@@ -493,7 +493,11 @@
     paper: "<svg viewBox='0 0 20 20' fill='none' aria-hidden='true' class='wb-prompt-chip-icon'><path d='M15.5 9.5 9 16a3.3 3.3 0 0 1-4.7-4.7l7-7a2.2 2.2 0 0 1 3.1 3.1l-7 7a1.1 1.1 0 0 1-1.6-1.6l6.4-6.4' stroke='currentColor' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/></svg>",
     list: "<svg viewBox='0 0 20 20' fill='none' aria-hidden='true' class='wb-prompt-chip-icon'><path d='M7 5.5h8M7 10h8M7 14.5h8' stroke='currentColor' stroke-width='1.4' stroke-linecap='round'/><path d='M4 5.5h.01M4 10h.01M4 14.5h.01' stroke='currentColor' stroke-width='2' stroke-linecap='round'/></svg>",
     sparkle: "<svg viewBox='0 0 20 20' fill='none' aria-hidden='true'><path d='m10 2.8 1.7 5.5L17.2 10l-5.5 1.7L10 17.2l-1.7-5.5L2.8 10l5.5-1.7z' stroke='currentColor' stroke-width='1.5' stroke-linejoin='round'/></svg>",
-    link: "<svg viewBox='0 0 20 20' fill='none' aria-hidden='true'><path d='M8.2 11.8 11.8 8.2M6.5 14.5l-1 1a2.8 2.8 0 0 1-4-4l3-3a2.8 2.8 0 0 1 4 0M13.5 5.5l1-1a2.8 2.8 0 0 1 4 4l-3 3a2.8 2.8 0 0 1-4 0' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'/></svg>"
+    link: "<svg viewBox='0 0 20 20' fill='none' aria-hidden='true'><path d='M8.2 11.8 11.8 8.2M6.5 14.5l-1 1a2.8 2.8 0 0 1-4-4l3-3a2.8 2.8 0 0 1 4 0M13.5 5.5l1-1a2.8 2.8 0 0 1 4 4l-3 3a2.8 2.8 0 0 1-4 0' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'/></svg>",
+    sun: "<svg viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'><circle cx='10' cy='10' r='3.2'/><path d='M10 2v2M10 16v2M2 10h2M16 10h2M4.3 4.3l1.4 1.4M14.3 14.3l1.4 1.4M15.7 4.3l-1.4 1.4M5.7 14.3l-1.4 1.4'/></svg>",
+    zoom: "<svg viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'><circle cx='8.5' cy='8.5' r='4.8'/><path d='M12.2 12.2 17 17M6.5 8.5h4M8.5 6.5v4'/></svg>",
+    shield: "<svg viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M10 2.5 16 5v4.6c0 3.5-2.4 6-6 7.9-3.6-1.9-6-4.4-6-7.9V5z'/><path d='m7.3 9.8 1.8 1.8 3.6-3.8'/></svg>",
+    info: "<svg viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'><circle cx='10' cy='10' r='7'/><path d='M10 9v4M10 6.5v.1'/></svg>"
   };
 
   // src/sidepanel/kernel-panel.ts
@@ -533,11 +537,9 @@
       const compact = document.querySelector("#kernel-compact");
       const attachmentList = document.querySelector("#kernel-attachments");
       const modelLabelNode = document.querySelector("#kernel-model-label");
-      const approvalLabelNode = document.querySelector("#kernel-approval-label");
       const input = document.querySelector("#kernel-input");
-      if (!rows || !status || !send || !stop || !input || !modeButton || !approvePlan || !compact || !attachmentList || !modelLabelNode || !approvalLabelNode) return;
+      if (!rows || !status || !send || !stop || !input || !modeButton || !approvePlan || !compact || !attachmentList || !modelLabelNode) return;
       modelLabelNode.textContent = modelLabel;
-      approvalLabelNode.textContent = approvalLabel();
       status.innerHTML = `<span class="wb-run-spinner"></span><span class="wb-run-text">${escapeHtml(statusText(
         projection,
         busy,
@@ -653,30 +655,6 @@
       event.stopPropagation();
       void openTabMenu().catch(showError);
     });
-    document.querySelector("#kernel-approval")?.addEventListener("click", (event) => {
-      event.stopPropagation();
-      const menu = document.querySelector("#kernel-approval-menu");
-      if (menu) {
-        menu.innerHTML = approvalMenuMarkup();
-        menu.hidden = !menu.hidden;
-      }
-      const modelMenu = document.querySelector("#kernel-model-menu");
-      if (modelMenu) modelMenu.hidden = true;
-      const commandMenu = document.querySelector("#kernel-command-menu");
-      if (commandMenu) commandMenu.hidden = true;
-      const tabMenu = document.querySelector("#kernel-tab-menu");
-      if (tabMenu) tabMenu.hidden = true;
-    });
-    document.querySelector("#kernel-approval-menu")?.addEventListener("click", (event) => {
-      const option = event.target.closest("[data-kernel-approval]");
-      if (!option) return;
-      pageConfig.approval = option.dataset.kernelApproval === "auto" ? "auto" : "ask";
-      void writePageConfig().then(() => client.reloadRuntime()).then(() => {
-        const menu = document.querySelector("#kernel-approval-menu");
-        if (menu) menu.hidden = true;
-        render();
-      }).catch(showError);
-    });
     document.querySelector("#kernel-tab-menu")?.addEventListener("click", (event) => {
       const tab = event.target.closest("[data-kernel-tab]");
       if (!tab?.dataset.kernelTab) return;
@@ -785,6 +763,25 @@
         void openArtifact(artifactTarget.dataset.artifact).catch(showError);
         return;
       }
+      const copyTarget = event.target.closest("[data-copy-message]");
+      if (copyTarget?.dataset.copyMessage) {
+        const text = projection?.rows.find((row) => row.id === copyTarget.dataset.copyMessage)?.text ?? "";
+        void navigator.clipboard.writeText(text).then(() => {
+          copyTarget.textContent = pageConfig.language.startsWith("zh") ? "\u5DF2\u590D\u5236" : "Copied";
+        }).catch(showError);
+        return;
+      }
+      const exportTarget = event.target.closest("[data-export-message]");
+      if (exportTarget?.dataset.exportMessage) {
+        const text = projection?.rows.find((row) => row.id === exportTarget.dataset.exportMessage)?.text ?? "";
+        const href = URL.createObjectURL(new Blob([text], { type: "text/markdown" }));
+        const anchor = document.createElement("a");
+        anchor.href = href;
+        anchor.download = `tinyai-${Date.now()}.md`;
+        anchor.click();
+        window.setTimeout(() => URL.revokeObjectURL(href), 1e3);
+        return;
+      }
       const handoffTarget = event.target.closest("[data-handoff]");
       if (handoffTarget) {
         const handoffId = handoffTarget.dataset.handoff;
@@ -820,9 +817,6 @@
       if (commandMenu) commandMenu.hidden = true;
       const tabMenu = document.querySelector("#kernel-tab-menu");
       if (tabMenu) tabMenu.hidden = true;
-      if (target.closest("#kernel-approval-menu") || target.closest("#kernel-approval")) return;
-      const approvalMenu = document.querySelector("#kernel-approval-menu");
-      if (approvalMenu) approvalMenu.hidden = true;
       if (target.closest("#kernel-model-menu") || target.closest("#kernel-model")) return;
       const modelMenu = document.querySelector("#kernel-model-menu");
       if (modelMenu) modelMenu.hidden = true;
@@ -1017,20 +1011,29 @@
       <div class="wb-settings-body">
         <div class="wb-set-card wb-set-account">
           <div class="wb-account-row">
-            <span class="wb-account-avatar wb-account-avatar--logo" aria-hidden="true"><img class="wb-account-avatar-img" alt="" src="icon/leia-avatar.svg"></span>
+            <span class="wb-account-avatar wb-account-avatar--logo" aria-hidden="true"><img class="wb-account-avatar-img" alt="" src="icon/tinyai.svg"></span>
             <span class="wb-account-copy"><span class="wb-account-name-row"><span class="wb-account-name">tinyai</span></span><span class="wb-account-line">${zh ? "\u6240\u6709\u5BF9\u8BDD\u548C\u6A21\u578B Key \u90FD\u4FDD\u5B58\u5728\u672C\u673A\u3002" : "All chats and model keys stay on this machine."}</span></span>
             <span class="wb-badge">${zh ? "\u672C\u5730 Agent" : "Local agent"}</span>
           </div>
         </div>
         <div class="wb-set-group"><div class="wb-set-group-label">${zh ? "\u901A\u7528" : "General"}</div>
           <div class="wb-set-card">
-            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label">${zh ? "\u5916\u89C2" : "Appearance"}</span>
+            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.sun}</span>${zh ? "\u5916\u89C2" : "Appearance"}</span>
               <button type="button" class="wb-set-select" data-page-action="theme"><span class="wb-set-select-value">${escapeHtml(themeLabel(pageConfig.theme, zh))}</span>${icons.chevronDown}</button></div>
             <div class="wb-set-sepa"></div>
-            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label">${zh ? "\u8BED\u8A00" : "Language"}</span>
-              <button type="button" class="wb-set-select" data-page-action="language"><span class="wb-set-select-value">${zh ? "\u4E2D\u6587" : "English"}</span>${icons.chevronDown}</button></div>
+            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.globe}</span>${zh ? "\u8BED\u8A00" : "Language"}</span>
+              <select id="kernel-page-language" class="wb-native-select">${[
+        ["en", "English"],
+        ["zh", "\u4E2D\u6587"],
+        ["zh-TW", "\u7E41\u9AD4\u4E2D\u6587"],
+        ["ja", "\u65E5\u672C\u8A9E"],
+        ["ko", "\uD55C\uAD6D\uC5B4"],
+        ["es", "Espa\xF1ol"],
+        ["fr", "Fran\xE7ais"],
+        ["de", "Deutsch"]
+      ].map(([value, label]) => `<option value="${value}" ${value === pageConfig.language ? "selected" : ""}>${label}</option>`).join("")}</select></div>
             <div class="wb-set-sepa"></div>
-            <div class="wb-set-row"><span class="wb-set-row-label">${zh ? "\u7F29\u653E" : "Zoom"}</span><span class="wb-input-grow"></span>
+            <div class="wb-set-row"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.zoom}</span>${zh ? "\u7F29\u653E" : "Zoom"}</span><span class="wb-input-grow"></span>
               <button type="button" class="wb-set-stepper-btn" data-page-action="zoom" data-delta="-10" aria-label="Zoom out">\u2212</button>
               <button type="button" class="wb-set-stepper-value" data-page-action="zoom" data-delta="0">${pageConfig.zoom}%</button>
               <button type="button" class="wb-set-stepper-btn" data-page-action="zoom" data-delta="10" aria-label="Zoom in">+</button></div>
@@ -1038,23 +1041,21 @@
         </div>
         <div class="wb-set-group"><div class="wb-set-group-label">${zh ? "\u6A21\u578B" : "Models"}</div>
           <div class="wb-set-card">
-            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label">${zh ? "\u6A21\u578B" : "Model"}</span>
+            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.sparkle}</span>${zh ? "\u6A21\u578B" : "Model"}</span>
               <select class="wb-native-select" id="kernel-page-model">${models.length ? models.map((item) => `<option value="${escapeHtml(item.connection + "|" + item.model)}" ${item.connection === pageConfig.connection && item.model === pageConfig.model ? "selected" : ""}>${escapeHtml(item.label)}</option>`).join("") : `<option>${zh ? "\u672A\u914D\u7F6E\u6A21\u578B" : "No model"}</option>`}</select></div>
             <div class="wb-set-sepa"></div>
-            <div class="wb-set-row wb-set-navrow wb-clickable" data-page-action="connections"><span class="wb-set-row-label">${zh ? "\u6A21\u578B\u8FDE\u63A5" : "Model connections"}</span><span class="wb-input-grow"></span><span class="wb-set-row-value">${pageConfig.connections.length}</span>${icons.chevronDown}</div>
+            <div class="wb-set-row wb-set-navrow wb-clickable" data-page-action="connections"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.link}</span>${zh ? "\u6A21\u578B\u8FDE\u63A5" : "Model connections"}</span><span class="wb-input-grow"></span><span class="wb-set-row-value">${pageConfig.connections.length}</span>${icons.chevronDown}</div>
           </div>
         </div>
         <div class="wb-set-group"><div class="wb-set-group-label">${zh ? "\u6743\u9650" : "Permissions"}</div>
           <div class="wb-set-card">
-            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label">${zh ? "\u64CD\u4F5C\u5BA1\u6279" : "Action approval"}</span>
+            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.shield}</span>${zh ? "\u64CD\u4F5C\u5BA1\u6279" : "Action approval"}</span>
               <button type="button" class="wb-set-select" data-page-action="approval"><span class="wb-set-select-value">${pageConfig.approval === "auto" ? zh ? "\u81EA\u52A8\u6267\u884C" : "Auto-approve" : zh ? "\u9700\u8981\u5BA1\u6279" : "Requires approval"}</span>${icons.chevronDown}</button></div>
           </div>
         </div>
         <div class="wb-set-group"><div class="wb-set-group-label">${zh ? "\u5173\u4E8E" : "About"}</div>
           <div class="wb-set-card">
-            <div class="wb-set-row"><span class="wb-set-row-label">${zh ? "\u7248\u672C" : "Version"}</span><span class="wb-input-grow"></span><span class="wb-set-row-value">${escapeHtml(chrome.runtime.getManifest().version)}</span></div>
-            <div class="wb-set-sepa"></div>
-            <div class="wb-set-row"><span class="wb-set-row-label">${zh ? "\u6269\u5C55\u8FDE\u63A5" : "Extension"}</span><span class="wb-input-grow"></span><span class="wb-set-row-value">${zh ? "\u5DF2\u8FDE\u63A5" : "Connected"}</span></div>
+            <div class="wb-set-row"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.info}</span>${zh ? "\u7248\u672C" : "Version"}</span><span class="wb-input-grow"></span><span class="wb-set-row-value">${escapeHtml(chrome.runtime.getManifest().version)}</span></div>
           </div>
         </div>
         ${pageAlertMarkup()}
@@ -1168,10 +1169,9 @@
       document.querySelector("#kernel-settings")?.setAttribute("aria-label", zh ? "\u8BBE\u7F6E" : "Settings");
       const input = document.querySelector("#kernel-input");
       if (input) {
-        input.placeholder = zh ? "\u7ED9 tinyai \u53D1\u6D88\u606F\uFF0C\u6309 @ \u9009\u62E9\u6807\u7B7E\u9875\uFF0C/ \u67E5\u770B\u547D\u4EE4" : "Message tinyai, press @ for tabs, or / for commands";
+        input.placeholder = zh ? "\u7ED9 tinyai \u53D1\u6D88\u606F\uFF0C\u6309 @ \u9009\u62E9\u6807\u7B7E\u9875\uFF0C/ \u67E5\u770B\u547D\u4EE4" : "Type a task, Enter to send";
         input.setAttribute("aria-label", zh ? "\u4EFB\u52A1" : "Task");
       }
-      document.querySelector("#kernel-approval")?.setAttribute("aria-label", zh ? "\u5BA1\u6279\u6A21\u5F0F" : "Approval mode");
       setLabel("#kernel-compact", zh ? "\u538B\u7F29\u4E0A\u4E0B\u6587" : "Compact context");
       setLabel("#kernel-approve-plan", zh ? "\u6279\u51C6\u8BA1\u5212" : "Approve plan");
       const skill = document.querySelector("#kernel-skill");
@@ -1180,27 +1180,6 @@
     function effectiveTheme() {
       const systemDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
       return pageConfig.theme === "dark" || pageConfig.theme === "system" && systemDark ? "dark" : "light";
-    }
-    function approvalLabel() {
-      return approvalText(pageConfig.approval, pageConfig.language);
-    }
-    function approvalMenuMarkup() {
-      const zh = pageConfig.language.startsWith("zh");
-      const item = (value, title, description) => `<button type="button" class="wb-pop-item${pageConfig.approval === value ? " selected" : ""}" data-kernel-approval="${value}">
-        <span class="wb-pop-copy"><span class="wb-pop-title">${escapeHtml(title)}</span><span class="wb-pop-desc">${escapeHtml(description)}</span></span>
-        ${pageConfig.approval === value ? icons.check : ""}
-      </button>`;
-      return `<div class="wb-menu-heading">${zh ? "\u6743\u9650" : "Permission"}</div>
-      ${item(
-        "ask",
-        zh ? "\u9700\u8981\u5BA1\u6279" : "Requires approval",
-        zh ? "\u6267\u884C\u6709\u98CE\u9669\u7684\u64CD\u4F5C\u524D\u5148\u8BE2\u95EE\u4F60" : "Ask before potentially risky actions"
-      )}
-      ${item(
-        "auto",
-        zh ? "\u81EA\u52A8\u6267\u884C" : "Auto-approve",
-        zh ? "\u5DE5\u5177\u76F4\u63A5\u6267\u884C\uFF0C\u4E0D\u6253\u65AD\u4F60" : "Run tools without asking"
-      )}`;
     }
     async function handlePageAction(action, target) {
       if (action === "back") {
@@ -1468,7 +1447,7 @@
     ];
     return `<div class="wb-empty kernel-empty">
     <div class="wb-empty-head">
-      <img class="wb-empty-avatar" src="icon/leia-avatar.svg" alt="" aria-hidden="true">
+      <img class="wb-empty-avatar" src="icon/tinyai.svg" alt="" aria-hidden="true">
       <div class="wb-empty-title">${zh ? "\u4F60\u597D\uFF0C\u60F3\u8BA9\u6211\u505A\u4EC0\u4E48\uFF1F" : "What should tinyai do?"}</div>
     </div>
     <div class="wb-prompt-chips">
@@ -1485,10 +1464,13 @@
     }
     if (row.kind === "assistant") {
       if (!row.text && row.status !== "streaming") return "";
-      if (!row.text) return "";
-      const body = `${md(row.text)}${row.status === "streaming" ? '<span class="wb-cursor"></span>' : ""}`;
+      const body = row.status === "streaming" && !row.text ? '<span class="wb-thinking"><i></i><i></i><i></i></span>' : `${md(row.text)}${row.status === "streaming" ? '<span class="wb-cursor"></span>' : ""}`;
+      const feedback = !row.status || row.status === "completed" ? `<div class="wb-feedback">
+          <button type="button" class="wb-mini-action" data-copy-message="${escapeHtml(row.id)}">${icons.file}${zh ? "\u590D\u5236" : "Copy"}</button>
+          <button type="button" class="wb-mini-action" data-export-message="${escapeHtml(row.id)}">${zh ? "\u5BFC\u51FA" : "Export"}</button>
+        </div>` : "";
       return `<div class="wb-stream-row kernel-message-row">
-      <div class="wb-msg"><div class="wb-assistant"><div class="wb-assistant-body">${body}</div></div></div>
+      <div class="wb-msg"><div class="wb-assistant"><div class="wb-assistant-body">${body}</div>${feedback}</div></div>
     </div>`;
     }
     if (row.kind === "tool") {
@@ -1580,7 +1562,7 @@
         <div class="wb-inputbox">
           <div class="wb-input-main">
             <span class="wb-input-prompt">&gt;</span>
-            <textarea id="kernel-input" class="wb-editor kernel-editor" rows="1" placeholder="${zh ? "\u7ED9 tinyai \u53D1\u6D88\u606F\uFF0C\u6309 @ \u9009\u62E9\u6807\u7B7E\u9875\uFF0C/ \u67E5\u770B\u547D\u4EE4" : "Message tinyai, press @ for tabs, or / for commands"}" aria-label="${zh ? "\u4EFB\u52A1" : "Task"}"></textarea>
+            <textarea id="kernel-input" class="wb-editor kernel-editor" rows="1" placeholder="${zh ? "\u7ED9 tinyai \u53D1\u6D88\u606F\uFF0C\u6309 @ \u9009\u62E9\u6807\u7B7E\u9875\uFF0C/ \u67E5\u770B\u547D\u4EE4" : "Type a task, Enter to send"}" aria-label="${zh ? "\u4EFB\u52A1" : "Task"}"></textarea>
           </div>
           <input id="kernel-file-input" type="file" multiple accept="text/*,image/*,.md,.ts,.tsx,.js,.jsx,.json,.css,.html,.txt" hidden>
           <div class="wb-input-bar">
@@ -1593,14 +1575,6 @@
             <button type="button" id="kernel-attach" class="wb-icon-button wb-sk-tip-anchor" aria-label="${zh ? "\u6DFB\u52A0\u6587\u4EF6\u6216\u56FE\u7247" : "Add a file or image"}">
               <span class="wb-composer-glyph wb-composer-glyph--clip" aria-hidden="true"></span><span class="wb-sk-tip" role="tooltip">${zh ? "\u6DFB\u52A0\u6587\u4EF6\u6216\u56FE\u7247" : "Add a file or image"}</span>
             </button>
-            <div class="wb-pop-anchor">
-              <button type="button" id="kernel-approval" class="wb-mode-toggle wb-approval-toggle wb-sk-tip-anchor" aria-haspopup="menu">
-                <span class="wb-composer-glyph wb-composer-glyph--safe" aria-hidden="true"></span>
-                <span class="wb-approval-label" id="kernel-approval-label">${escapeHtml(approvalText(config.approval, config.language))}</span>
-                ${icons.chevron}
-              </button>
-              <div id="kernel-approval-menu" class="kernel-command-menu" hidden></div>
-            </div>
             <div id="kernel-tab-menu" class="kernel-command-menu kernel-tab-menu" hidden></div>
             <div id="kernel-command-menu" class="kernel-command-menu" hidden>
               <div class="wb-menu-heading">Skills</div>
@@ -1669,10 +1643,6 @@
     }
     return `<pre>${escapeHtml(text.length > 8e3 ? `${text.slice(0, 8e3)}
 \u2026(truncated in UI)` : text)}</pre>`;
-  }
-  function approvalText(approval, language) {
-    const zh = language.startsWith("zh");
-    return approval === "auto" ? zh ? "\u81EA\u52A8\u6267\u884C" : "Auto-approve" : zh ? "\u9700\u8981\u5BA1\u6279" : "Requires approval";
   }
   function themeLabel(theme, zh) {
     if (theme === "dark") return zh ? "\u6DF1\u8272" : "Dark mode";

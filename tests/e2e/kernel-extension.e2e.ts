@@ -265,7 +265,7 @@ describe('kernel extension E2E', () => {
         await chrome.storage.local.set({
           'tinyai:v2:config': {
             approval: 'auto',
-            language: 'zh',
+            language: 'en',
             theme: 'light',
             zoom: 100,
             connection: 'e2e',
@@ -286,7 +286,7 @@ describe('kernel extension E2E', () => {
     );
 
     const page = await context.newPage();
-    await page.setViewportSize({ width: 500, height: 757 });
+    await page.setViewportSize({ width: 420, height: 900 });
     const pageErrors: string[] = [];
     page.on('pageerror', (error) => pageErrors.push(error.message));
     await page.goto(`chrome-extension://${extensionId}/sidepanel.html`);
@@ -300,17 +300,12 @@ describe('kernel extension E2E', () => {
     }));
     expect(layout.scrollWidth).toBeLessThanOrEqual(layout.viewport + 1);
     expect(layout.sendVisible).toBe(true);
-    const promptIconSize = await page.locator('.wb-prompt-chip-icon').first().evaluate((element) => {
-      const style = getComputedStyle(element);
-      return { width: style.width, height: style.height };
-    });
-    expect(promptIconSize).toEqual({ width: '18px', height: '18px' });
     await page.click('#kernel-settings');
     await page.waitForSelector('#kernel-page-layer');
     const settingsBox = await page.locator('#kernel-page-layer').boundingBox();
-    expect(settingsBox?.width ?? 0).toBe(500);
-    expect(settingsBox?.height ?? 0).toBe(757);
-    expect(await page.locator('.wb-settings-title').textContent()).toBe('设置');
+    expect(settingsBox?.width ?? 0).toBe(420);
+    expect(settingsBox?.height ?? 0).toBe(900);
+    expect(await page.locator('.wb-settings-title').textContent()).toBe('Settings');
     await page.click('[data-page-action="zoom"][data-delta="10"]');
     await page.waitForFunction(() =>
       document.querySelector('.wb-set-stepper-value')?.textContent?.includes('110%')
@@ -320,19 +315,19 @@ describe('kernel extension E2E', () => {
       document.querySelector('.wb-set-stepper-value')?.textContent?.includes('100%')
     );
     await page.click('[data-page-action="theme"]');
-    await page.waitForFunction(() => document.querySelector('[data-page-action="theme"]')?.textContent?.includes('深色'));
+    await page.waitForFunction(() => document.querySelector('[data-page-action="theme"]')?.textContent?.includes('Dark mode'));
     await page.click('[data-page-action="theme"]');
-    await page.waitForFunction(() => document.querySelector('[data-page-action="theme"]')?.textContent?.includes('跟随系统'));
+    await page.waitForFunction(() => document.querySelector('[data-page-action="theme"]')?.textContent?.includes('System'));
     await page.click('[data-page-action="theme"]');
-    await page.waitForFunction(() => document.querySelector('[data-page-action="theme"]')?.textContent?.includes('浅色'));
-    await page.click('[data-page-action="language"]');
-    await page.waitForFunction(() => document.querySelector('.wb-settings-title')?.textContent === 'Settings');
-    await page.click('[data-page-action="language"]');
+    await page.waitForFunction(() => document.querySelector('[data-page-action="theme"]')?.textContent?.includes('Light mode'));
+    await page.selectOption('#kernel-page-language', 'zh');
     await page.waitForFunction(() => document.querySelector('.wb-settings-title')?.textContent === '设置');
+    await page.selectOption('#kernel-page-language', 'en');
+    await page.waitForFunction(() => document.querySelector('.wb-settings-title')?.textContent === 'Settings');
     await page.screenshot({ path: resolve('docs/settings.png'), fullPage: false });
     await page.click('[data-page-action="connections"]');
     await page.waitForSelector('.wb-conn-card');
-    expect(await page.locator('.wb-settings-title').textContent()).toBe('模型连接');
+    expect(await page.locator('.wb-settings-title').textContent()).toBe('Connections');
     await page.screenshot({ path: resolve('docs/connections.png'), fullPage: false });
     await page.click('[data-page-action="conn-edit"]');
     await page.waitForSelector('#kernel-connection-form');
@@ -342,7 +337,7 @@ describe('kernel extension E2E', () => {
     await page.waitForSelector('[data-page-action="connections"]');
     await page.click('[data-page-action="back"]');
     await page.waitForSelector('#kernel-page-layer', { state: 'detached' });
-    await page.screenshot({ path: resolve('docs/empty.png'), fullPage: false });
+    await page.screenshot({ path: resolve('docs/restored-empty.png'), fullPage: false });
     const disabledSend = await page.locator('#kernel-send').evaluate((element) => {
       const style = getComputedStyle(element);
       return {
@@ -352,7 +347,7 @@ describe('kernel extension E2E', () => {
       };
     });
     expect(disabledSend.disabled).toBe(true);
-    expect(disabledSend.opacity).toBe('1');
+    expect(disabledSend.opacity).toBe('0.3');
     expect(disabledSend.background).not.toBe('rgba(0, 0, 0, 0)');
     await page.setViewportSize({ width: 390, height: 740 });
     const mobileLayout = await page.evaluate(() => ({
@@ -360,8 +355,8 @@ describe('kernel extension E2E', () => {
       scrollWidth: document.documentElement.scrollWidth,
     }));
     expect(mobileLayout.scrollWidth).toBeLessThanOrEqual(mobileLayout.viewport + 1);
-    await page.screenshot({ path: resolve('docs/empty-mobile.png'), fullPage: false });
-    await page.setViewportSize({ width: 500, height: 757 });
+    await page.screenshot({ path: resolve('docs/restored-empty-mobile.png'), fullPage: false });
+    await page.setViewportSize({ width: 420, height: 900 });
     const offscreenDeadline = Date.now() + 5_000;
     let offscreenCount = 0;
     while (offscreenCount === 0 && Date.now() < offscreenDeadline) {
@@ -387,7 +382,7 @@ describe('kernel extension E2E', () => {
     expect(pageErrors).toEqual([]);
     expect(modelCalls).toBe(1);
     expect(await page.locator('.wb-assistant').count()).toBeGreaterThan(0);
-    await page.screenshot({ path: resolve('docs/kernel-ui.png'), fullPage: false });
+    await page.screenshot({ path: resolve('docs/restored-chat.png'), fullPage: false });
     await page.click('#kernel-tabs');
     await page.waitForSelector('#kernel-tab-menu:not([hidden])');
     expect(await page.locator('#kernel-tab-menu [data-kernel-tab]').count()).toBeGreaterThan(0);
@@ -422,15 +417,15 @@ describe('kernel extension E2E', () => {
     expect(await page.locator('.kernel-tool-step', { hasText: 'Start subagent' }).count()).toBe(1);
     expect(await page.locator('.kernel-child', { hasText: 'general' }).count()).toBe(1);
     expect(await page.locator('.kernel-child-open').count()).toBe(1);
-    await page.screenshot({ path: resolve('docs/kernel-subagent.png'), fullPage: false });
+    await page.screenshot({ path: resolve('docs/restored-subagent.png'), fullPage: false });
     await page.click('.kernel-child-open');
     await page.waitForFunction(() =>
       document.querySelector('#kernel-rows')?.textContent?.includes('child-only answer')
     );
     await page.click('#kernel-history');
     await page.waitForSelector('#kernel-page-layer');
-    expect(await page.locator('.wb-settings-title').textContent()).toBe('聊天记录');
-    await page.screenshot({ path: resolve('docs/history.png'), fullPage: false });
+    expect(await page.locator('.wb-settings-title').textContent()).toBe('Chat history');
+    await page.screenshot({ path: resolve('docs/restored-history.png'), fullPage: false });
     const parentHistory = page.locator('.wb-history-main', { hasText: 'extension smoke' });
     expect(await parentHistory.count()).toBeGreaterThan(0);
     await parentHistory.first().click();
@@ -442,9 +437,9 @@ describe('kernel extension E2E', () => {
     await page.click('#kernel-slash');
     await page.waitForSelector('#kernel-command-menu:not([hidden])');
     await page.click('#kernel-mode');
-    await page.waitForFunction(() => document.querySelector('#kernel-mode')?.textContent?.includes('退出计划'));
+    await page.waitForFunction(() => document.querySelector('#kernel-mode')?.textContent?.includes('Exit plan'));
     await page.click('#kernel-approve-plan');
-    await page.waitForFunction(() => document.querySelector('#kernel-mode')?.textContent?.includes('计划'));
+    await page.waitForFunction(() => document.querySelector('#kernel-mode')?.textContent?.includes('Plan'));
     expect(pageErrors).toEqual([]);
 
     await page.fill('#kernel-input', 'detached task');

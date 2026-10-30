@@ -1,16 +1,17 @@
-/* Runtime-specific additions to the restored Leia shell. */
-html, body, #root {
+/* Runtime adapters for the original tinyai side-panel UI. */
+html,
+body,
+#root {
   width: 100%;
   height: 100%;
   margin: 0;
 }
-body { overflow: hidden; background: #fff; }
-#root { height: 100%; }
 
-.kernel-shell,
-.kernel-page-layer,
-.kernel-page-layer > .wb-stage {
-  width: 100%;
+body {
+  overflow: hidden;
+}
+
+.kernel-shell {
   height: 100%;
   min-height: 100%;
 }
@@ -19,13 +20,15 @@ body { overflow: hidden; background: #fff; }
   position: absolute;
   inset: 0;
   z-index: 70;
+  display: flex;
   overflow: hidden;
-  background: var(--wb-bg);
+  background: var(--bg);
 }
 
 .kernel-page-layer > .wb-stage {
-  display: flex;
-  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
 }
 
 .kernel-page-layer .wb-settings-head {
@@ -42,87 +45,35 @@ body { overflow: hidden; background: #fff; }
 }
 
 .kernel-message-row--user {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.kernel-tool-step .wb-tool-group-chev {
-  margin-left: auto;
-}
-
-.kernel-tool-step[open] .wb-tool-group-chev {
-  transform: rotate(90deg);
-}
-
-.kernel-activity {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 20px;
-  color: var(--wb-dim);
-  font-size: 13px;
-}
-
-.kernel-activity-mark {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--wb-blue);
-}
-
-.kernel-activity.is-running .kernel-activity-mark {
-  animation: wb-subtask-pulse 1.4s ease-in-out infinite;
-}
-
-.kernel-status {
-  margin: 0 14px 8px;
-}
-
-.wd-run-spinner,
-.wb-run-spinner {
-  display: inline-block;
-  flex: none;
-  width: 12px;
-  height: 12px;
-  margin-right: 7px;
-  border: 1.5px solid var(--wb-line);
-  border-top-color: var(--wb-mid);
-  border-radius: 50%;
-  vertical-align: -1px;
-  animation: spin 0.8s linear infinite;
+  width: 100%;
 }
 
 .kernel-command-menu {
-  position: absolute;
-  left: 30px;
-  bottom: calc(100% + 9px);
-  z-index: 40;
-  width: min(240px, calc(100vw - 42px));
+  position: fixed;
+  right: 16px;
+  bottom: 112px;
+  left: 16px;
+  z-index: 60;
+  width: auto;
   padding: 6px;
-  border: 1px solid var(--wb-line);
-  border-radius: 12px;
-  background: var(--wb-bg);
-  box-shadow: 0 8px 30px -14px rgba(0, 0, 0, .3);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg);
+  box-shadow: var(--shadow);
 }
 
-.kernel-tab-menu {
-  left: 0;
-  width: min(300px, calc(100vw - 32px));
-  max-height: 320px;
-  overflow: auto;
+.kernel-composer .wb-input-bar {
+  position: relative;
 }
 
+.kernel-tab-menu,
 .kernel-model-menu {
-  right: 0;
-  left: auto;
-  width: min(260px, calc(100vw - 32px));
-  max-height: 320px;
+  right: 16px;
+  left: 16px;
+  width: min(280px, calc(100vw - 24px));
+  margin-left: auto;
+  max-height: 340px;
   overflow: auto;
-}
-
-.kernel-approval-menu {
-  left: 0;
-  width: min(270px, calc(100vw - 32px));
 }
 
 .kernel-command-menu .kernel-tool-button {
@@ -130,103 +81,73 @@ body { overflow: hidden; background: #fff; }
   width: 100%;
   padding: 8px 9px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 9px;
   background: transparent;
-  color: var(--wb-text);
+  color: var(--fg);
   text-align: left;
   font-size: 13px;
 }
 
 .kernel-command-menu .kernel-tool-button:hover {
-  background: var(--wb-bg-2);
+  background: var(--surface);
 }
 
 .kernel-skill-select {
   width: 100%;
   padding: 6px 7px;
-  border: 1px solid var(--wb-line);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  color: var(--wb-text);
-  background: var(--wb-bg);
+  color: var(--fg);
+  background: var(--bg);
   font-size: 12px;
 }
 
-.kernel-context-list {
+.kernel-status {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 0 14px 8px;
-}
-
-.kernel-context-list:empty {
-  display: none;
-}
-
-.kernel-context-chip {
-  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: 8px;
-  background: var(--wb-bg-2);
-  color: var(--wb-text);
-  font-size: 12px;
-}
-
-.kernel-context-chip button {
-  padding: 0 2px;
-  border: 0;
-  background: transparent;
-  color: var(--wb-dim);
-  font-size: 14px;
-  line-height: 1;
+  gap: 8px;
 }
 
 .kernel-plan-card {
-  margin: 4px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   padding: 12px;
-  border: 1px solid var(--wb-line);
-  border-radius: 12px;
-  background: var(--wb-bg-1);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
 }
 
 .kernel-plan-head {
   display: flex;
   justify-content: space-between;
-  margin-bottom: 5px;
-  color: var(--wb-dim);
+  color: var(--muted);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 650;
   letter-spacing: .04em;
   text-transform: uppercase;
 }
 
 .kernel-plan-body {
-  color: var(--wb-text);
   font-size: 13px;
 }
 
 .kernel-plan-inline {
-  color: var(--wb-mid);
+  color: var(--muted);
   font-size: 12px;
 }
 
-.kernel-plan-inline summary {
-  cursor: pointer;
-}
-
 .kernel-plan-inline > div {
-  margin: 6px 0 0 20px;
+  margin-left: 20px;
 }
 
 .kernel-child {
   display: flex;
   align-items: flex-start;
-  gap: 9px;
-  margin: 3px 14px 6px 22px;
-  padding: 8px 10px 8px 14px;
-  border-left: 1px solid var(--wb-line);
-  background: transparent;
+  gap: 8px;
+  margin: 3px 0 3px 8px;
+  padding: 7px 8px 7px 16px;
+  border-left: 1px solid var(--line);
 }
 
 .kernel-child-line {
@@ -234,8 +155,8 @@ body { overflow: hidden; background: #fff; }
 }
 
 .kernel-child-icon {
-  color: var(--wb-dim);
-  font-size: 15px;
+  color: var(--muted);
+  font-size: 14px;
 }
 
 .kernel-child-copy {
@@ -251,92 +172,80 @@ body { overflow: hidden; background: #fff; }
 
 .kernel-child-copy strong {
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .kernel-child-copy p {
   margin: 1px 0 0;
-  color: var(--wb-dim);
-  font-size: 12px;
+  color: var(--muted);
+  font-size: 11.5px;
 }
 
 .kernel-child-status {
   padding: 1px 6px;
   border-radius: 999px;
-  background: var(--wb-bg-2);
-  color: var(--wb-dim);
-  font-size: 10px;
-}
-
-.kernel-child--running .kernel-child-status {
-  color: var(--wb-blue);
-}
-
-.kernel-child--failed .kernel-child-status {
-  color: var(--wb-error);
+  background: var(--surface);
+  color: var(--faint);
+  font-size: 9px;
 }
 
 .kernel-child-open {
   align-self: center;
   padding: 2px 0;
   border: 0;
-  color: var(--wb-dim);
   background: transparent;
-  font-size: 11px;
-}
-
-.kernel-child-open:hover {
-  color: var(--wb-text);
-}
-
-.kernel-approval,
-.kernel-handoff {
-  margin-top: 2px;
-  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .kernel-btn {
   padding: 7px 11px;
-  border: 1px solid var(--wb-line);
-  border-radius: 8px;
-  background: var(--wb-bg);
-  color: var(--wb-text);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--fg);
   font-size: 12px;
 }
 
 .kernel-btn--primary {
-  border-color: var(--wb-accent);
-  background: var(--wb-accent);
-  color: var(--wb-white);
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.kernel-approval,
+.kernel-handoff {
+  margin: 0;
 }
 
 .kernel-tool-image {
   display: block;
   max-width: 100%;
-  margin-top: 7px;
-  border-radius: 8px;
+  margin-top: 6px;
+  border-radius: 10px;
 }
 
 .kernel-artifact-link {
   padding: 6px 9px;
-  border: 1px solid var(--wb-line);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--wb-bg);
-  color: var(--wb-blue);
+  color: var(--blue);
+  background: var(--bg);
   font: inherit;
 }
 
 .kernel-dialog {
   width: min(720px, calc(100vw - 24px));
   padding: 0;
-  border: 1px solid var(--wb-line);
-  border-radius: 12px;
-  color: var(--wb-text);
-  background: var(--wb-bg);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--fg);
+  background: var(--bg);
+  box-shadow: var(--shadow);
 }
 
 .kernel-dialog::backdrop {
-  background: rgba(0, 0, 0, .32);
+  background: rgba(0, 0, 0, .28);
 }
 
 .kernel-artifact-view {
@@ -345,14 +254,9 @@ body { overflow: hidden; background: #fff; }
 
 .kernel-artifact-view header {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 12px;
-}
-
-.kernel-artifact-view h2 {
-  margin: 0;
-  font-size: 16px;
+  align-items: center;
+  gap: 10px;
 }
 
 .kernel-artifact-view pre {
@@ -361,24 +265,24 @@ body { overflow: hidden; background: #fff; }
   white-space: pre-wrap;
 }
 
-.kernel-child + .kernel-child {
-  margin-top: 0;
+.wb-run-spinner {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--line);
+  border-top-color: var(--fg);
+  border-radius: 50%;
+  animation: wb-spin .8s linear infinite;
 }
 
-.wb-empty.kernel-empty {
+textarea.wb-editor {
   width: 100%;
-  max-width: 560px;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
 }
 
-.wb-prompt-chip-icon {
-  width: 18px !important;
-  height: 18px !important;
-  max-width: 18px !important;
-  max-height: 18px !important;
-  flex: 0 0 18px;
-}
-
-.wb-set-sepa {
-  margin-right: 16px !important;
-  margin-left: 16px !important;
+.wb-input-prompt {
+  display: none;
 }

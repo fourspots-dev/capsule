@@ -16,4 +16,8 @@ export const icons = {
   list: "<svg viewBox='0 0 20 20' fill='none' aria-hidden='true' class='wb-prompt-chip-icon'><path d='M7 5.5h8M7 10h8M7 14.5h8' stroke='currentColor' stroke-width='1.4' stroke-linecap='round'/><path d='M4 5.5h.01M4 10h.01M4 14.5h.01' stroke='currentColor' stroke-width='2' stroke-linecap='round'/></svg>",
   sparkle: "<svg viewBox='0 0 20 20' fill='none' aria-hidden='true'><path d='m10 2.8 1.7 5.5L17.2 10l-5.5 1.7L10 17.2l-1.7-5.5L2.8 10l5.5-1.7z' stroke='currentColor' stroke-width='1.5' stroke-linejoin='round'/></svg>",
   link: "<svg viewBox='0 0 20 20' fill='none' aria-hidden='true'><path d='M8.2 11.8 11.8 8.2M6.5 14.5l-1 1a2.8 2.8 0 0 1-4-4l3-3a2.8 2.8 0 0 1 4 0M13.5 5.5l1-1a2.8 2.8 0 0 1 4 4l-3 3a2.8 2.8 0 0 1-4 0' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'/></svg>",
+  sun: "<svg viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'><circle cx='10' cy='10' r='3.2'/><path d='M10 2v2M10 16v2M2 10h2M16 10h2M4.3 4.3l1.4 1.4M14.3 14.3l1.4 1.4M15.7 4.3l-1.4 1.4M5.7 14.3l-1.4 1.4'/></svg>",
+  zoom: "<svg viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'><circle cx='8.5' cy='8.5' r='4.8'/><path d='M12.2 12.2 17 17M6.5 8.5h4M8.5 6.5v4'/></svg>",
+  shield: "<svg viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M10 2.5 16 5v4.6c0 3.5-2.4 6-6 7.9-3.6-1.9-6-4.4-6-7.9V5z'/><path d='m7.3 9.8 1.8 1.8 3.6-3.8'/></svg>",
+  info: "<svg viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'><circle cx='10' cy='10' r='7'/><path d='M10 9v4M10 6.5v.1'/></svg>",
 } as const;

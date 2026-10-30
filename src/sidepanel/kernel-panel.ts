@@ -69,11 +69,9 @@ export async function initKernelUi(): Promise<void> {
     const compact = document.querySelector<HTMLButtonElement>('#kernel-compact');
     const attachmentList = document.querySelector<HTMLElement>('#kernel-attachments');
     const modelLabelNode = document.querySelector<HTMLElement>('#kernel-model-label');
-    const approvalLabelNode = document.querySelector<HTMLElement>('#kernel-approval-label');
     const input = document.querySelector<HTMLTextAreaElement>('#kernel-input');
-    if (!rows || !status || !send || !stop || !input || !modeButton || !approvePlan || !compact || !attachmentList || !modelLabelNode || !approvalLabelNode) return;
+    if (!rows || !status || !send || !stop || !input || !modeButton || !approvePlan || !compact || !attachmentList || !modelLabelNode) return;
     modelLabelNode.textContent = modelLabel;
-    approvalLabelNode.textContent = approvalLabel();
     status.innerHTML = `<span class="wb-run-spinner"></span><span class="wb-run-text">${escapeHtml(statusText(
       projection,
       busy,
@@ -219,33 +217,6 @@ export async function initKernelUi(): Promise<void> {
     event.stopPropagation();
     void openTabMenu().catch(showError);
   });
-  document.querySelector('#kernel-approval')?.addEventListener('click', (event) => {
-    event.stopPropagation();
-    const menu = document.querySelector<HTMLElement>('#kernel-approval-menu');
-    if (menu) {
-      menu.innerHTML = approvalMenuMarkup();
-      menu.hidden = !menu.hidden;
-    }
-    const modelMenu = document.querySelector<HTMLElement>('#kernel-model-menu');
-    if (modelMenu) modelMenu.hidden = true;
-    const commandMenu = document.querySelector<HTMLElement>('#kernel-command-menu');
-    if (commandMenu) commandMenu.hidden = true;
-    const tabMenu = document.querySelector<HTMLElement>('#kernel-tab-menu');
-    if (tabMenu) tabMenu.hidden = true;
-  });
-  document.querySelector('#kernel-approval-menu')?.addEventListener('click', (event) => {
-    const option = (event.target as Element).closest<HTMLElement>('[data-kernel-approval]');
-    if (!option) return;
-    pageConfig.approval = option.dataset.kernelApproval === 'auto' ? 'auto' : 'ask';
-    void writePageConfig()
-      .then(() => client.reloadRuntime())
-      .then(() => {
-        const menu = document.querySelector<HTMLElement>('#kernel-approval-menu');
-        if (menu) menu.hidden = true;
-        render();
-      })
-      .catch(showError);
-  });
   document.querySelector('#kernel-tab-menu')?.addEventListener('click', (event) => {
     const tab = (event.target as Element).closest<HTMLElement>('[data-kernel-tab]');
     if (!tab?.dataset.kernelTab) return;
@@ -362,6 +333,27 @@ export async function initKernelUi(): Promise<void> {
       void openArtifact(artifactTarget.dataset.artifact).catch(showError);
       return;
     }
+    const copyTarget = (event.target as Element).closest<HTMLElement>('[data-copy-message]');
+    if (copyTarget?.dataset.copyMessage) {
+      const text =
+        projection?.rows.find((row) => row.id === copyTarget.dataset.copyMessage)?.text ?? '';
+      void navigator.clipboard.writeText(text).then(() => {
+        copyTarget.textContent = pageConfig.language.startsWith('zh') ? '已复制' : 'Copied';
+      }).catch(showError);
+      return;
+    }
+    const exportTarget = (event.target as Element).closest<HTMLElement>('[data-export-message]');
+    if (exportTarget?.dataset.exportMessage) {
+      const text =
+        projection?.rows.find((row) => row.id === exportTarget.dataset.exportMessage)?.text ?? '';
+      const href = URL.createObjectURL(new Blob([text], { type: 'text/markdown' }));
+      const anchor = document.createElement('a');
+      anchor.href = href;
+      anchor.download = `tinyai-${Date.now()}.md`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(href), 1000);
+      return;
+    }
     const handoffTarget = (event.target as Element).closest<HTMLElement>('[data-handoff]');
     if (handoffTarget) {
       const handoffId = handoffTarget.dataset.handoff;
@@ -397,9 +389,6 @@ export async function initKernelUi(): Promise<void> {
     if (commandMenu) commandMenu.hidden = true;
     const tabMenu = document.querySelector<HTMLElement>('#kernel-tab-menu');
     if (tabMenu) tabMenu.hidden = true;
-    if (target.closest('#kernel-approval-menu') || target.closest('#kernel-approval')) return;
-    const approvalMenu = document.querySelector<HTMLElement>('#kernel-approval-menu');
-    if (approvalMenu) approvalMenu.hidden = true;
     if (target.closest('#kernel-model-menu') || target.closest('#kernel-model')) return;
     const modelMenu = document.querySelector<HTMLElement>('#kernel-model-menu');
     if (modelMenu) modelMenu.hidden = true;
@@ -623,20 +612,29 @@ export async function initKernelUi(): Promise<void> {
       <div class="wb-settings-body">
         <div class="wb-set-card wb-set-account">
           <div class="wb-account-row">
-            <span class="wb-account-avatar wb-account-avatar--logo" aria-hidden="true"><img class="wb-account-avatar-img" alt="" src="icon/leia-avatar.svg"></span>
+            <span class="wb-account-avatar wb-account-avatar--logo" aria-hidden="true"><img class="wb-account-avatar-img" alt="" src="icon/tinyai.svg"></span>
             <span class="wb-account-copy"><span class="wb-account-name-row"><span class="wb-account-name">tinyai</span></span><span class="wb-account-line">${zh ? '所有对话和模型 Key 都保存在本机。' : 'All chats and model keys stay on this machine.'}</span></span>
             <span class="wb-badge">${zh ? '本地 Agent' : 'Local agent'}</span>
           </div>
         </div>
         <div class="wb-set-group"><div class="wb-set-group-label">${zh ? '通用' : 'General'}</div>
           <div class="wb-set-card">
-            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label">${zh ? '外观' : 'Appearance'}</span>
+            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.sun}</span>${zh ? '外观' : 'Appearance'}</span>
               <button type="button" class="wb-set-select" data-page-action="theme"><span class="wb-set-select-value">${escapeHtml(themeLabel(pageConfig.theme, zh))}</span>${icons.chevronDown}</button></div>
             <div class="wb-set-sepa"></div>
-            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label">${zh ? '语言' : 'Language'}</span>
-              <button type="button" class="wb-set-select" data-page-action="language"><span class="wb-set-select-value">${zh ? '中文' : 'English'}</span>${icons.chevronDown}</button></div>
+            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.globe}</span>${zh ? '语言' : 'Language'}</span>
+              <select id="kernel-page-language" class="wb-native-select">${[
+                ['en', 'English'],
+                ['zh', '中文'],
+                ['zh-TW', '繁體中文'],
+                ['ja', '日本語'],
+                ['ko', '한국어'],
+                ['es', 'Español'],
+                ['fr', 'Français'],
+                ['de', 'Deutsch'],
+              ].map(([value, label]) => `<option value="${value}" ${value === pageConfig.language ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
             <div class="wb-set-sepa"></div>
-            <div class="wb-set-row"><span class="wb-set-row-label">${zh ? '缩放' : 'Zoom'}</span><span class="wb-input-grow"></span>
+            <div class="wb-set-row"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.zoom}</span>${zh ? '缩放' : 'Zoom'}</span><span class="wb-input-grow"></span>
               <button type="button" class="wb-set-stepper-btn" data-page-action="zoom" data-delta="-10" aria-label="Zoom out">−</button>
               <button type="button" class="wb-set-stepper-value" data-page-action="zoom" data-delta="0">${pageConfig.zoom}%</button>
               <button type="button" class="wb-set-stepper-btn" data-page-action="zoom" data-delta="10" aria-label="Zoom in">+</button></div>
@@ -644,23 +642,21 @@ export async function initKernelUi(): Promise<void> {
         </div>
         <div class="wb-set-group"><div class="wb-set-group-label">${zh ? '模型' : 'Models'}</div>
           <div class="wb-set-card">
-            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label">${zh ? '模型' : 'Model'}</span>
+            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.sparkle}</span>${zh ? '模型' : 'Model'}</span>
               <select class="wb-native-select" id="kernel-page-model">${models.length ? models.map((item) => `<option value="${escapeHtml(item.connection + '|' + item.model)}" ${item.connection === pageConfig.connection && item.model === pageConfig.model ? 'selected' : ''}>${escapeHtml(item.label)}</option>`).join('') : `<option>${zh ? '未配置模型' : 'No model'}</option>`}</select></div>
             <div class="wb-set-sepa"></div>
-            <div class="wb-set-row wb-set-navrow wb-clickable" data-page-action="connections"><span class="wb-set-row-label">${zh ? '模型连接' : 'Model connections'}</span><span class="wb-input-grow"></span><span class="wb-set-row-value">${pageConfig.connections.length}</span>${icons.chevronDown}</div>
+            <div class="wb-set-row wb-set-navrow wb-clickable" data-page-action="connections"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.link}</span>${zh ? '模型连接' : 'Model connections'}</span><span class="wb-input-grow"></span><span class="wb-set-row-value">${pageConfig.connections.length}</span>${icons.chevronDown}</div>
           </div>
         </div>
         <div class="wb-set-group"><div class="wb-set-group-label">${zh ? '权限' : 'Permissions'}</div>
           <div class="wb-set-card">
-            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label">${zh ? '操作审批' : 'Action approval'}</span>
+            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.shield}</span>${zh ? '操作审批' : 'Action approval'}</span>
               <button type="button" class="wb-set-select" data-page-action="approval"><span class="wb-set-select-value">${pageConfig.approval === 'auto' ? (zh ? '自动执行' : 'Auto-approve') : (zh ? '需要审批' : 'Requires approval')}</span>${icons.chevronDown}</button></div>
           </div>
         </div>
         <div class="wb-set-group"><div class="wb-set-group-label">${zh ? '关于' : 'About'}</div>
           <div class="wb-set-card">
-            <div class="wb-set-row"><span class="wb-set-row-label">${zh ? '版本' : 'Version'}</span><span class="wb-input-grow"></span><span class="wb-set-row-value">${escapeHtml(chrome.runtime.getManifest().version)}</span></div>
-            <div class="wb-set-sepa"></div>
-            <div class="wb-set-row"><span class="wb-set-row-label">${zh ? '扩展连接' : 'Extension'}</span><span class="wb-input-grow"></span><span class="wb-set-row-value">${zh ? '已连接' : 'Connected'}</span></div>
+            <div class="wb-set-row"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.info}</span>${zh ? '版本' : 'Version'}</span><span class="wb-input-grow"></span><span class="wb-set-row-value">${escapeHtml(chrome.runtime.getManifest().version)}</span></div>
           </div>
         </div>
         ${pageAlertMarkup()}
@@ -793,10 +789,9 @@ export async function initKernelUi(): Promise<void> {
     if (input) {
       input.placeholder = zh
         ? '给 tinyai 发消息，按 @ 选择标签页，/ 查看命令'
-        : 'Message tinyai, press @ for tabs, or / for commands';
+        : 'Type a task, Enter to send';
       input.setAttribute('aria-label', zh ? '任务' : 'Task');
     }
-    document.querySelector('#kernel-approval')?.setAttribute('aria-label', zh ? '审批模式' : 'Approval mode');
     setLabel('#kernel-compact', zh ? '压缩上下文' : 'Compact context');
     setLabel('#kernel-approve-plan', zh ? '批准计划' : 'Approve plan');
     const skill = document.querySelector<HTMLSelectElement>('#kernel-skill');
@@ -808,30 +803,6 @@ export async function initKernelUi(): Promise<void> {
     return pageConfig.theme === 'dark' || (pageConfig.theme === 'system' && systemDark)
       ? 'dark'
       : 'light';
-  }
-
-  function approvalLabel(): string {
-    return approvalText(pageConfig.approval, pageConfig.language);
-  }
-
-  function approvalMenuMarkup(): string {
-    const zh = pageConfig.language.startsWith('zh');
-    const item = (value: 'ask' | 'auto', title: string, description: string): string =>
-      `<button type="button" class="wb-pop-item${pageConfig.approval === value ? ' selected' : ''}" data-kernel-approval="${value}">
-        <span class="wb-pop-copy"><span class="wb-pop-title">${escapeHtml(title)}</span><span class="wb-pop-desc">${escapeHtml(description)}</span></span>
-        ${pageConfig.approval === value ? icons.check : ''}
-      </button>`;
-    return `<div class="wb-menu-heading">${zh ? '权限' : 'Permission'}</div>
-      ${item(
-        'ask',
-        zh ? '需要审批' : 'Requires approval',
-        zh ? '执行有风险的操作前先询问你' : 'Ask before potentially risky actions'
-      )}
-      ${item(
-        'auto',
-        zh ? '自动执行' : 'Auto-approve',
-        zh ? '工具直接执行，不打断你' : 'Run tools without asking'
-      )}`;
   }
 
   async function handlePageAction(action: string, target: HTMLElement): Promise<void> {
@@ -1169,7 +1140,7 @@ function emptyHtml(language = 'en'): string {
       ];
   return `<div class="wb-empty kernel-empty">
     <div class="wb-empty-head">
-      <img class="wb-empty-avatar" src="icon/leia-avatar.svg" alt="" aria-hidden="true">
+      <img class="wb-empty-avatar" src="icon/tinyai.svg" alt="" aria-hidden="true">
       <div class="wb-empty-title">${zh ? '你好，想让我做什么？' : 'What should tinyai do?'}</div>
     </div>
     <div class="wb-prompt-chips">
@@ -1187,10 +1158,18 @@ function rowHtml(row: ProductProjection['rows'][number], language = 'en'): strin
   }
   if (row.kind === 'assistant') {
     if (!row.text && row.status !== 'streaming') return '';
-    if (!row.text) return '';
-    const body = `${md(row.text)}${row.status === 'streaming' ? '<span class="wb-cursor"></span>' : ''}`;
+    const body =
+      row.status === 'streaming' && !row.text
+        ? '<span class="wb-thinking"><i></i><i></i><i></i></span>'
+        : `${md(row.text)}${row.status === 'streaming' ? '<span class="wb-cursor"></span>' : ''}`;
+    const feedback = !row.status || row.status === 'completed'
+      ? `<div class="wb-feedback">
+          <button type="button" class="wb-mini-action" data-copy-message="${escapeHtml(row.id)}">${icons.file}${zh ? '复制' : 'Copy'}</button>
+          <button type="button" class="wb-mini-action" data-export-message="${escapeHtml(row.id)}">${zh ? '导出' : 'Export'}</button>
+        </div>`
+      : '';
     return `<div class="wb-stream-row kernel-message-row">
-      <div class="wb-msg"><div class="wb-assistant"><div class="wb-assistant-body">${body}</div></div></div>
+      <div class="wb-msg"><div class="wb-assistant"><div class="wb-assistant-body">${body}</div>${feedback}</div></div>
     </div>`;
   }
   if (row.kind === 'tool') {
@@ -1298,7 +1277,7 @@ function shell(config: KernelStoredConfig): string {
         <div class="wb-inputbox">
           <div class="wb-input-main">
             <span class="wb-input-prompt">&gt;</span>
-            <textarea id="kernel-input" class="wb-editor kernel-editor" rows="1" placeholder="${zh ? '给 tinyai 发消息，按 @ 选择标签页，/ 查看命令' : 'Message tinyai, press @ for tabs, or / for commands'}" aria-label="${zh ? '任务' : 'Task'}"></textarea>
+            <textarea id="kernel-input" class="wb-editor kernel-editor" rows="1" placeholder="${zh ? '给 tinyai 发消息，按 @ 选择标签页，/ 查看命令' : 'Type a task, Enter to send'}" aria-label="${zh ? '任务' : 'Task'}"></textarea>
           </div>
           <input id="kernel-file-input" type="file" multiple accept="text/*,image/*,.md,.ts,.tsx,.js,.jsx,.json,.css,.html,.txt" hidden>
           <div class="wb-input-bar">
@@ -1311,14 +1290,6 @@ function shell(config: KernelStoredConfig): string {
             <button type="button" id="kernel-attach" class="wb-icon-button wb-sk-tip-anchor" aria-label="${zh ? '添加文件或图片' : 'Add a file or image'}">
               <span class="wb-composer-glyph wb-composer-glyph--clip" aria-hidden="true"></span><span class="wb-sk-tip" role="tooltip">${zh ? '添加文件或图片' : 'Add a file or image'}</span>
             </button>
-            <div class="wb-pop-anchor">
-              <button type="button" id="kernel-approval" class="wb-mode-toggle wb-approval-toggle wb-sk-tip-anchor" aria-haspopup="menu">
-                <span class="wb-composer-glyph wb-composer-glyph--safe" aria-hidden="true"></span>
-                <span class="wb-approval-label" id="kernel-approval-label">${escapeHtml(approvalText(config.approval, config.language))}</span>
-                ${icons.chevron}
-              </button>
-              <div id="kernel-approval-menu" class="kernel-command-menu" hidden></div>
-            </div>
             <div id="kernel-tab-menu" class="kernel-command-menu kernel-tab-menu" hidden></div>
             <div id="kernel-command-menu" class="kernel-command-menu" hidden>
               <div class="wb-menu-heading">Skills</div>
@@ -1413,13 +1384,6 @@ function defaultPageConfig(): KernelStoredConfig {
     model: null,
     connections: [],
   };
-}
-
-function approvalText(approval: 'ask' | 'auto', language: string): string {
-  const zh = language.startsWith('zh');
-  return approval === 'auto'
-    ? (zh ? '自动执行' : 'Auto-approve')
-    : (zh ? '需要审批' : 'Requires approval');
 }
 
 function themeLabel(theme: 'light' | 'dark' | 'system', zh: boolean): string {
