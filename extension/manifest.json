@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "tinyai",
+  "version": "0.1.0",
+  "description": "tinyai — a tiny browser agent that runs entirely in Chrome.",
+  "permissions": [
+    "tabs",
+    "debugger",
+    "storage",
+    "downloads",
+    "tabGroups",
+    "unlimitedStorage",
+    "offscreen",
+    "sidePanel"
+  ],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "js/background/main.js" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "action": { "default_title": "Open tinyai" },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": { "default": "Ctrl+Shift+K", "mac": "Command+Shift+K" }
+    }
+  },
+  "icons": {
+    "16": "icon/16.png",
+    "32": "icon/32.png",
+    "48": "icon/48.png",
+    "128": "icon/128.png"
+  }
+}

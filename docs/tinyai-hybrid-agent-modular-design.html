@@ -1,0 +1,2008 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="tinyai Agent 2.0 混合分模块详细设计：吸收上游行为基线，支持浏览器内标注和修订保存。">
+  <title>tinyai Agent 2.0 · 分模块实现设计</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f2f0ea;
+      --surface: #fffdf8;
+      --surface-2: #eae6dc;
+      --surface-3: #ddd7ca;
+      --text: #191a17;
+      --muted: #666960;
+      --faint: #8d8f86;
+      --border: #d8d2c6;
+      --border-strong: #b6afa1;
+      --accent: #cf5531;
+      --accent-soft: #fde6de;
+      --accent-ink: #8b2c17;
+      --green: #257052;
+      --green-soft: #def0e7;
+      --blue: #2f608c;
+      --blue-soft: #e0edf7;
+      --amber: #8d5b16;
+      --amber-soft: #f8ebc9;
+      --purple: #6a508d;
+      --purple-soft: #eee5f7;
+      --red: #a32e36;
+      --red-soft: #f8e1e2;
+      --code: #20211e;
+      --code-text: #f1eee7;
+      --shadow: 0 18px 50px rgba(55, 42, 28, .08);
+      --sidebar: 245px;
+      --drawer: 430px;
+    }
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #11120f;
+      --surface: #1a1c18;
+      --surface-2: #24271f;
+      --surface-3: #30342b;
+      --text: #efede5;
+      --muted: #aaa99e;
+      --faint: #85877e;
+      --border: #373a31;
+      --border-strong: #55594d;
+      --accent: #ef7854;
+      --accent-soft: #3d241c;
+      --accent-ink: #ffc4b1;
+      --green: #72cba4;
+      --green-soft: #19362a;
+      --blue: #8bc3ed;
+      --blue-soft: #1c3041;
+      --amber: #e1ba73;
+      --amber-soft: #382e1b;
+      --purple: #c1a8e8;
+      --purple-soft: #30243f;
+      --red: #f0898f;
+      --red-soft: #401f22;
+      --code: #0d0e0c;
+      --code-text: #e9e7df;
+      --shadow: 0 18px 52px rgba(0, 0, 0, .25);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 86% -8%, color-mix(in srgb, var(--accent) 11%, transparent), transparent 28rem),
+        var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 15px;
+      line-height: 1.72;
+      text-rendering: optimizeLegibility;
+    }
+    a { color: var(--accent-ink); text-underline-offset: 3px; }
+    button, input, textarea, select { font: inherit; color: inherit; }
+    code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+    code { padding: .14em .38em; border-radius: 5px; background: var(--surface-2); font-size: .9em; }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      min-height: 64px;
+      padding: 0 24px;
+      background: color-mix(in srgb, var(--bg) 91%, transparent);
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+      backdrop-filter: blur(18px);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; min-width: var(--sidebar); font-weight: 650; }
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      color: #fff;
+      background: var(--accent);
+      border-radius: 9px 9px 9px 3px;
+      font-family: Georgia, serif;
+      font-size: 17px;
+      font-style: italic;
+    }
+    .top-meta { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .top-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+    .toolbar-button, .icon-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 36px;
+      border: 1px solid var(--border);
+      border-radius: 99px;
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .toolbar-button { gap: 6px; padding: 0 13px; }
+    .icon-button { width: 36px; padding: 0; }
+    .toolbar-button:hover, .icon-button:hover { border-color: var(--border-strong); }
+    .toolbar-button.is-active { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .review-count {
+      display: inline-grid;
+      place-items: center;
+      min-width: 20px;
+      height: 20px;
+      padding: 0 6px;
+      border-radius: 99px;
+      background: color-mix(in srgb, currentColor 12%, transparent);
+      font-size: 10px;
+    }
+    .layout { display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); max-width: 1500px; margin: 0 auto; }
+    .sidebar {
+      position: sticky;
+      top: 64px;
+      align-self: start;
+      height: calc(100vh - 64px);
+      padding: 30px 22px 46px 26px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+    }
+    .sidebar-label { margin: 0 0 12px; color: var(--faint); font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+    .toc { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
+    .toc a { display: block; padding: 6px 10px; border-left: 2px solid transparent; color: var(--muted); font-size: 13px; line-height: 1.45; text-decoration: none; }
+    .toc a:hover { color: var(--text); }
+    .toc a.active { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--text); font-weight: 600; }
+    .sidebar-note, .review-summary { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border); color: var(--faint); font-size: 11px; line-height: 1.55; }
+    .review-summary strong { display: block; margin-bottom: 6px; color: var(--text); font-size: 12px; }
+    .review-summary button { margin-top: 10px; }
+    main { width: min(100%, 1160px); padding: 52px 58px 110px; }
+    .hero {
+      position: relative;
+      padding: 46px 48px 42px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 26px;
+      background: linear-gradient(132deg, var(--surface), color-mix(in srgb, var(--accent) 5%, var(--surface)));
+      box-shadow: var(--shadow);
+    }
+    .hero::after {
+      content: "v0.1";
+      position: absolute;
+      right: 28px;
+      top: 5px;
+      color: color-mix(in srgb, var(--accent) 12%, transparent);
+      font-family: Georgia, serif;
+      font-size: 118px;
+      line-height: 1;
+      letter-spacing: -.08em;
+      pointer-events: none;
+    }
+    .eyebrow { display: flex; align-items: center; gap: 8px; margin-bottom: 22px; color: var(--accent-ink); font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent); }
+    h1 { position: relative; max-width: 790px; margin: 0; font-family: Georgia, "Songti SC", serif; font-size: clamp(36px, 5vw, 62px); font-weight: 500; line-height: 1.05; letter-spacing: -.045em; }
+    .hero-lead { position: relative; max-width: 780px; margin: 24px 0 0; color: var(--muted); font-size: 17px; }
+    .meta-strip { display: flex; flex-wrap: wrap; gap: 10px 24px; margin-top: 32px; padding-top: 22px; border-top: 1px solid var(--border); color: var(--faint); font-size: 12px; }
+    .meta-strip strong { margin-right: 5px; color: var(--text); font-weight: 600; }
+    section { scroll-margin-top: 88px; margin-top: 70px; }
+    .section-head { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+    .section-no { color: var(--accent); font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px; font-weight: 700; letter-spacing: .08em; }
+    h2 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: clamp(27px, 3vw, 36px); font-weight: 500; line-height: 1.2; letter-spacing: -.025em; }
+    h3 { margin: 32px 0 12px; font-size: 18px; font-weight: 650; letter-spacing: -.015em; }
+    h4 { margin: 20px 0 8px; font-size: 14px; font-weight: 650; }
+    p { margin: 10px 0 16px; }
+    ul, ol { margin: 12px 0 20px; padding-left: 23px; }
+    li { margin: 6px 0; }
+    li::marker { color: var(--accent); }
+    .lede { max-width: 830px; color: var(--muted); font-size: 16px; }
+    .grid-2, .grid-3, .grid-4 { display: grid; gap: 16px; }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .card { min-width: 0; padding: 21px 22px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }
+    .card h3, .card h4 { margin-top: 0; }
+    .card p:last-child, .card ul:last-child { margin-bottom: 0; }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 23px;
+      padding: 2px 8px;
+      border-radius: 99px;
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .tag.core { background: var(--accent-soft); color: var(--accent-ink); }
+    .tag.borrow { background: var(--green-soft); color: var(--green); }
+    .tag.new { background: var(--blue-soft); color: var(--blue); }
+    .tag.future { background: var(--purple-soft); color: var(--purple); }
+    .tag.risk { background: var(--red-soft); color: var(--red); }
+    .callout { display: grid; grid-template-columns: 4px 1fr; gap: 18px; margin: 28px 0; padding: 18px 20px; border-radius: 10px; background: var(--surface-2); }
+    .callout::before { content: ""; border-radius: 4px; background: var(--accent); }
+    .callout strong { display: block; margin-bottom: 3px; }
+    .callout p { margin: 0; color: var(--muted); }
+    .callout.info::before { background: var(--blue); }
+    .callout.warn { background: var(--amber-soft); }
+    .callout.warn::before { background: var(--amber); }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 11px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { color: var(--faint); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    .table-wrap table { min-width: 680px; }
+    .diagram-card { padding: 22px; overflow-x: auto; border: 1px solid var(--border); border-radius: 18px; background: var(--surface); }
+    .diagram-card .mermaid { min-width: 780px; text-align: center; }
+    .diagram-caption { margin: 12px 2px 0; color: var(--faint); font-size: 11px; text-align: center; }
+    .baseline { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .baseline span { padding: 3px 7px; border-radius: 6px; background: var(--green-soft); color: var(--green); font-family: monospace; font-size: 10px; }
+    .module {
+      position: relative;
+      margin: 28px 0;
+      padding: 28px 30px;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      background: var(--surface);
+    }
+    .module-head { display: flex; align-items: flex-start; gap: 16px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+    .module-index {
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: var(--accent-soft);
+      color: var(--accent-ink);
+      font-family: monospace;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .module-title { min-width: 0; flex: 1; }
+    .module-title h3 { margin: 0 0 4px; font-family: "SFMono-Regular", Consolas, monospace; font-size: 18px; }
+    .module-title p { margin: 0; color: var(--muted); font-size: 13px; }
+    .review-pin {
+      flex: 0 0 auto;
+      padding: 5px 9px;
+      border: 1px solid var(--border);
+      border-radius: 99px;
+      background: transparent;
+      color: var(--faint);
+      font-size: 10px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .review-pin:hover, .review-pin.has-notes { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft); }
+    .module-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+    .module-grid > div { min-width: 0; }
+    .module-grid h4:first-child { margin-top: 0; }
+    .contract { margin: 0; padding: 14px 16px; border-left: 3px solid var(--blue); background: var(--blue-soft); border-radius: 0 9px 9px 0; font-size: 12px; }
+    pre { margin: 16px 0; padding: 18px 20px; overflow-x: auto; border-radius: 13px; background: var(--code); color: var(--code-text); font-size: 11px; line-height: 1.65; }
+    pre code { padding: 0; background: transparent; color: inherit; font-size: inherit; }
+    .checklist { padding: 0; list-style: none; }
+    .checklist li { position: relative; margin: 9px 0; padding-left: 27px; }
+    .checklist li::before {
+      content: "✓";
+      position: absolute;
+      left: 0;
+      top: 1px;
+      display: grid;
+      place-items: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--green-soft);
+      color: var(--green);
+      font-size: 10px;
+      font-weight: 800;
+    }
+    .roadmap { display: grid; gap: 0; margin-top: 20px; }
+    .phase { display: grid; grid-template-columns: 78px 1fr; gap: 20px; padding: 0 0 32px; }
+    .phase-track { position: relative; display: flex; justify-content: center; }
+    .phase-track::before { content: ""; position: absolute; top: 35px; bottom: -32px; width: 1px; background: var(--border); }
+    .phase:last-child .phase-track::before { display: none; }
+    .phase-dot { position: relative; z-index: 1; display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid var(--border); border-radius: 50%; background: var(--surface); color: var(--accent); font-family: monospace; font-size: 11px; font-weight: 700; }
+    .phase-body { padding: 20px 22px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }
+    .phase-body h3 { margin: 0 0 5px; }
+    .phase-body p { margin: 0 0 9px; color: var(--muted); font-size: 13px; }
+    .phase-body ul { margin-bottom: 0; font-size: 13px; }
+    details { margin: 12px 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); }
+    summary { cursor: pointer; font-weight: 650; font-size: 13px; }
+    .footer { margin-top: 72px; padding-top: 24px; border-top: 1px solid var(--border); color: var(--faint); font-size: 11px; }
+
+    body.review-mode [data-reviewable] { outline: 1px dashed color-mix(in srgb, var(--accent) 48%, transparent); outline-offset: 4px; cursor: crosshair; }
+    body.review-mode [data-reviewable]:hover { outline: 2px solid var(--accent); background-color: color-mix(in srgb, var(--accent) 3%, transparent); }
+    .annotation-drawer {
+      position: fixed;
+      z-index: 80;
+      top: 0;
+      right: 0;
+      width: min(var(--drawer), 100vw);
+      height: 100vh;
+      padding: 22px;
+      overflow-y: auto;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      box-shadow: -20px 0 60px rgba(0, 0, 0, .15);
+      transform: translateX(105%);
+      transition: transform .22s ease;
+    }
+    .annotation-drawer.is-open { transform: translateX(0); }
+    .drawer-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+    .drawer-head h2 { font-family: inherit; font-size: 20px; letter-spacing: -.02em; }
+    .drawer-close { margin-left: auto; }
+    .drawer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 18px; }
+    .field { display: grid; gap: 6px; margin: 13px 0; }
+    .field label { color: var(--muted); font-size: 11px; font-weight: 650; }
+    .field input, .field textarea, .field select {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--surface-2);
+      color: var(--text);
+      padding: 9px 10px;
+      font-size: 13px;
+    }
+    .field textarea { min-height: 132px; resize: vertical; line-height: 1.55; }
+    .field-selection { min-height: 48px; padding: 9px 10px; border-radius: 8px; background: var(--amber-soft); color: var(--amber); font-size: 11px; line-height: 1.5; }
+    .primary-button, .secondary-button, .danger-button {
+      min-height: 36px;
+      padding: 0 13px;
+      border-radius: 9px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .primary-button { border: 1px solid var(--accent); background: var(--accent); color: #fff; }
+    .secondary-button { border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+    .danger-button { border: 1px solid var(--red); background: transparent; color: var(--red); }
+    .notes-list { display: grid; gap: 10px; margin-top: 18px; }
+    .note {
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      background: var(--surface-2);
+      font-size: 12px;
+    }
+    .note-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 6px; color: var(--faint); font-size: 10px; }
+    .note-status { padding: 2px 6px; border-radius: 99px; background: var(--amber-soft); color: var(--amber); font-weight: 700; }
+    .note-status.must { background: var(--red-soft); color: var(--red); }
+    .note-status.decision { background: var(--blue-soft); color: var(--blue); }
+    .note-status.question { background: var(--purple-soft); color: var(--purple); }
+    .note p { margin: 0; white-space: pre-wrap; }
+    .note-actions { display: flex; gap: 8px; margin-top: 9px; }
+    .note-actions button { border: 0; background: transparent; color: var(--accent-ink); padding: 0; font-size: 11px; cursor: pointer; }
+    .drawer-tip { color: var(--faint); font-size: 11px; line-height: 1.5; }
+    .toast {
+      position: fixed;
+      z-index: 100;
+      left: 50%;
+      bottom: 24px;
+      transform: translate(-50%, 20px);
+      padding: 9px 14px;
+      border-radius: 99px;
+      background: var(--code);
+      color: var(--code-text);
+      font-size: 12px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .16s, transform .16s;
+    }
+    .toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
+
+    @media (max-width: 1050px) {
+      :root { --sidebar: 210px; }
+      main { padding: 42px 36px 90px; }
+      .grid-4, .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 820px) {
+      .topbar { padding: 0 15px; }
+      .brand { min-width: auto; }
+      .top-meta { display: none; }
+      .toolbar-button .review-label { display: none; }
+      .layout { display: block; }
+      .sidebar { display: none; }
+      main { padding: 26px 18px 76px; }
+      .hero { padding: 34px 26px 30px; border-radius: 20px; }
+      .grid-2, .grid-3, .grid-4, .module-grid { grid-template-columns: 1fr; }
+      .module { padding: 23px 20px; }
+      .annotation-drawer { width: 100vw; border-left: 0; }
+    }
+    @media (max-width: 520px) {
+      body { font-size: 14px; }
+      .brand > span:last-child { display: none; }
+      .hero-lead { font-size: 15px; }
+      .meta-strip { display: grid; gap: 7px; }
+      .section-head { flex-wrap: wrap; }
+      .module-head { flex-wrap: wrap; }
+      .phase { grid-template-columns: 50px 1fr; gap: 12px; }
+      .phase-dot { width: 34px; height: 34px; }
+      .annotation-drawer { padding: 17px; }
+    }
+    @media print {
+      html, body { background: #fff; color: #111; }
+      .topbar, .sidebar, .top-actions, .review-pin, .annotation-drawer, .toast { display: none !important; }
+      .layout { display: block; }
+      main { width: 100%; max-width: none; padding: 0; }
+      .hero, .card, .module, .phase-body, .diagram-card { box-shadow: none; break-inside: avoid; }
+      section { break-inside: avoid-page; }
+      a { color: #111; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { transition: none !important; animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">m</span><span>tinyai modular design</span></div>
+    <div class="top-meta">Agent 2.0 · 上游行为基线 + 目标内核 · Review v0.1</div>
+    <div class="top-actions">
+      <button class="icon-button" id="theme-toggle" type="button" aria-label="切换主题" title="切换主题">◐</button>
+      <button class="toolbar-button" id="review-toggle" type="button" aria-pressed="false"><span aria-hidden="true">✎</span><span class="review-label">标注模式</span></button>
+      <button class="toolbar-button" id="open-review" type="button"><span aria-hidden="true">☰</span><span class="review-label">批注</span><span class="review-count" id="review-count">0</span></button>
+      <button class="toolbar-button" id="export-review" type="button" title="导出修订 JSON"><span aria-hidden="true">⇩</span><span class="review-label">导出修订</span></button>
+      <button class="icon-button" id="print-button" type="button" aria-label="打印文档" title="打印为 PDF">⎙</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar" aria-label="文档目录">
+      <p class="sidebar-label">Design map</p>
+      <nav>
+        <ol class="toc">
+          <li><a href="#summary">设计摘要</a></li>
+          <li><a href="#baseline">实现基线</a></li>
+          <li><a href="#architecture">总体架构</a></li>
+          <li><a href="#objects">核心对象</a></li>
+          <li><a href="#modules">模块设计</a></li>
+          <li><a href="#module-ui">控制面与事件投影</a></li>
+          <li><a href="#module-runtime">任务运行时</a></li>
+          <li><a href="#module-store">任务与事件存储</a></li>
+          <li><a href="#module-model">模型网关</a></li>
+          <li><a href="#module-context">上下文管理</a></li>
+          <li><a href="#module-tools">工具执行器</a></li>
+          <li><a href="#module-policy">策略审批</a></li>
+          <li><a href="#module-browser">浏览器适配</a></li>
+          <li><a href="#module-subagent">子 Agent</a></li>
+          <li><a href="#module-verify">计划与验证</a></li>
+          <li><a href="#module-trace">追踪评测</a></li>
+          <li><a href="#module-sandbox">沙盒接口</a></li>
+          <li><a href="#interactions">跨模块交互</a></li>
+          <li><a href="#delivery">交付路线</a></li>
+          <li><a href="#acceptance">验收清单</a></li>
+        </ol>
+      </nav>
+      <div class="review-summary">
+        <strong>修订状态</strong>
+        当前 0 条批注。标注会自动保存在本浏览器；提交开发前请导出修订 JSON。
+        <button class="secondary-button" id="import-review" type="button">导入修订</button>
+        <input id="import-review-file" type="file" accept=".json,application/json" hidden>
+      </div>
+      <div class="sidebar-note">点击正文中的“批注”按钮，或开启标注模式后点击模块区域。文档内容与批注数据分离，后续改稿不会覆盖你的意见。</div>
+    </aside>
+
+    <main>
+      <section class="hero" id="summary">
+        <div class="eyebrow"><span class="status-dot"></span>IMPLEMENTATION DESIGN · REVIEW v0.1</div>
+        <h1>在成熟行为上，重建一个可演进的 Agent 内核</h1>
+        <p class="hero-lead">
+          本文把上游已经验证的浏览器 Agent 行为，与 tinyai 的持久任务、能力权限、上下文档位和沙盒边界合并成一份可实现、可验收的分模块设计。评审意见可直接标注在页面中，作为下一轮开发的输入。
+        </p>
+        <div class="meta-strip">
+          <span><strong>设计基线</strong> 上游 0.15.1 + Agent 2.0</span>
+          <span><strong>首要目标</strong> 对齐行为，再扩展沙盒</span>
+          <span><strong>文档版本</strong> Review v0.1</span>
+          <span><strong>开发状态</strong> 待用户评审</span>
+        </div>
+      </section>
+
+      <div class="callout info">
+        <div>
+          <strong>评审方式</strong>
+          <p>点击各章节标题旁的“批注”，或在右上角开启“标注模式”后点击模块。批注可标记为修改建议、必须修改、确认决策或待确认；数据保存在本浏览器，完成后请用“导出修订”生成 JSON。</p>
+        </div>
+      </div>
+
+      <section id="baseline">
+        <div class="section-head"><span class="section-no">01</span><h2>实现基线与设计取舍</h2></div>
+        <p class="lede">本设计不重写上游的成熟行为，而是把这些行为映射到更稳定的任务与执行边界中。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>基线</th><th>直接借鉴的上游实现</th><th>在本设计中的落点</th></tr></thead>
+            <tbody>
+              <tr><td><code>B1</code></td><td>后台 session-loop、消息队列、时间线与端口投影</td><td>TaskRuntime + EventLog + UI Projection</td></tr>
+              <tr><td><code>B2</code></td><td>Agent Step Loop、工具批次、参数校验、AbortSignal</td><td>ToolExecutor + StepEngine</td></tr>
+              <tr><td><code>B3</code></td><td>CompactionManager、overflow 恢复、媒体降级</td><td>ContextManager</td></tr>
+              <tr><td><code>B4</code></td><td>同进程子 Agent、独立 context、实时子事件、父取消</td><td>SubagentCoordinator</td></tr>
+              <tr><td><code>B5</code></td><td>域名动作授权、挂起审批、审批恢复</td><td>PolicyEngine + ApprovalService</td></tr>
+              <tr><td><code>B6</code></td><td>OpenAI/Anthropic/AgentGW、重试、模型恢复</td><td>ModelGateway</td></tr>
+              <tr><td><code>B7</code></td><td>IndexedDB records/blobs/chats、replay、历史修复</td><td>TaskRepository + ArtifactStore</td></tr>
+              <tr><td><code>B8</code></td><td>真模块 import 单测、真机 smoke、布局与产物闸门</td><td>TraceRecorder + EvalHarness</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>本设计相对上游的关键调整</h3>
+        <div class="grid-3">
+          <div class="card"><span class="tag new">新增</span><h4>持久任务状态机</h4><p>从“会话正在运行”提升到明确 TaskStatus、revision、检查点和写入租约。</p></div>
+          <div class="card"><span class="tag new">新增</span><h4>能力级策略</h4><p>浏览器域授权保留为用户 UX，后端扩展到文件、进程、网络和子任务能力。</p></div>
+          <div class="card"><span class="tag new">新增</span><h4>执行适配层</h4><p>浏览器与未来沙盒共用 ToolExecutor 和 ModelGateway，不污染 Agent 主循环。</p></div>
+        </div>
+
+        <div class="callout warn">
+          <div>
+            <strong>实现顺序约束</strong>
+            <p>先完成 B1–B3 的稳定行为，再引入子 Agent 和沙盒。Coding 能力不能先于任务恢复、权限和上下文预算实现。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="architecture">
+        <div class="section-head"><span class="section-no">02</span><h2>总体架构</h2></div>
+        <p class="lede">控制面只发命令和投影事件；Agent 内核只依赖契约；所有外部副作用都经过 ToolExecutor 与 PolicyEngine。</p>
+
+        <div class="diagram-card">
+          <div class="mermaid">
+flowchart TB
+  subgraph CP["控制面"]
+    UI["Side Panel / Review UI"]
+    PROJECT["Event Projection<br/>timeline · plan · approval · artifacts"]
+    BRIDGE["Command / Event Bridge"]
+    UI <--> PROJECT
+    PROJECT <--> BRIDGE
+  end
+  subgraph KERNEL["Agent Kernel"]
+    RUNTIME["TaskRuntime<br/>state machine · lease · budgets"]
+    STEP["StepEngine<br/>model → tool → observe"]
+    PLAN["Planner / Verifier"]
+    MODEL["ModelGateway"]
+    CTX["ContextManager"]
+    TOOL["ToolExecutor"]
+    SUB["SubagentCoordinator"]
+  end
+  subgraph POLICY["Policy & Data"]
+    POLICY_ENGINE["PolicyEngine<br/>capabilities · approval"]
+    REPO["TaskRepository<br/>snapshot · event log"]
+    ART["ArtifactStore"]
+    TRACE["TraceRecorder"]
+  end
+  subgraph EXEC["Execution Providers"]
+    BROWSER["BrowserProvider"]
+    SANDBOX["Workspace / SandboxProvider<br/>phase 2"]
+    NET["Network / Secret Broker"]
+  end
+  BRIDGE <--> RUNTIME
+  RUNTIME --> STEP
+  STEP --> MODEL
+  STEP --> CTX
+  STEP --> TOOL
+  STEP --> PLAN
+  RUNTIME --> SUB
+  TOOL <--> POLICY_ENGINE
+  TOOL --> BROWSER
+  TOOL -.-> SANDBOX
+  SANDBOX -.-> NET
+  CTX --> ART
+  RUNTIME <--> REPO
+  STEP --> TRACE
+  REPO --> PROJECT
+  classDef control fill:#fde6de,stroke:#cf5531,color:#191a17
+  classDef kernel fill:#e0edf7,stroke:#2f608c,color:#191a17
+  classDef data fill:#f8ebc9,stroke:#8d5b16,color:#191a17
+  classDef exec fill:#def0e7,stroke:#257052,color:#191a17
+  class UI,PROJECT,BRIDGE control
+  class RUNTIME,STEP,PLAN,MODEL,CTX,TOOL,SUB kernel
+  class POLICY_ENGINE,REPO,ART,TRACE data
+  class BROWSER,SANDBOX,NET exec
+          </div>
+          <div class="diagram-caption">图 1 · 混合设计的分层与依赖方向</div>
+        </div>
+
+        <div class="grid-3" style="margin-top:18px">
+          <div class="card"><span class="tag core">单一推进者</span><h4>只有 TaskRuntime 改状态</h4><p>Tool、ModelGateway 和 UI 都只能产生结果或命令。</p></div>
+          <div class="card"><span class="tag core">副作用闸门</span><h4>只有 ToolExecutor 做执行</h4><p>策略、幂等、取消和结果记录都在同一入口完成。</p></div>
+          <div class="card"><span class="tag core">事件事实源</span><h4>事件日志不可覆盖</h4><p>快照用于恢复，事件用于重放、审计和 UI 投影。</p></div>
+        </div>
+      </section>
+
+      <section id="objects">
+        <div class="section-head"><span class="section-no">03</span><h2>核心对象与关系</h2></div>
+        <p class="lede">对象设计优先保证边界清楚、可序列化、可恢复。所有关键对象都必须带 revision 或单调序号。</p>
+
+        <div class="diagram-card">
+          <div class="mermaid">
+classDiagram
+  direction LR
+  class TaskRecord {
+    +id: string
+    +parentId?: string
+    +status: TaskStatus
+    +revision: number
+    +goal: string
+    +budget: TaskBudget
+    +policyProfileId: string
+    +contextCheckpointId?: string
+  }
+  class TaskSnapshot {
+    +taskId: string
+    +revision: number
+    +status: TaskStatus
+    +plan: PlanState
+    +pendingAction?: PendingAction
+    +lastEventSeq: number
+  }
+  class AgentEvent {
+    +id: string
+    +taskId: string
+    +seq: number
+    +type: AgentEventType
+    +revision: number
+    +data: unknown
+  }
+  class ModelEvent {
+    +type: text_delta|tool_call|usage|finish|error
+    +attempt: number
+    +data: unknown
+  }
+  class ToolCall {
+    +callId: string
+    +name: string
+    +args: object
+    +idempotencyKey?: string
+  }
+  class ToolResult {
+    +callId: string
+    +ok: boolean
+    +output: unknown
+    +artifactRefs: string[]
+    +error?: StructuredError
+  }
+  class ApprovalRequest {
+    +id: string
+    +taskId: string
+    +actionDigest: string
+    +risk: Risk
+    +expiresAt: number
+  }
+  class ContextCheckpoint {
+    +summary: string
+    +pinnedFacts: Fact[]
+    +coveredEventSeq: number
+    +estimatedTokens: number
+  }
+  class ChildTaskSpec {
+    +parentTaskId: string
+    +role: AgentRole
+    +brief: string
+    +toolAllowlist: string[]
+    +budget: TaskBudget
+  }
+  class TraceSpan {
+    +traceId: string
+    +name: string
+    +startedAt: number
+    +endedAt?: number
+    +attributes: object
+  }
+  TaskRecord "1" --> "1" TaskSnapshot : current
+  TaskRecord "1" --> "*" AgentEvent : emits
+  TaskSnapshot "1" --> "0..1" ContextCheckpoint
+  TaskSnapshot "1" --> "0..1" ApprovalRequest
+  AgentEvent "1" --> "0..*" ModelEvent
+  AgentEvent "1" --> "0..*" ToolCall
+  ToolCall "1" --> "1" ToolResult
+  ChildTaskSpec "1" --> "1" TaskRecord : creates
+  AgentEvent "1" --> "0..*" TraceSpan
+          </div>
+          <div class="diagram-caption">图 2 · 核心领域对象与关系</div>
+        </div>
+
+        <div class="table-wrap" style="margin-top:18px">
+          <table>
+            <thead><tr><th>对象</th><th>所有者</th><th>必须保证</th></tr></thead>
+            <tbody>
+              <tr><td><code>TaskRecord</code></td><td>TaskRuntime</td><td>目标、预算、策略和父任务关系不可被 UI 直接修改。</td></tr>
+              <tr><td><code>AgentEvent</code></td><td>TaskRepository</td><td>任务内 seq 单调、不可覆盖、重复 id 幂等。</td></tr>
+              <tr><td><code>ToolCall / ToolResult</code></td><td>ToolExecutor</td><td>参数先校验；副作用有幂等键；结果带结构化错误。</td></tr>
+              <tr><td><code>ApprovalRequest</code></td><td>PolicyEngine</td><td>绑定 task、action digest、revision 和过期时间。</td></tr>
+              <tr><td><code>ContextCheckpoint</code></td><td>ContextManager</td><td>覆盖到明确的 event seq；不删除原始事件与 artifact。</td></tr>
+              <tr><td><code>ChildTaskSpec</code></td><td>SubagentCoordinator</td><td>角色、父权限、白名单、预算和结果 schema 都显式声明。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="modules">
+        <div class="section-head"><span class="section-no">04</span><h2>模块设计总览</h2></div>
+        <p class="lede">每个模块都给出职责、核心对象、交互边界、借鉴的上游行为和验收条件。标注可针对每个模块单独保存。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>模块</th><th>主要职责</th><th>实现阶段</th><th>基线</th></tr></thead>
+            <tbody>
+              <tr><td>ControlPlane / UI</td><td>命令、事件投影、审批卡和修订批注</td><td>P0</td><td>B1/B8</td></tr>
+              <tr><td>TaskRuntime</td><td>任务状态、预算、调度、取消、恢复</td><td>P0</td><td>B1</td></tr>
+              <tr><td>TaskRepository / EventLog</td><td>快照、事件、回放、租约</td><td>P0</td><td>B1/B7</td></tr>
+              <tr><td>ModelGateway</td><td>模型协议、流、重试、usage、降级</td><td>P0</td><td>B6</td></tr>
+              <tr><td>ContextManager</td><td>token 预算、压缩、overflow、artifact</td><td>P0</td><td>B3</td></tr>
+              <tr><td>ToolExecutor</td><td>校验、并发、授权、执行、取消</td><td>P0</td><td>B2/B5</td></tr>
+              <tr><td>PolicyEngine / Approval</td><td>能力策略、动作审批、站点授权</td><td>P0</td><td>B5</td></tr>
+              <tr><td>BrowserProvider</td><td>标签组、CDP、frame、页面工具</td><td>P0</td><td>B1/B2</td></tr>
+              <tr><td>SubagentCoordinator</td><td>子任务树、权限、预算、结果</td><td>P1</td><td>B4</td></tr>
+              <tr><td>Planner / Verifier</td><td>短计划、进度、完成验证</td><td>P1</td><td>新增</td></tr>
+              <tr><td>TraceRecorder / Eval</td><td>trace、脱敏、指标、回放评测</td><td>P0/P1</td><td>B8</td></tr>
+              <tr><td>SandboxProvider</td><td>工作区、PTY、网络和 artifact</td><td>P2</td><td>新增</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="module-ui">
+        <div class="section-head"><span class="section-no">05</span><h2>ControlPlane / UI Projection</h2></div>
+        <p class="lede">UI 只发布命令和消费事件，不直接修改任务或调用执行器。</p>
+
+        <article class="module" id="spec-ui" data-reviewable="spec-ui" data-review-title="ControlPlane / UI Projection 模块">
+          <div class="module-head">
+            <div class="module-index">M0</div>
+            <div class="module-title"><h3>ControlPlane / UI Projection</h3><p>侧栏、审批、计划、产物与文档评审状态</p></div>
+            <span class="tag core">P0 · Interface</span>
+          </div>
+          <div class="baseline"><span>B1 session ports</span><span>timeline reducer</span><span>B8 smoke UI</span></div>
+          <div class="module-grid">
+            <div>
+              <h4>设计要点</h4>
+              <ul>
+                <li>CommandBus 接收 Start/Pause/Resume/Cancel/Approval 等意图。</li>
+                <li>EventProjection 从 TaskSnapshot 和增量事件重建 timeline、计划与审批。</li>
+                <li>流式文本只更新临时投影，最终内容以持久事件为准。</li>
+                <li>UI 断开或重连时发送 snapshot，再补发 lastEventSeq 之后的事件。</li>
+                <li>审批卡展示动作、目标、风险和过期时间，不能只显示工具名。</li>
+                <li>设计文档的修订批注与 Agent 运行事件分开存储，避免产品状态污染。</li>
+              </ul>
+            </div>
+            <div>
+              <h4>核心契约</h4>
+              <pre><code>interface UICommandBus {
+  send(command:
+    | StartTaskCommand
+    | PauseTaskCommand
+    | ResumeTaskCommand
+    | CancelTaskCommand
+    | ApprovalDecision
+  ): Promise&lt;CommandAck&gt;;
+}
+
+interface EventSubscription {
+  taskId: string;
+  afterSeq: number;
+  onSnapshot(snapshot: TaskSnapshot): void;
+  onEvent(event: AgentEvent): void;
+  onReconnect(): void;
+}</code></pre>
+            </div>
+          </div>
+          <h4>交互</h4>
+          <p>页面加载先拉取 TaskSnapshot，再按 lastEventSeq 订阅事件；用户操作只通过 CommandBus 进入 Runtime。Runtime 产生 plan/tool/approval/notice 事件，Projection 更新视图，不反向写任务状态。</p>
+          <h4>借鉴与增强</h4>
+          <p>沿用上游端口广播、时间线 reducer、审批卡和工具卡交互；新增 revision/seq 断线重连协议，避免 UI 与服务化 Runtime 连接中断后丢失事件。</p>
+          <h4>验收</h4>
+          <ul class="checklist">
+            <li>断开再连接不会重复或遗漏时间线事件。</li>
+            <li>UI 刷新后审批、计划和运行状态一致。</li>
+            <li>修订批注和 Agent 事件不互相覆盖。</li>
+            <li>390px 与桌面宽度无关键内容遮挡。</li>
+          </ul>
+        </article>
+      </section>
+
+      <section id="module-runtime">
+        <div class="section-head"><span class="section-no">06</span><h2>TaskRuntime</h2></div>
+        <p class="lede">系统的唯一任务状态推进者。负责调度，不负责模型协议、工具实现或 UI 展示。</p>
+
+        <article class="module" id="spec-runtime" data-reviewable="spec-runtime" data-review-title="TaskRuntime 模块">
+          <div class="module-head">
+            <div class="module-index">M1</div>
+            <div class="module-title"><h3>TaskRuntime</h3><p>任务生命周期、预算、并发和恢复</p></div>
+            <span class="tag core">P0 · Core</span>
+          </div>
+          <div class="baseline"><span>B1 session-loop</span><span>AbortSignal</span><span>消息队列</span></div>
+          <div class="module-grid">
+            <div>
+              <h4>设计要点</h4>
+              <ul>
+                <li>采用显式状态机，任何迁移都先 append event，再更新 snapshot。</li>
+                <li>单任务同一时刻只有一个写入租约；不支持两个执行者同时推进。</li>
+                <li>预算按步骤、token、费用和 wall time 分别限制。</li>
+                <li>取消是持久状态，必须传播给模型、工具、审批和子任务。</li>
+                <li>恢复时根据 last stable event 决定重试、吸收结果或等待人工确认。</li>
+              </ul>
+              <h4>不负责</h4>
+              <p>工具业务逻辑、浏览器 API、消息渲染和模型协议解析。</p>
+            </div>
+            <div>
+              <h4>核心契约</h4>
+              <pre><code>interface TaskRuntime {
+  start(command: StartTask): Promise&lt;TaskId&gt;;
+  run(taskId: string): Promise&lt;void&gt;;
+  pause(taskId: string, reason: string): Promise&lt;void&gt;;
+  resume(taskId: string): Promise&lt;void&gt;;
+  cancel(taskId: string): Promise&lt;void&gt;;
+  resolveApproval(decision: ApprovalDecision): Promise&lt;void&gt;;
+  recover(taskId: string): Promise&lt;RecoveryDecision&gt;;
+}</code></pre>
+            </div>
+          </div>
+          <h4>交互</h4>
+          <p>接收 UI 的 Start/Pause/Resume/Cancel，调用 StepEngine 推进一次模型或工具步骤；每一步通过 TaskRepository 持久化，通过 EventBus 向 UI 投影。收到 ApprovalService 决议后从 waiting_approval 恢复。</p>
+          <h4>借鉴与增强</h4>
+          <p>保留上游的单会话队列、running 锁和 AbortController 语义；新增 lease、revision、显式 waiting 状态和恢复决策，避免只依赖内存 loop。</p>
+          <h4>验收</h4>
+          <ul class="checklist">
+            <li>关闭 UI、刷新扩展和 worker 重启后任务可恢复。</li>
+            <li>取消后不再产生新模型请求或工具副作用。</li>
+            <li>同一任务并发执行请求被租约拒绝。</li>
+            <li>预算耗尽进入 paused，不会静默失败。</li>
+          </ul>
+        </article>
+
+        <div class="diagram-card">
+          <div class="mermaid">
+stateDiagram-v2
+  [*] --> queued
+  queued --> running: claim lease
+  running --> waiting_model: request model
+  waiting_model --> running: valid response
+  running --> waiting_tool: execute tool
+  waiting_tool --> running: result recorded
+  running --> waiting_approval: policy asks
+  waiting_approval --> waiting_tool: allow once
+  waiting_approval --> running: deny
+  running --> waiting_user: manual action
+  waiting_user --> running: continue
+  running --> paused: budget / user pause
+  paused --> running: resume
+  running --> completed: verified
+  running --> failed: permanent error
+  running --> cancelled: cancel
+  waiting_model --> cancelled: cancel
+  waiting_tool --> cancelled: cancel
+  waiting_approval --> cancelled: cancel
+  waiting_user --> cancelled: cancel
+  completed --> [*]
+  failed --> [*]
+  cancelled --> [*]
+          </div>
+          <div class="diagram-caption">图 3 · 任务状态机</div>
+        </div>
+      </section>
+
+      <section id="module-store">
+        <div class="section-head"><span class="section-no">07</span><h2>TaskRepository / EventLog</h2></div>
+        <p class="lede">事实数据与 UI 时间线分离。事件是不可变审计记录，快照是可快速恢复的物化视图。</p>
+
+        <article class="module" id="spec-store" data-reviewable="spec-store" data-review-title="TaskRepository / EventLog 模块">
+          <div class="module-head">
+            <div class="module-index">M2</div>
+            <div class="module-title"><h3>TaskRepository / EventLog</h3><p>持久任务、事件、回放和 artifact 索引</p></div>
+            <span class="tag core">P0 · Core</span>
+          </div>
+          <div class="baseline"><span>B1 timeline reducer</span><span>B7 IndexedDB</span><span>replay</span></div>
+          <div class="module-grid">
+            <div>
+              <h4>设计要点</h4>
+              <ul>
+                <li>任务内事件严格单调 seq；事件 ID 全局唯一。</li>
+                <li>快照保存 revision 和 lastEventSeq，写入时做 CAS。</li>
+                <li>租约包含 ownerId、expiresAt 和 fencing token。</li>
+                <li>长结果、截图和日志进入 ArtifactStore，事件只保存摘要与引用。</li>
+                <li>事件 schema 版本化，升级提供 replay migration。</li>
+              </ul>
+            </div>
+            <div>
+              <h4>核心契约</h4>
+              <pre><code>interface TaskRepository {
+  create(task: TaskRecord): Promise&lt;void&gt;;
+  load(taskId: string): Promise&lt;TaskBundle | null&gt;;
+  append(event: AgentEvent, lease: FencingLease): Promise&lt;void&gt;;
+  saveSnapshot(snapshot: TaskSnapshot, expectedRevision: number): Promise&lt;void&gt;;
+  replay(taskId: string, throughSeq?: number): AsyncIterable&lt;AgentEvent&gt;;
+  acquireLease(taskId: string, ownerId: string): Promise&lt;FencingLease&gt;;
+}</code></pre>
+            </div>
+          </div>
+          <h4>交互</h4>
+          <p>Runtime 每次状态迁移调用 append；成功后再 saveSnapshot。UI 从 snapshot 加增量事件重建；Eval 可以重放到任意事件位置。ArtifactStore 提供受控的正文和二进制读取。</p>
+          <h4>借鉴与增强</h4>
+          <p>借鉴上游 chat records/blobs/chats、时间线 reducer 和 replay 修复逻辑。新增 fencing lease、CAS revision 与副作用账本，解决多个执行上下文同时写入的问题。</p>
+          <h4>验收</h4>
+          <ul class="checklist">
+            <li>重复 append 同一 eventId 不产生重复状态。</li>
+            <li>旧 lease 的写请求被拒绝。</li>
+            <li>从任意合法快照重放事件得到相同投影。</li>
+            <li>存储升级后旧会话可迁移或明确标记不可迁移。</li>
+          </ul>
+        </article>
+      </section>
+
+      <section id="module-model">
+        <div class="section-head"><span class="section-no">08</span><h2>ModelGateway</h2></div>
+        <p class="lede">统一供应商差异，向下暴露稳定的模型事件，不让主循环直接理解 Chat Completions 或 Messages 协议。</p>
+
+        <article class="module" id="spec-model" data-reviewable="spec-model" data-review-title="ModelGateway 模块">
+          <div class="module-head">
+            <div class="module-index">M3</div>
+            <div class="module-title"><h3>ModelGateway</h3><p>流式协议、重试、模型恢复和 usage</p></div>
+            <span class="tag borrow">P0 · Port + adapt</span>
+          </div>
+          <div class="baseline"><span>B6 providers.js</span><span>retry</span><span>model recovery</span><span>media degrade</span></div>
+          <div class="module-grid">
+            <div>
+              <h4>设计要点</h4>
+              <ul>
+                <li>统一 ModelEvent：text delta、reasoning、tool call delta、usage、finish、error。</li>
+                <li>只处理一次模型请求，不执行工具；工具调用结果回传给 StepEngine。</li>
+                <li>429/网络错误指数退避，保留 provider request ID 和 Retry-After。</li>
+                <li>上下文溢出、媒体过大、协议结构错误走可观测降级路径。</li>
+                <li>模型不可用时允许切换连接，但必须记录 from/to 与原因。</li>
+                <li>所有密钥只通过连接解析器注入，不进入事件和日志。</li>
+              </ul>
+            </div>
+            <div>
+              <h4>核心契约</h4>
+              <pre><code>interface ModelGateway {
+  stream(request: ModelRequest, signal: AbortSignal): AsyncIterable&lt;ModelEvent&gt;;
+  discoverModels(connection: Connection): Promise&lt;ModelDescriptor[]&gt;;
+  classifyError(error: unknown): StructuredError;
+  withBudget(request: ModelRequest, budget: OutputBudget): ModelRequest;
+}</code></pre>
+            </div>
+          </div>
+          <h4>交互</h4>
+          <p>StepEngine 构建消息和工具 schema，ModelGateway 输出规范化事件。ContextManager 接收 overflow 结果并压缩；TaskRuntime 接收模型切换通知并更新配置快照。</p>
+          <h4>借鉴与增强</h4>
+          <p>直接借用上游的 provider 转换、错误分类、媒体降级、重试和模型切换行为。目标设计增加统一 usage/cost 事件与可配置重试策略，便于后续沙盒 Agent 共用。</p>
+          <h4>验收</h4>
+          <ul class="checklist">
+            <li>OpenAI 兼容和 Anthropic fixture 产生相同内部事件序列。</li>
+            <li>429、连接中断、超时和内容过滤有不同错误代码。</li>
+            <li>模型切换后 usage 连续累计。</li>
+            <li>API key 不出现在 trace、tool result 或 UI 文本中。</li>
+          </ul>
+        </article>
+      </section>
+
+      <section id="module-context">
+        <div class="section-head"><span class="section-no">09</span><h2>ContextManager</h2></div>
+        <p class="lede">优先复用上游经过真机验证的压缩行为，再扩展 artifact 引用与来源标签。</p>
+
+        <article class="module" id="spec-context" data-reviewable="spec-context" data-review-title="ContextManager 模块">
+          <div class="module-head">
+            <div class="module-index">M4</div>
+            <div class="module-title"><h3>ContextManager</h3><p>预算、压缩、溢出恢复和大结果 artifact</p></div>
+            <span class="tag borrow">P0 · Port first</span>
+          </div>
+          <div class="baseline"><span>B3 compaction.js</span><span>token estimate</span><span>overflow recovery</span><span>media degrade</span></div>
+          <div class="module-grid">
+            <div>
+              <h4>设计要点</h4>
+              <ul>
+                <li>输入按 system、task、plan、conversation、observation、reserve 分区。</li>
+                <li>达到预警阈值先减少可重建观察，再触发结构化 compaction。</li>
+                <li>保留最近用户消息和明确 pinned facts；摘要记录覆盖 event seq。</li>
+                <li>工具大输出进入 artifact，模型只接收摘要、长度和读取引用。</li>
+                <li>图片/音频过多时先降级为标签，再移除媒体后重试。</li>
+                <li>压缩失败不破坏原历史；任务进入 paused 或 error。</li>
+              </ul>
+            </div>
+            <div>
+              <h4>核心契约</h4>
+              <pre><code>interface ContextManager {
+  build(task: TaskSnapshot, events: AgentEvent[]): ModelContext;
+  estimate(context: ModelContext): TokenEstimate;
+  compact(input: CompactInput, signal: AbortSignal): Promise&lt;ContextCheckpoint&gt;;
+  handleOverflow(error: ContextOverflow, signal: AbortSignal): Promise&lt;ModelContext&gt;;
+  artifactize(result: ToolResult): Promise&lt;ArtifactRef&gt;;
+}</code></pre>
+            </div>
+          </div>
+          <h4>交互</h4>
+          <p>StepEngine 在模型请求前调用 build；ModelGateway 返回 overflow 时调用 handleOverflow；成功后 append context.compacted 事件并保存 checkpoint。ToolExecutor 对大结果调用 artifactize。</p>
+          <h4>借鉴与增强</h4>
+          <p>B3 是本设计最重要的行为来源：token 估算、保留消息、handoff 摘要、媒体降级、结构化 normalization 都应先跑 fixture 对齐。新设计额外加入来源标签和 artifact 引用，但不能牺牲上游已验证的压缩顺序。</p>
+          <h4>验收</h4>
+          <ul class="checklist">
+            <li>压缩前后 token 下降且关键用户消息保留。</li>
+            <li>媒体降级不改变任务最终语义。</li>
+            <li>大工具输出只以引用进入后续上下文。</li>
+            <li>压缩取消后恢复原 checkpoint，不产生半写状态。</li>
+          </ul>
+        </article>
+      </section>
+
+      <section id="module-tools">
+        <div class="section-head"><span class="section-no">10</span><h2>ToolExecutor</h2></div>
+        <p class="lede">所有副作用都从这个入口通过。工具执行器本身不判断任务是否完成，也不更新 Agent 业务状态。</p>
+
+        <article class="module" id="spec-tools" data-reviewable="spec-tools" data-review-title="ToolExecutor 模块">
+          <div class="module-head">
+            <div class="module-index">M5</div>
+            <div class="module-title"><h3>ToolExecutor</h3><p>参数校验、策略授权、并发、执行和取消</p></div>
+            <span class="tag borrow">P0 · Port + unify</span>
+          </div>
+          <div class="baseline"><span>B2 tool batch</span><span>schema validation</span><span>PathAccessScheduler</span><span>AbortSignal</span></div>
+          <div class="module-grid">
+            <div>
+              <h4>设计要点</h4>
+              <ul>
+                <li>收到 tool call 后先 JSON parse 和 schema 校验，失败绝不按空参数执行。</li>
+                <li>每个工具声明 capabilities、effects、risk、timeout、cancel 和 idempotent。</li>
+                <li>只读工具可以并发；读写冲突由资源锁或 PathAccessScheduler 串行。</li>
+                <li>执行前写入 tool.started 和 idempotency key，执行后写 tool.completed/failed。</li>
+                <li>真实的取消要传递到 Provider 和底层 API，不能只做 Promise race。</li>
+                <li>大结果交 ArtifactStore，返回 ToolResult 引用而不是无限文本。</li>
+              </ul>
+            </div>
+            <div>
+              <h4>核心契约</h4>
+              <pre><code>interface ToolDefinition&lt;I, O&gt; {
+  name: string;
+  capabilities: Capability[];
+  effects: Effect[];
+  risk: Risk;
+  idempotent: boolean;
+  inputSchema: Schema&lt;I&gt;;
+  outputSchema: Schema&lt;O&gt;;
+  execute(input: I, ctx: ToolContext): Promise&lt;O&gt;;
+  cancel?(callId: string): Promise&lt;void&gt;;
+}
+
+interface ToolExecutor {
+  prepare(calls: ToolCall[]): PreparedCall[];
+  executeBatch(calls: ToolCall[], signal: AbortSignal): Promise&lt;ToolResult[]&gt;;
+  cancel(taskId: string, callId: string): Promise&lt;void&gt;;
+}</code></pre>
+            </div>
+          </div>
+          <h4>交互</h4>
+          <p>StepEngine 把同一模型响应中的 calls 交给 ToolExecutor。ToolExecutor 调用 PolicyEngine 获得 allow/deny/approval，再调用 ExecutionProvider。结果和错误进入 EventLog 并回填模型消息。</p>
+          <h4>借鉴与增强</h4>
+          <p>上游已经实现参数校验、批次调度、路径冲突、用户中断和结果截断。首版直接复用这些行为；新增统一 idempotency ledger 和 ToolDefinition 的跨环境 effects 声明。</p>
+          <h4>验收</h4>
+          <ul class="checklist">
+            <li>非法 JSON 被拒绝且模型能收到结构化修复提示。</li>
+            <li>只读并发不破坏结果顺序。</li>
+            <li>同一文件或资源的冲突写操作不会并发执行。</li>
+            <li>取消发生后底层工具在可测时间内停止。</li>
+            <li>重复调用不会重复产生已知副作用。</li>
+          </ul>
+        </article>
+      </section>
+
+      <section id="module-policy">
+        <div class="section-head"><span class="section-no">11</span><h2>PolicyEngine / ApprovalService</h2></div>
+        <p class="lede">保留上游按站点授权的易用性，同时把后端决策抽象成跨浏览器、文件、网络和进程的能力策略。</p>
+
+        <article class="module" id="spec-policy" data-reviewable="spec-policy" data-review-title="PolicyEngine / ApprovalService 模块">
+          <div class="module-head">
+            <div class="module-index">M6</div>
+            <div class="module-title"><h3>PolicyEngine / ApprovalService</h3><p>能力策略、风险决定和可恢复审批</p></div>
+            <span class="tag core">P0 · Security critical</span>
+          </div>
+          <div class="baseline"><span>B5 domain permissions</span><span>pending approval registry</span><span>permission restore</span></div>
+          <div class="module-grid">
+            <div>
+              <h4>设计要点</h4>
+              <ul>
+                <li>PolicyEngine 返回 allow / ask / deny，不直接弹 UI。</li>
+                <li>审批绑定 taskId、revision、action digest、目标资源和 TTL。</li>
+                <li>站点授权保留为便捷 profile，但不能覆盖能力硬拒绝。</li>
+                <li>高风险默认逐次确认；full access 只能作为显式受限 profile。</li>
+                <li>所有审批、消费、过期和拒绝都写入事件日志。</li>
+                <li>子 Agent 权限与父权限求交集，永远不能提升。</li>
+              </ul>
+            </div>
+            <div>
+              <h4>核心契约</h4>
+              <pre><code>interface PolicyEngine {
+  decide(action: NormalizedAction, task: TaskSnapshot): PolicyDecision;
+  createApproval(action: NormalizedAction, task: TaskSnapshot): ApprovalRequest;
+  validateApproval(input: ApprovalDecision): ApprovalValidation;
+  consumeApproval(id: string, actionDigest: string): Promise&lt;void&gt;;
+}
+
+type PolicyDecision =
+  | { type: "allow"; reason: string }
+  | { type: "ask"; approval: ApprovalRequest }
+  | { type: "deny"; reason: StructuredError };</code></pre>
+            </div>
+          </div>
+          <h4>交互</h4>
+          <p>ToolExecutor 在副作用前调用 decide。ask 时 TaskRuntime 进入 waiting_approval；UI 显示审批卡；ApprovalService 验证 revision 和 digest 后，Runtime 回到 waiting_tool。重启后从未过期审批继续等待。</p>
+          <h4>借鉴与增强</h4>
+          <p>上游的域名 + 四类动作授权、挂起审批对账和请求取消都可以保留。扩展点是把 domain action 映射到 capability，并增加 action digest、TTL 和子任务权限求交集。</p>
+          <h4>验收</h4>
+          <ul class="checklist">
+            <li>修改工具参数后旧审批失效。</li>
+            <li>审批等待跨扩展重启仍可见且可继续。</li>
+            <li>子任务无法调用父任务未授予的工具。</li>
+            <li>站点永久授权不能绕过硬拒绝能力。</li>
+          </ul>
+        </article>
+
+        <div class="diagram-card" style="margin-top:18px">
+          <div class="mermaid">
+sequenceDiagram
+  participant R as TaskRuntime
+  participant T as ToolExecutor
+  participant P as PolicyEngine
+  participant U as User / UI
+  participant E as ExecutionProvider
+  R->>T: execute(toolCall)
+  T->>P: decide(action, snapshot)
+  P-->>T: ask + actionDigest
+  T-->>R: waiting_approval
+  R-->>U: approval.requested
+  U->>P: allow once
+  P->>P: validate revision + TTL
+  P-->>R: approval granted
+  R->>T: resume exact action
+  T->>P: consume approval
+  T->>E: execute
+  E-->>T: result
+  T-->>R: tool.completed
+          </div>
+          <div class="diagram-caption">图 4 · 可恢复审批链</div>
+        </div>
+      </section>
+
+      <section id="module-browser">
+        <div class="section-head"><span class="section-no">12</span><h2>BrowserProvider</h2></div>
+        <p class="lede">第一个执行适配层。保留上游真实浏览器能力，同时把 CDP、标签组和页面工具封装在统一接口后面。</p>
+
+        <article class="module" id="spec-browser" data-reviewable="spec-browser" data-review-title="BrowserProvider 模块">
+          <div class="module-head">
+            <div class="module-index">M7</div>
+            <div class="module-title"><h3>BrowserProvider</h3><p>标签组、CDP、frame、页面工具和下载</p></div>
+            <span class="tag borrow">P0 · Reuse behavior</span>
+          </div>
+          <div class="baseline"><span>B1 tab-group</span><span>B2 page tools</span><span>frame-read</span><span>CDP guard</span></div>
+          <div class="module-grid">
+            <div>
+              <h4>设计要点</h4>
+              <ul>
+                <li>一个 Task 绑定一个标签组，子 Agent 默认创建自己的工作标签。</li>
+                <li>封装 attach、Page.enable、dialog guard 和命令超时。</li>
+                <li>提供 snapshot、find、read_page、click、fill、upload、download 等能力。</li>
+                <li>snapshot ref 必须有生命周期和 tabId，不能跨页面误用。</li>
+                <li>frame、PDF、图片等不可读页面返回明确错误而不是空成功。</li>
+                <li>不把 Chrome API 细节泄漏给 Agent 主循环。</li>
+              </ul>
+            </div>
+            <div>
+              <h4>核心契约</h4>
+              <pre><code>interface BrowserProvider extends ExecutionProvider {
+  ensureTaskGroup(taskId: string): Promise&lt;TabGroupId&gt;;
+  getWorkingTab(taskId: string): Promise&lt;TabId | null&gt;;
+  snapshot(tabId: string, options: SnapshotOptions): Promise&lt;PageSnapshot&gt;;
+  navigate(tabId: string, url: string, signal: AbortSignal): Promise&lt;PageInfo&gt;;
+  closeTaskTabs(taskId: string): Promise&lt;void&gt;;
+}</code></pre>
+            </div>
+          </div>
+          <h4>交互</h4>
+          <p>ToolExecutor 调用 BrowserProvider 执行页面动作；Provider 发 chrome.debugger 命令并把 AX/截图/下载结果规范化为 ToolResult。TaskRuntime 持久化 tab group binding，恢复时重新绑定仍存活的标签。</p>
+          <h4>借鉴与增强</h4>
+          <p>上游的标签组隔离、CDP attach 重试、dialog guard、frame 读取、快照 ref 和真实鼠标事件都应保留。新设计只需增加统一 action 模型、artifact 引用和与沙盒 Provider 相同的健康检查。</p>
+          <h4>验收</h4>
+          <ul class="checklist">
+            <li>不同任务标签组互不串页。</li>
+            <li>页面有 JS dialog 时非 dialog 命令被明确阻止。</li>
+            <li>frame/PDF/图片失败有可恢复错误。</li>
+            <li>任务恢复后能重新绑定仍存活的标签组。</li>
+          </ul>
+        </article>
+      </section>
+
+      <section id="module-subagent">
+        <div class="section-head"><span class="section-no">13</span><h2>SubagentCoordinator</h2></div>
+        <p class="lede">上游已经证明子 Agent 的价值；本设计把它的执行、权限、预算和结果契约化。</p>
+
+        <article class="module" id="spec-subagent" data-reviewable="spec-subagent" data-review-title="SubagentCoordinator 模块">
+          <div class="module-head">
+            <div class="module-index">M8</div>
+            <div class="module-title"><h3>SubagentCoordinator</h3><p>子任务树、独立上下文、权限与结果汇总</p></div>
+            <span class="tag borrow">P1 · Port + govern</span>
+          </div>
+          <div class="baseline"><span>B4 runSubagentTask</span><span>child events</span><span>parent abort</span><span>subtask UI</span></div>
+          <div class="module-grid">
+            <div>
+              <h4>设计要点</h4>
+              <ul>
+                <li>第一版只开放 Researcher 和 Reviewer，均为只读角色。</li>
+                <li>子任务从零上下文开始，只接收 brief、facts、artifact refs 和白名单工具。</li>
+                <li>父权限与角色白名单求交集；子任务不能申请提升权限。</li>
+                <li>子任务有独立步骤、token、时间、费用预算。</li>
+                <li>子事件实时投影到父时间线，但最终只回传结构化 ChildResult。</li>
+                <li>父取消递归取消后代；孤儿任务在启动时清扫。</li>
+                <li>写型 Implementer 在 P2 沙盒和 worktree 就绪后再开放。</li>
+              </ul>
+            </div>
+            <div>
+              <h4>核心契约</h4>
+              <pre><code>interface SubagentCoordinator {
+  spawn(parent: TaskSnapshot, spec: ChildTaskSpec): Promise&lt;TaskId&gt;;
+  send(childTaskId: string, message: string): Promise&lt;void&gt;;
+  wait(childTaskId: string, signal: AbortSignal): Promise&lt;ChildResult&gt;;
+  cancelTree(taskId: string, reason: string): Promise&lt;void&gt;;
+  collect(childTaskId: string): Promise&lt;ChildResult | null&gt;;
+}</code></pre>
+            </div>
+          </div>
+          <h4>交互</h4>
+          <p>父 Agent 通过 <code>spawn_agent</code> 工具创建 child TaskRecord。SubagentCoordinator 创建 TaskRuntime 子实例，继承策略交集与独立预算；事件经 EventLog 和 UI 投影，父 Agent 等待结果后显式验证。</p>
+          <h4>借鉴与增强</h4>
+          <p>上游的单类型子 Agent、零上下文 brief、子标签页、实时事件和父 AbortSignal 传播是直接基线。新增角色、权限交集、预算和结构化结果，避免子 Agent 成为隐形的无限成本来源。</p>
+          <h4>验收</h4>
+          <ul class="checklist">
+            <li>子 Agent 启动时看不到父完整 transcript。</li>
+            <li>子 Agent 无法调用父未授权工具。</li>
+            <li>父取消后所有后代停止并产生 cancelled 事件。</li>
+            <li>子结果超过 schema 或缺少证据时不自动并入任务完成。</li>
+          </ul>
+        </article>
+      </section>
+
+      <section id="module-verify">
+        <div class="section-head"><span class="section-no">14</span><h2>Planner / Verifier</h2></div>
+        <p class="lede">保持轻量。计划用于减少迷航，验证用于阻止“模型说完成”。</p>
+
+        <article class="module" id="spec-verify" data-reviewable="spec-verify" data-review-title="Planner / Verifier 模块">
+          <div class="module-head">
+            <div class="module-index">M9</div>
+            <div class="module-title"><h3>Planner / Verifier</h3><p>短计划、进度检测、完成条件和独立验证</p></div>
+            <span class="tag new">P1 · New</span>
+          </div>
+          <div class="baseline"><span>B1 todo compression</span><span>upstream stopReason</span><span>新增 verifier</span></div>
+          <div class="module-grid">
+            <div>
+              <h4>Planner 要点</h4>
+              <ul>
+                <li>计划项只保存短标题、状态和验收信号，不保存长链思考。</li>
+                <li>工具结果更新最近观察、未解决问题和计划状态。</li>
+                <li>连续重复调用、重复失败或预算增长过快触发 replan。</li>
+                <li>用户修改目标时追加目标变更事件，不覆盖旧目标。</li>
+              </ul>
+              <h4>Verifier 要点</h4>
+              <ul>
+                <li>模型声称完成不等于 completed；必须有确定性检查。</li>
+                <li>浏览器任务用观察结果验证；Coding 任务用测试、build、diff 验证。</li>
+                <li>Verifier 失败返回结构化原因，指导下一轮修正。</li>
+              </ul>
+            </div>
+            <div>
+              <h4>核心契约</h4>
+              <pre><code>interface PlanState {
+  goal: string;
+  constraints: string[];
+  items: Array&lt;{
+    id: string;
+    title: string;
+    status: "pending" | "running" | "done" | "failed";
+    acceptance?: string;
+  }&gt;;
+  openQuestions: string[];
+  lastProgressAt: number;
+}
+
+interface Verifier {
+  verify(snapshot: TaskSnapshot, evidence: ArtifactRef[]): Promise&lt;VerificationResult&gt;;
+}</code></pre>
+            </div>
+          </div>
+          <h4>交互</h4>
+          <p>StepEngine 在每次工具结果后更新 Planner；模型返回无工具最终文本时调用 Verifier。Verifier 通过则 TaskRuntime 进入 completed；失败则把结构化原因写回上下文并重新进入 running。</p>
+          <h4>借鉴与增强</h4>
+          <p>上游已有 todo 列表压缩、stop reason 和失败分类，可复用其状态表述。新设计增加显式验收信号和 Verifier，避免浏览器 Agent 的“文本完成”直接升级为 Coding Agent 的“代码完成”。</p>
+          <h4>验收</h4>
+          <ul class="checklist">
+            <li>相同无效工具连续调用达到阈值时触发重规划。</li>
+            <li>无证据的完成声明不会进入 completed。</li>
+            <li>计划更新不会丢失用户原始目标。</li>
+            <li>Coding task 测试失败时不会生成成功结果。</li>
+          </ul>
+        </article>
+      </section>
+
+      <section id="module-trace">
+        <div class="section-head"><span class="section-no">15</span><h2>TraceRecorder / EvalHarness</h2></div>
+        <p class="lede">上游的高测试量是核心资产。本模块把“可运行”固化为“可重复验证”。</p>
+
+        <article class="module" id="spec-trace" data-reviewable="spec-trace" data-review-title="TraceRecorder / EvalHarness 模块">
+          <div class="module-head">
+            <div class="module-index">M10</div>
+            <div class="module-title"><h3>TraceRecorder / EvalHarness</h3><p>结构化 trace、脱敏、回放和场景评测</p></div>
+            <span class="tag borrow">P0/P1 · Port discipline</span>
+          </div>
+          <div class="baseline"><span>B8 unit tests</span><span>real Chrome smoke</span><span>diagnostics</span><span>inventory gates</span></div>
+          <div class="module-grid">
+            <div>
+              <h4>设计要点</h4>
+              <ul>
+                <li>每个 model/tool/approval/child 调用都是带父子关系的 span。</li>
+                <li>记录延迟、token、费用、重试次数、错误代码和 artifact 引用。</li>
+                <li>记录前执行字段级脱敏；full body 只进入受控 artifact。</li>
+                <li>Eval 使用脚本化模型、假 Provider、真实工具 fixture 和少量联网测试。</li>
+                <li>以任务结果和副作用状态判定成功，不比较完整模型文本。</li>
+                <li>真机 smoke 验证扩展安装、Service Worker 重启、BYOK 和布局。</li>
+              </ul>
+            </div>
+            <div>
+              <h4>核心契约</h4>
+              <pre><code>interface TraceRecorder {
+  startSpan(input: StartSpan): TraceSpan;
+  endSpan(spanId: string, result: SpanResult): void;
+  redact(value: unknown, policy: RedactionPolicy): unknown;
+  export(taskId: string): Promise&lt;ArtifactRef&gt;;
+}
+
+interface EvalCase {
+  id: string;
+  initialTask: TaskRecord;
+  modelScript: ModelEvent[];
+  toolFixtures: Record&lt;string, ToolFixture[]&gt;;
+  expected: {
+    status: TaskStatus;
+    events: string[];
+    sideEffects: SideEffect[];
+  };
+}</code></pre>
+            </div>
+          </div>
+          <h4>交互</h4>
+          <p>TaskRuntime、ModelGateway、ToolExecutor 和 SubagentCoordinator 通过统一 trace context 传播 traceId。EvalHarness 读取同一事件日志并断言状态、工具副作用、恢复行为和审批。UI 只展示摘要和导出 artifact。</p>
+          <h4>借鉴与增强</h4>
+          <p>沿用上游的“真 import 测试、可注入协作方、真机 smoke、产物 inventory”。新设计把 trace 和 Eval 作为内核一等模块，并明确比较副作用而非只比较输出文本。</p>
+          <h4>验收</h4>
+          <ul class="checklist">
+            <li>失败场景可从 trace 定位到具体 step 和 tool call。</li>
+            <li>金丝雀 secret 不出现在 console、事件和导出中。</li>
+            <li>核心 Eval 无网络也能稳定运行。</li>
+            <li>真机 smoke 覆盖 SW 重启和审批恢复。</li>
+          </ul>
+        </article>
+      </section>
+
+      <section id="module-sandbox">
+        <div class="section-head"><span class="section-no">16</span><h2>Workspace / SandboxProvider</h2></div>
+        <p class="lede">先定义接口，后实现沙盒。代码执行不能通过网页 evaluate 偷渡。</p>
+
+        <article class="module" id="spec-sandbox" data-reviewable="spec-sandbox" data-review-title="Workspace / SandboxProvider 模块">
+          <div class="module-head">
+            <div class="module-index">M11</div>
+            <div class="module-title"><h3>Workspace / SandboxProvider</h3><p>受限文件、PTY、测试、网络和 artifact</p></div>
+            <span class="tag future">P2 · Future integration</span>
+          </div>
+          <div class="baseline"><span>upstream browser boundary</span><span>new sandbox boundary</span><span>artifact contract</span></div>
+          <div class="module-grid">
+            <div>
+              <h4>设计要点</h4>
+              <ul>
+                <li>工作区是唯一可写目录，根文件系统和宿主目录只读或不可见。</li>
+                <li>提供 read/write/patch/search/git/test/run/artifact 等原子能力，不把任意 shell 字符串作为唯一接口。</li>
+                <li>PTY 和长进程需要有 session、输出流、超时和取消。</li>
+                <li>网络默认关闭，按域名或代理 allowlist 开通。</li>
+                <li>密钥由 SecretBroker 注入短时环境变量，不进入命令文本和日志。</li>
+                <li>写型子 Agent 使用独立 worktree 或 sandbox，父 Agent 负责 diff 和合并。</li>
+              </ul>
+            </div>
+            <div>
+              <h4>核心契约</h4>
+              <pre><code>interface SandboxProvider extends ExecutionProvider {
+  createWorkspace(taskId: string, template: WorkspaceTemplate): Promise&lt;WorkspaceRef&gt;;
+  readFile(path: string): Promise&lt;FileChunk&gt;;
+  writePatch(patch: UnifiedPatch): Promise&lt;PatchResult&gt;;
+  search(query: SearchQuery): Promise&lt;SearchResult[]&gt;;
+  startProcess(spec: ProcessSpec): Promise&lt;ProcessHandle&gt;;
+  runTests(spec: TestSpec, signal: AbortSignal): Promise&lt;TestReport&gt;;
+  snapshot(workspace: WorkspaceRef): Promise&lt;SnapshotRef&gt;;
+  restore(snapshot: SnapshotRef): Promise&lt;void&gt;;
+}</code></pre>
+            </div>
+          </div>
+          <h4>交互</h4>
+          <p>ToolExecutor 将 fs/process/test 调用路由到 SandboxProvider；PolicyEngine 检查工作区根、网络和命令能力；Verifier 读取 TestReport；ArtifactStore 接收 diff、日志和截图。TaskRuntime 不感知容器实现。</p>
+          <h4>借鉴与增强</h4>
+          <p>上游 BrowserProvider 已经把执行、标签、取消和结果封装得很好；沙盒遵循同样模式，但使用独立进程和资源限制。不要把宿主权限交给浏览器扩展，也不要复用网页浏览器 Profile 作为代码执行环境。</p>
+          <h4>验收</h4>
+          <ul class="checklist">
+            <li>路径穿越和 symlink 逃逸被拒绝。</li>
+            <li>任务只能写自己的工作区。</li>
+            <li>CPU、内存、PID、磁盘和执行时间有硬限制。</li>
+            <li>网络默认关闭，allowlist 之外请求失败。</li>
+            <li>测试失败和进程超时返回结构化结果。</li>
+            <li>快照恢复后工作区内容可重放。</li>
+          </ul>
+        </article>
+      </section>
+
+      <section id="interactions">
+        <div class="section-head"><span class="section-no">17</span><h2>跨模块交互</h2></div>
+        <p class="lede">以下三条链路决定系统是否可靠：主回合、上下文压缩和子 Agent。审批链路见 PolicyEngine。</p>
+
+        <div class="diagram-card">
+          <div class="mermaid">
+sequenceDiagram
+  participant U as UI
+  participant R as TaskRuntime
+  participant S as StepEngine
+  participant C as ContextManager
+  participant M as ModelGateway
+  participant T as ToolExecutor
+  participant P as PolicyEngine
+  participant E as EventLog
+  U->>R: start(goal, budget, policy)
+  R->>E: task.created
+  R->>S: runStep(task)
+  S->>C: build context
+  C-->>S: messages + tool schema
+  S->>M: stream(request)
+  M-->>S: text / tool calls
+  S->>T: executeBatch(calls)
+  T->>P: decide(action)
+  P-->>T: allow / ask / deny
+  T-->>S: structured results
+  S->>E: step.completed
+  S-->>R: next action
+  R-->>U: progress event
+  R->>R: verify and finish
+          </div>
+          <div class="diagram-caption">图 5 · 主 Agent 回合</div>
+        </div>
+
+        <div class="diagram-card" style="margin-top:18px">
+          <div class="mermaid">
+sequenceDiagram
+  participant S as StepEngine
+  participant M as ModelGateway
+  participant C as ContextManager
+  participant A as ArtifactStore
+  participant E as EventLog
+  S->>M: request(context)
+  M-->>S: context overflow
+  S->>C: compact(events, signal)
+  C->>A: persist large outputs
+  C-->>S: ContextCheckpoint
+  S->>E: context.compacted
+  S->>M: retry(request, checkpoint)
+  M-->>S: model events
+          </div>
+          <div class="diagram-caption">图 6 · 上下文溢出恢复</div>
+        </div>
+
+        <div class="diagram-card" style="margin-top:18px">
+          <div class="mermaid">
+sequenceDiagram
+  participant P as Parent Task
+  participant C as SubagentCoordinator
+  participant R as Child Runtime
+  participant E as EventLog
+  P->>C: spawn(ChildTaskSpec)
+  C->>C: policy = parent ∩ role
+  C->>R: create child task
+  R->>E: child events
+  E-->>P: live subagent progress
+  R-->>C: ChildResult
+  C-->>P: verified result envelope
+  P->>P: merge findings / accept
+          </div>
+          <div class="diagram-caption">图 7 · 父 Agent 与只读子 Agent</div>
+        </div>
+      </section>
+
+      <section id="delivery">
+        <div class="section-head"><span class="section-no">18</span><h2>分阶段交付路线</h2></div>
+        <p class="lede">每个阶段以可运行、可测试、可回滚为完成标准。</p>
+
+        <div class="roadmap">
+          <div class="phase">
+            <div class="phase-track"><div class="phase-dot">P0</div></div>
+            <div class="phase-body">
+              <h3>内核与浏览器行为对齐</h3>
+              <p>先建立可回归的 Agent 运行闭环。</p>
+              <ul>
+                <li>TaskRuntime、TaskRepository、EventLog、EventBus</li>
+                <li>ModelGateway、ContextManager、ToolExecutor</li>
+                <li>BrowserProvider、ApprovalService、TraceRecorder</li>
+                <li>移植上游工具参数校验、取消、压缩和模型恢复 fixture</li>
+              </ul>
+            </div>
+          </div>
+          <div class="phase">
+            <div class="phase-track"><div class="phase-dot">P1</div></div>
+            <div class="phase-body">
+              <h3>只读子 Agent 与验证</h3>
+              <p>用两组独立上下文验证任务拆分和结果聚合。</p>
+              <ul>
+                <li>Researcher / Reviewer、ChildBrief、ChildResult</li>
+                <li>父子事件、预算、权限交集和递归取消</li>
+                <li>轻量 Planner、进度检测和 Verifier</li>
+                <li>EvalHarness、真实 Chrome smoke 和 trace 导出</li>
+              </ul>
+            </div>
+          </div>
+          <div class="phase">
+            <div class="phase-track"><div class="phase-dot">P2</div></div>
+            <div class="phase-body">
+              <h3>受控代码工作区</h3>
+              <p>接入沙盒后再提供 Coding 能力。</p>
+              <ul>
+                <li>WorkspaceProvider、read/write/patch/search</li>
+                <li>PTY、测试、build、artifact 和日志</li>
+                <li>独立 worktree、快照、回滚和 diff</li>
+                <li>SecretBroker、网络 allowlist 和资源限制</li>
+              </ul>
+            </div>
+          </div>
+          <div class="phase">
+            <div class="phase-track"><div class="phase-dot">P3</div></div>
+            <div class="phase-body">
+              <h3>写型 Agent 与生产化</h3>
+              <p>只有 P2 安全与恢复验证通过后开放。</p>
+              <ul>
+                <li>Implementer 子 Agent 产出补丁</li>
+                <li>父 Agent 合并、测试和独立审查</li>
+                <li>多窗口、多任务和资源配额</li>
+                <li>发布、审计、成本与质量指标</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="acceptance">
+        <div class="section-head"><span class="section-no">19</span><h2>总体验收与评审清单</h2></div>
+        <p class="lede">以下项目是开发进入下一阶段的门槛，不是功能愿望清单。</p>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3>运行时</h3>
+            <ul class="checklist">
+              <li>任务可暂停、恢复、取消并跨重启保持状态</li>
+              <li>状态迁移都写入事件日志和 revision 快照</li>
+              <li>所有工具副作用有幂等键和审计记录</li>
+              <li>模型、工具和审批都能被真实取消</li>
+              <li>旧执行者的写入被 fencing lease 拒绝</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>Agent 能力</h3>
+            <ul class="checklist">
+              <li>压缩、overflow 恢复和媒体降级通过上游 fixture</li>
+              <li>子 Agent 使用独立上下文、权限和预算</li>
+              <li>工具批次遵守并发和冲突规则</li>
+              <li>完成状态必须经过 Verifier</li>
+              <li>UI 重放得到一致的 timeline 和审批状态</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>安全</h3>
+            <ul class="checklist">
+              <li>站点授权不能绕过能力硬拒绝</li>
+              <li>子 Agent 无法提升父权限</li>
+              <li>Secret、Cookie 和 API key 不进入普通 trace</li>
+              <li>网页和仓库内容始终标记为 untrusted</li>
+              <li>沙盒路径、网络和进程限制有逃逸测试</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>工程</h3>
+            <ul class="checklist">
+              <li>核心模块可用假模型和假 Provider 单测</li>
+              <li>真机 smoke 覆盖加载、重启、BYOK 和布局</li>
+              <li>构建、产物清单和版本闸门进入 CI</li>
+              <li>Eval 报告包含副作用、成本和恢复指标</li>
+              <li>所有评审批注导出为可追溯修订 JSON</li>
+            </ul>
+          </div>
+        </div>
+
+        <details>
+          <summary>开发前必须确认的设计决策</summary>
+          <ul>
+            <li>TaskRuntime 首版放在扩展 offscreen document、后台服务，还是服务化运行？</li>
+            <li>首版是否保留上游“完全授权”模式，还是只提供受限 profile？</li>
+            <li>ContextManager 首版直接移植上游算法，还是先做最小兼容接口？</li>
+            <li>只读子 Agent 的最大并发和最大预算分别是多少？</li>
+            <li>代码沙盒优先容器还是 microVM？网络默认是否完全关闭？</li>
+            <li>是否要求兼容上游现有会话、技能和站点授权数据？</li>
+          </ul>
+        </details>
+
+        <div class="callout warn">
+          <div>
+            <strong>下一步</strong>
+            <p>请在页面内逐模块批注，并优先标出“必须修改”和“确认决策”。评审完成后导出修订 JSON；下一轮开发将以该修订包作为最新约束，而不是以本轮默认文本直接开工。</p>
+          </div>
+        </div>
+      </section>
+
+      <footer class="footer">
+        tinyai Agent 2.0 · Modular Implementation Design · Review v0.1 · 2026-10-30
+      </footer>
+    </main>
+  </div>
+
+  <aside class="annotation-drawer" id="annotation-drawer" role="dialog" aria-modal="false" aria-labelledby="drawer-title" aria-hidden="true">
+    <div class="drawer-head">
+      <h2 id="drawer-title">修订批注</h2>
+      <button class="icon-button drawer-close" id="drawer-close" type="button" aria-label="关闭批注面板">×</button>
+    </div>
+    <p class="drawer-tip">在文档中选中文字后点击“标注模式”或模块批注按钮，可把选中内容作为上下文。修订意见保存在浏览器本地。</p>
+    <div class="field">
+      <label for="note-target">标注对象</label>
+      <div class="field-selection" id="note-target">尚未选择模块</div>
+    </div>
+    <div class="field">
+      <label for="note-type">类型</label>
+      <select id="note-type">
+        <option value="comment">修改建议</option>
+        <option value="must">必须修改</option>
+        <option value="decision">确认设计决策</option>
+        <option value="question">待确认问题</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="note-text">修订内容</label>
+      <textarea id="note-text" placeholder="例如：子 Agent 第一版只允许 1 个并发，避免多个任务争用同一个标签组。"></textarea>
+    </div>
+    <div class="drawer-actions">
+      <button class="primary-button" id="save-note" type="button">保存批注</button>
+      <button class="secondary-button" id="new-note" type="button">清空当前输入</button>
+      <button class="secondary-button" id="export-review-2" type="button">导出修订 JSON</button>
+    </div>
+    <h3 style="margin-top:24px">当前文档批注</h3>
+    <div class="notes-list" id="notes-list"></div>
+    <div class="drawer-actions" style="margin-top:20px">
+      <button class="danger-button" id="clear-notes" type="button">清空全部批注</button>
+    </div>
+  </aside>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11.6.0/dist/mermaid.min.js"></script>
+  <script>
+    (() => {
+      const DOC_ID = "tinyai-hybrid-agent-modular-design";
+      const DOC_VERSION = "0.1";
+      const REVIEW_KEY = "tinyai-hybrid-agent-design-review-v1";
+      const root = document.documentElement;
+      const drawer = document.getElementById("annotation-drawer");
+      const targetEl = document.getElementById("note-target");
+      const noteType = document.getElementById("note-type");
+      const noteText = document.getElementById("note-text");
+      const notesList = document.getElementById("notes-list");
+      const countEl = document.getElementById("review-count");
+      const toast = document.getElementById("toast");
+      let annotations = [];
+      let activeTarget = null;
+      let editingId = null;
+      let reviewMode = false;
+
+      try {
+        const saved = JSON.parse(localStorage.getItem(REVIEW_KEY) || "[]");
+        annotations = Array.isArray(saved) ? saved : [];
+      } catch {
+        annotations = [];
+      }
+
+      const escapeHtml = (value) => String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+      const showToast = (message) => {
+        toast.textContent = message;
+        toast.classList.add("is-visible");
+        clearTimeout(showToast.timer);
+        showToast.timer = setTimeout(() => toast.classList.remove("is-visible"), 1800);
+      };
+      const persist = () => {
+        try {
+          localStorage.setItem(REVIEW_KEY, JSON.stringify(annotations));
+          showToast("批注已保存到本浏览器");
+        } catch {
+          showToast("本地存储不可用，请立即导出修订包");
+        }
+        renderNotes();
+      };
+
+      const targetInfo = (element) => {
+        const block = element.closest("[data-reviewable]") || element.closest("section");
+        const section = element.closest("section");
+        const title = block?.dataset.reviewTitle || block?.querySelector("h2,h3")?.textContent?.trim() || section?.querySelector("h2")?.textContent?.trim() || "文档";
+        return {
+          id: block?.dataset.reviewable || section?.id || "document",
+          title,
+          sectionId: section?.id || block?.id || ""
+        };
+      };
+
+      const openDrawer = (element, existingId = null) => {
+        const selection = window.getSelection()?.toString().trim() || "";
+        const existing = existingId ? annotations.find((item) => item.id === existingId) : null;
+        const info = existing
+          ? {id: existing.targetId, title: existing.targetTitle, sectionId: existing.sectionId}
+          : element ? targetInfo(element) : (activeTarget || {id:"document",title:"文档全局",sectionId:""});
+        activeTarget = info;
+        editingId = existingId;
+        targetEl.innerHTML = `<strong>${escapeHtml(info.title)}</strong><br><span>${escapeHtml(info.id)}</span>${selection ? `<br><br>选中文本：${escapeHtml(selection.slice(0, 320))}` : ""}`;
+        noteType.value = existing?.type || "comment";
+        noteText.value = existing?.comment || "";
+        drawer.classList.add("is-open");
+        drawer.setAttribute("aria-hidden", "false");
+        renderNotes();
+        setTimeout(() => noteText.focus(), 120);
+      };
+
+      const closeDrawer = () => {
+        drawer.classList.remove("is-open");
+        drawer.setAttribute("aria-hidden", "true");
+      };
+
+      const renderNotes = () => {
+        countEl.textContent = String(annotations.length);
+        const summary = document.querySelector(".review-summary");
+        if (summary) summary.firstElementChild.textContent = `修订状态 · ${annotations.length} 条`;
+        document.querySelectorAll(".review-pin").forEach((button) => {
+          const target = button.dataset.target;
+          const count = annotations.filter((item) => item.targetId === target).length;
+          button.textContent = count ? `批注 ${count}` : "批注";
+          button.classList.toggle("has-notes", count > 0);
+        });
+        if (!annotations.length) {
+          notesList.innerHTML = '<div class="drawer-tip">还没有批注。</div>';
+          return;
+        }
+        notesList.innerHTML = annotations
+          .slice()
+          .sort((a, b) => b.updatedAt - a.updatedAt)
+          .map((item) => `
+            <article class="note">
+              <div class="note-head">
+                <span class="note-status ${escapeHtml(item.type)}">${escapeHtml(statusLabel(item.type))}</span>
+                <button type="button" data-jump="${escapeHtml(item.sectionId)}" style="border:0;background:transparent;color:inherit;cursor:pointer;padding:0">${escapeHtml(item.targetTitle)}</button>
+                <span>${new Date(item.updatedAt).toLocaleString("zh-CN", {hour12:false})}</span>
+              </div>
+              ${item.selection ? `<div class="drawer-tip" style="margin-bottom:6px">“${escapeHtml(item.selection)}”</div>` : ""}
+              <p>${escapeHtml(item.comment)}</p>
+              <div class="note-actions">
+                <button type="button" data-edit="${escapeHtml(item.id)}">编辑</button>
+                <button type="button" data-delete="${escapeHtml(item.id)}">删除</button>
+              </div>
+            </article>
+          `).join("");
+      };
+
+      const statusLabel = (type) => ({comment:"修改建议", must:"必须修改", decision:"已确认决策", question:"待确认"}[type] || "修改建议");
+
+      const saveNote = () => {
+        const comment = noteText.value.trim();
+        if (!comment) {
+          showToast("请输入修订内容");
+          noteText.focus();
+          return;
+        }
+        const now = Date.now();
+        if (editingId) {
+          const index = annotations.findIndex((item) => item.id === editingId);
+          if (index >= 0) annotations[index] = {...annotations[index], type:noteType.value, comment, updatedAt:now};
+        } else {
+          annotations.push({
+            id: crypto.randomUUID ? crypto.randomUUID() : `${now}-${Math.random()}`,
+            targetId: activeTarget.id,
+            targetTitle: activeTarget.title,
+            sectionId: activeTarget.sectionId,
+            selection: window.getSelection()?.toString().trim() || "",
+            type: noteType.value,
+            comment,
+            createdAt: now,
+            updatedAt: now,
+            docVersion: DOC_VERSION
+          });
+        }
+        editingId = null;
+        noteText.value = "";
+        persist();
+      };
+
+      const exportReview = async () => {
+        const payload = {
+          schemaVersion: 1,
+          documentId: DOC_ID,
+          documentVersion: DOC_VERSION,
+          documentFile: "tinyai-hybrid-agent-modular-design.html",
+          exportedAt: new Date().toISOString(),
+          annotations
+        };
+        const text = JSON.stringify(payload, null, 2);
+        const name = `tinyai-design-review-${new Date().toISOString().slice(0,10)}.json`;
+        try {
+          if (window.showSaveFilePicker) {
+            const handle = await window.showSaveFilePicker({
+              suggestedName: name,
+              types: [{description:"tinyai review JSON", accept:{"application/json":[".json"]}}]
+            });
+            const writable = await handle.createWritable();
+            await writable.write(text);
+            await writable.close();
+            showToast("修订包已保存");
+            return;
+          }
+        } catch (error) {
+          if (error?.name === "AbortError") return;
+        }
+        const url = URL.createObjectURL(new Blob([text], {type:"application/json"}));
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = name;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1500);
+        showToast("修订包已下载");
+      };
+
+      const importReview = async (file) => {
+        if (!file) return;
+        try {
+          const data = JSON.parse(await file.text());
+          if (!Array.isArray(data.annotations)) throw new Error("invalid format");
+          const byId = new Map(annotations.map((item) => [item.id, item]));
+          for (const item of data.annotations) {
+            if (item && data.documentId === DOC_ID && item.comment) byId.set(item.id, item);
+          }
+          annotations = Array.from(byId.values());
+          persist();
+          showToast(`已导入 ${data.annotations.length} 条批注`);
+        } catch {
+          showToast("导入失败：不是有效的修订 JSON");
+        }
+      };
+
+      document.querySelectorAll("section[id], article[id]").forEach((block) => {
+        if (!block.dataset.reviewable) block.dataset.reviewable = block.id;
+        if (!block.dataset.reviewTitle) block.dataset.reviewTitle = block.querySelector("h2,h3")?.textContent?.trim() || block.id;
+      });
+
+      document.querySelectorAll(".section-head").forEach((head) => {
+        const section = head.closest("[data-reviewable]");
+        if (!section) return;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "review-pin";
+        button.dataset.target = section.dataset.reviewable;
+        button.textContent = "批注";
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          openDrawer(section);
+        });
+        head.appendChild(button);
+      });
+
+      document.querySelectorAll(".module-head").forEach((head) => {
+        const module = head.closest("[data-reviewable]");
+        if (!module) return;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "review-pin";
+        button.dataset.target = module.dataset.reviewable;
+        button.textContent = "批注";
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          openDrawer(module);
+        });
+        head.appendChild(button);
+      });
+
+      document.getElementById("review-toggle").addEventListener("click", (event) => {
+        reviewMode = !reviewMode;
+        document.body.classList.toggle("review-mode", reviewMode);
+        event.currentTarget.setAttribute("aria-pressed", String(reviewMode));
+        event.currentTarget.classList.toggle("is-active", reviewMode);
+        showToast(reviewMode ? "标注模式：点击模块区域添加批注" : "已退出标注模式");
+      });
+      document.getElementById("open-review").addEventListener("click", () => openDrawer(activeTarget ? document.querySelector(`[data-reviewable="${activeTarget.id}"]`) : document.querySelector("#summary")));
+      document.getElementById("drawer-close").addEventListener("click", closeDrawer);
+      document.getElementById("save-note").addEventListener("click", saveNote);
+      document.getElementById("new-note").addEventListener("click", () => { editingId = null; noteText.value = ""; noteText.focus(); });
+      document.getElementById("export-review").addEventListener("click", exportReview);
+      document.getElementById("export-review-2").addEventListener("click", exportReview);
+      document.getElementById("import-review").addEventListener("click", () => document.getElementById("import-review-file").click());
+      document.getElementById("import-review-file").addEventListener("change", (event) => importReview(event.target.files?.[0]));
+      document.getElementById("clear-notes").addEventListener("click", () => {
+        if (!annotations.length) return;
+        if (confirm("确定清空全部本机批注吗？建议先导出修订 JSON。")) {
+          annotations = [];
+          persist();
+        }
+      });
+      document.addEventListener("click", (event) => {
+        if (!reviewMode) return;
+        const interactive = event.target.closest("button,a,input,select,textarea,summary,.mermaid");
+        if (interactive) return;
+        const block = event.target.closest("[data-reviewable]");
+        if (!block) return;
+        openDrawer(block);
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeDrawer();
+      });
+      notesList.addEventListener("click", (event) => {
+        const edit = event.target.closest("[data-edit]");
+        const del = event.target.closest("[data-delete]");
+        const jump = event.target.closest("[data-jump]");
+        if (edit) openDrawer(null, edit.dataset.edit);
+        if (del && confirm("删除这条批注吗？")) {
+          annotations = annotations.filter((item) => item.id !== del.dataset.delete);
+          persist();
+        }
+        if (jump) {
+          document.getElementById(jump.dataset.jump)?.scrollIntoView({behavior:"smooth", block:"start"});
+        }
+      });
+      document.getElementById("print-button").addEventListener("click", () => window.print());
+
+      const themeToggle = document.getElementById("theme-toggle");
+      const savedTheme = localStorage.getItem("tinyai-modular-theme");
+      root.dataset.theme = savedTheme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      themeToggle.textContent = root.dataset.theme === "dark" ? "☀" : "◐";
+      themeToggle.addEventListener("click", async () => {
+        const next = root.dataset.theme === "dark" ? "light" : "dark";
+        root.dataset.theme = next;
+        themeToggle.textContent = next === "dark" ? "☀" : "◐";
+        localStorage.setItem("tinyai-modular-theme", next);
+        await renderMermaid();
+      });
+
+      const sourceNodes = Array.from(document.querySelectorAll(".mermaid"));
+      sourceNodes.forEach((node) => { node.dataset.source = node.textContent.trim(); });
+      async function renderMermaid() {
+        if (!window.mermaid) return;
+        const css = getComputedStyle(root);
+        const vars = {
+          background: css.getPropertyValue("--surface").trim(),
+          primaryColor: css.getPropertyValue("--surface-2").trim(),
+          primaryTextColor: css.getPropertyValue("--text").trim(),
+          primaryBorderColor: css.getPropertyValue("--border-strong").trim(),
+          secondaryColor: css.getPropertyValue("--blue-soft").trim(),
+          tertiaryColor: css.getPropertyValue("--green-soft").trim(),
+          lineColor: css.getPropertyValue("--muted").trim(),
+          fontFamily: getComputedStyle(document.body).fontFamily,
+          fontSize: "13px"
+        };
+        mermaid.initialize({startOnLoad:false, securityLevel:"loose", theme:"base", themeVariables:vars, flowchart:{curve:"basis",htmlLabels:true,padding:14}, sequence:{useMaxWidth:true,wrap:true}, class:{useMaxWidth:true}});
+        sourceNodes.forEach((node) => {
+          node.removeAttribute("data-processed");
+          node.textContent = node.dataset.source;
+        });
+        await mermaid.run({nodes:sourceNodes});
+      }
+      const links = Array.from(document.querySelectorAll(".toc a"));
+      const sections = links.map((link) => document.querySelector(link.getAttribute("href"))).filter(Boolean);
+      const observer = new IntersectionObserver((entries) => {
+        const visible = entries.filter((entry) => entry.isIntersecting).sort((a,b)=>b.intersectionRatio-a.intersectionRatio);
+        if (!visible[0]) return;
+        links.forEach((link) => link.classList.toggle("active", link.getAttribute("href") === "#" + visible[0].target.id));
+      }, {rootMargin:"-15% 0px -70% 0px", threshold:[0.05,0.2,0.5]});
+      sections.forEach((section) => observer.observe(section));
+      renderNotes();
+      renderMermaid();
+    })();
+  </script>
+</body>
+</html>

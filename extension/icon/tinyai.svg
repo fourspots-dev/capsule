@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="12" y1="6" x2="116" y2="122" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4338CA"/>
+      <stop offset=".55" stop-color="#5B4BE6"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+    <linearGradient id="star" x1="91" y1="20" x2="107" y2="38" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#99F6E4"/>
+      <stop offset="1" stop-color="#2DD4BF"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#bg)"/>
+  <text x="64" y="108" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, SF Pro Display, Helvetica Neue, Helvetica, sans-serif" font-size="112" font-weight="600" fill="#FFFFFF">t</text>
+  <path d="M99 22l2.6 7.4 7.4 2.6-7.4 2.6L99 42l-2.6-7.4L89 32l7.4-2.6z" fill="url(#star)"/>
+</svg>

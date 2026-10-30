@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tinyai 完成度审计 v1</title>
+  <style>
+    :root{--bg:#f4f2eb;--paper:#fffdf8;--ink:#17231c;--muted:#647068;--line:#d8d4c8;--green:#176b4d;--soft:#e3f1e9;--amber:#9a5b0a;--amberbg:#f9ead4;--red:#873535;--redbg:#f4dfdf}
+    *{box-sizing:border-box}body{margin:0;color:var(--ink);background:linear-gradient(180deg,#fbfaf5,var(--bg));font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif}a{color:var(--green)}
+    main{width:min(1180px,calc(100% - 36px));margin:auto;padding:52px 0 80px}h1{margin:8px 0 10px;font-size:clamp(36px,7vw,68px);line-height:1.02;letter-spacing:-.05em}.eyebrow{color:var(--green);font-size:12px;font-weight:850;letter-spacing:.14em;text-transform:uppercase}.lede{max-width:850px;color:var(--muted);font-size:18px}
+    .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:28px 0}.metric,.card,table{border:1px solid var(--line);background:var(--paper);border-radius:14px}.metric{padding:18px}.metric b{display:block;color:var(--green);font-size:28px}.metric span{color:var(--muted);font-size:12px}
+    h2{margin:36px 0 14px;font-size:28px;letter-spacing:-.02em}.status{display:inline-block;padding:3px 8px;border-radius:999px;font-size:11px;font-weight:800;white-space:nowrap}.done{color:var(--green);background:var(--soft)}.partial{color:var(--amber);background:var(--amberbg)}.blocked{color:var(--red);background:var(--redbg)}
+    table{width:100%;border-collapse:separate;border-spacing:0;overflow:hidden}th,td{padding:11px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}tr:last-child td{border-bottom:0}th{background:#ebe8de;font-size:12px;text-transform:uppercase;letter-spacing:.05em}code{padding:.12em .35em;border-radius:5px;background:#ecebe5;font:0.9em/1.5 ui-monospace,SFMono-Regular,monospace}
+    .cards{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}.card{padding:20px}.card h3{margin:0 0 7px}.callout{margin:18px 0;padding:17px 19px;border-left:4px solid var(--green);background:var(--soft)}.warn{border-color:var(--amber);background:var(--amberbg)}
+    pre{overflow:auto;padding:16px;border-radius:12px;color:#e8f2ec;background:#17251f;font:12px/1.6 ui-monospace,SFMono-Regular,monospace}li{margin:5px 0}footer{margin-top:40px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+    @media(max-width:800px){.metrics,.cards{grid-template-columns:1fr 1fr}table{min-width:760px}.tablewrap{overflow:auto}}@media(max-width:520px){.metrics,.cards{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">Completion audit · 2026-10-30</div>
+  <h1>tinyai 完成度审计</h1>
+  <p class="lede">逐项核对 Agent 3.0 融合设计与测试方案。结论只采信当前源码、类型检查、确定性测试、真实 Chrome E2E、Live LLM Smoke 和构建产物。</p>
+
+  <div class="metrics">
+    <div class="metric"><b>158</b><span>确定性测试通过</span></div>
+    <div class="metric"><b>2</b><span>真实 Chrome E2E</span></div>
+    <div class="metric"><b>1</b><span>DeepSeek Live Smoke 通过</span></div>
+    <div class="metric"><b>3</b><span>交付构建产物</span></div>
+  </div>
+
+  <h2>模块证据矩阵</h2>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>设计要求</th><th>状态</th><th>权威证据</th></tr></thead>
+    <tbody>
+      <tr><td>Command / ACK / Query / InputLedger</td><td><span class="status done">DONE</span></td><td>FIFO、duplicate、stale、durable ACK、cold query 与属性测试。</td></tr>
+      <tr><td>SessionLifecycle 与 TaskStatus 分离</td><td><span class="status done">DONE</span></td><td>状态机、并发 ensureReady、stop/restart、faulted 与资源释放测试。</td></tr>
+      <tr><td>AgentLoop / Steering / Follow-up / 并行工具</td><td><span class="status done">DONE</span></td><td>事件化循环、completion-order events、source-order messages、Abort 和恢复测试。</td></tr>
+      <tr><td>SessionTree / Branch / Context Edit</td><td><span class="status done">DONE</span></td><td>append-only Entry、defensive copy、fork、context replacement 与 migration 测试。</td></tr>
+      <tr><td>Compaction / Overflow Recovery</td><td><span class="status done">DONE</span></td><td>安全切点、tool call/result 不拆、重复压缩、usage、自动单次 overflow retry。</td></tr>
+      <tr><td>ProductProjection / 五种 Delta</td><td><span class="status done">DONE</span></td><td>snapshot/delta、gap resync、closed delta、live/cold Golden。</td></tr>
+      <tr><td>Model Gateway</td><td><span class="status done">DONE</span></td><td>OpenAI SSE、tool_calls 聚合、retry/fallback、abort、Live DeepSeek。</td></tr>
+      <tr><td>ToolRegistry / Executor</td><td><span class="status done">DONE</span></td><td>Schema、risk/effect、Policy、Hooks、timeout、artifact、并行策略和来源覆盖。</td></tr>
+      <tr><td>Policy / Plan Mode / Approval</td><td><span class="status done">DONE</span></td><td>plan/build/edit/guarded/sandbox-auto、digest、审批和真实 Chrome 审批 E2E。</td></tr>
+      <tr><td>Generic AgentProfile</td><td><span class="status done">DONE</span></td><td>任意名称、来源优先级、权限交集、context/execution、result schema。</td></tr>
+      <tr><td>SubagentCoordinator</td><td><span class="status done">DONE</span></td><td>spawn/send/wait/stop/resume/list、foreground/background、fork context、递归取消、实时行。</td></tr>
+      <tr><td>BrowserProvider</td><td><span class="status done">DONE</span></td><td>tabs、CDP、Frame、AX/ref、真实鼠标、文件、网络、PDF、截图、dialog 与 session drain。</td></tr>
+      <tr><td>Kernel UI Protocol</td><td><span class="status done">DONE</span></td><td>Command-only mutation、Projection rendering、设置、附件、技能、历史、Artifact、审批与 handoff。</td></tr>
+      <tr><td>Session Persistence / Recovery</td><td><span class="status done">DONE</span></td><td>ChromeStorage、cold reconcile、command query、plan/mode、legacy history import、offscreen keepalive。</td></tr>
+      <tr><td>Extensions / Skills / MCP / Hooks</td><td><span class="status done">DONE</span></td><td>来源信任、技能读写、HTTP MCP、declarative hooks、commands/themes registry 和设置 UI。</td></tr>
+      <tr><td>ArtifactStore / Trace / SecretBroker</td><td><span class="status done">DONE</span></td><td>内存/Chrome artifact、大输出引用、trace spans、secret 任务作用域与 redaction。</td></tr>
+      <tr><td>SandboxProvider / PTY / Verifier</td><td><span class="status done">DONE</span></td><td>真实 macOS Seatbelt + InMemory + Docker adapter、lease、文件、exec、PTY、checkpoint、资源清理和强制验证。</td></tr>
+      <tr><td>Network Policy</td><td><span class="status done">DONE</span></td><td>HTTPS/allowlist/private-IP/DNS 结果检查，以及真实 HTTP AllowlistProxy 测试。</td></tr>
+      <tr><td>Coding Agent CLI</td><td><span class="status done">DONE</span></td><td>Docker bind mount、sandbox-auto、artifact、test/typecheck 完成门槛和可执行 bundle。</td></tr>
+      <tr><td>本机受限沙盒 E2E</td><td><span class="status done">DONE</span></td><td>真实 Seatbelt 验证目录写入边界、symlink 逃逸、网络拒绝、超时、checkpoint、PTY 和 Agent 编码闭环。</td></tr>
+      <tr><td>真实 DeepSeek Coding CLI</td><td><span class="status done">DONE</span></td><td>真实模型读取项目、写文件、运行测试，Verifier 独立复验通过。</td></tr>
+      <tr><td>Docker / Proxy sidecar</td><td><span class="status partial">OPTIONAL</span></td><td>Adapter、internal/bridge 双网络 sidecar、镜像与生命周期已实现并契约测试；当前不作为默认环境或完成门禁。</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2>最终门禁</h2>
+  <pre><code>npm run check
+  生产 + 测试 typecheck   PASS
+  158 deterministic tests PASS
+  1 live smoke skipped in normal run
+  extension build         PASS
+  coding CLI build        PASS
+  extension ZIP packaging PASS
+  seed template check     PASS
+
+npm run test:e2e
+  2 Chrome E2E            PASS
+
+Live DeepSeek
+  1 real API smoke         PASS</code></pre>
+
+  <h2>已按本机环境闭环</h2>
+  <div class="cards">
+    <div class="card"><h3>Seatbelt 沙盒</h3><p>使用系统自带 sandbox-exec 在本机完成真实命令与文件系统边界验证，不再依赖 Docker。</p></div>
+    <div class="card"><h3>真实 Coding Agent</h3><p>DeepSeek 在临时项目内完成读取、写入与测试，CLI Verifier 再次独立运行测试并检查结果文件。</p></div>
+  </div>
+  <div class="callout"><strong>完成判定：</strong>产品代码、浏览器运行路径、真实 Chrome E2E、Live LLM、真实本机 Seatbelt 和 Coding CLI 闭环均已完成。Docker 作为可选部署 Provider，不再阻塞目标。</div>
+
+  <footer>源码：<code>src/core</code>, <code>src/adapters</code>, <code>src/runtime</code>, <code>src/sidepanel</code>, <code>src/cli</code> · 测试：<code>tests/</code></footer>
+</main>
+</body>
+</html>

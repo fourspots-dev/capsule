@@ -1,0 +1,4 @@
+node_modules/
+dist/
+extension/seed.js
+.DS_Store

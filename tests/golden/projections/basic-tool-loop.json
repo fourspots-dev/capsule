@@ -1,0 +1,47 @@
+{
+  "sessionId": "session_1",
+  "phase": "completed",
+  "taskStatus": "completed",
+  "inputRouting": "startNow",
+  "queueLength": 0,
+  "permissionMode": "guarded",
+  "availability": {
+    "canSend": true,
+    "canStop": false,
+    "canApprove": false,
+    "canQueue": false
+  },
+  "rows": [
+    {
+      "kind": "user",
+      "text": "Read the golden page",
+      "status": "completed"
+    },
+    {
+      "kind": "activity",
+      "text": "Thinking complete",
+      "status": "completed"
+    },
+    {
+      "kind": "assistant",
+      "text": "",
+      "status": "completed"
+    },
+    {
+      "kind": "tool",
+      "text": "golden page",
+      "status": "completed",
+      "toolName": "read"
+    },
+    {
+      "kind": "activity",
+      "text": "Thinking complete",
+      "status": "completed"
+    },
+    {
+      "kind": "assistant",
+      "text": "Golden complete.",
+      "status": "completed"
+    }
+  ]
+}

@@ -1,0 +1,1069 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="tinyai Agent 测试设计方案：参考 ZCode、Pi、Browser Agent 的分层测试、契约、fixture、E2E 与 CI 门禁。">
+  <title>tinyai Agent · 测试设计方案 v1.0</title>
+  <style>
+    :root {
+      color-scheme:light;
+      --bg:#f2f0e9;--surface:#fffdf8;--surface-2:#eae6dc;--surface-3:#ddd6c9;
+      --text:#191a17;--muted:#676a61;--faint:#8c8f86;--border:#d7d1c5;--border-strong:#b5aea0;
+      --accent:#b44f2c;--accent-soft:#fbe5dc;--accent-ink:#7f2a16;
+      --green:#246e51;--green-soft:#ddf0e7;--blue:#2e608a;--blue-soft:#e0edf7;
+      --amber:#886019;--amber-soft:#f7ebc9;--purple:#66508e;--purple-soft:#eee5f7;
+      --red:#a12f38;--red-soft:#f8e0e2;--code:#20211e;--code-text:#f1eee7;
+      --shadow:0 18px 50px rgba(55,42,28,.08);--sidebar:250px;--drawer:442px;
+    }
+    html[data-theme="dark"]{color-scheme:dark;--bg:#11120f;--surface:#1a1c18;--surface-2:#24271f;--surface-3:#30342b;--text:#efede5;--muted:#aaa99e;--faint:#85877e;--border:#373a31;--border-strong:#55594d;--accent:#ef7854;--accent-soft:#3d241c;--accent-ink:#ffc4b1;--green:#72cba4;--green-soft:#19362a;--blue:#8bc3ed;--blue-soft:#1c3041;--amber:#e1ba73;--amber-soft:#382e1b;--purple:#c1a8e8;--purple-soft:#30243f;--red:#f0898f;--red-soft:#401f22;--code:#0d0e0c;--code-text:#e9e7df;--shadow:0 18px 52px rgba(0,0,0,.25)}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}
+    body{margin:0;overflow-x:clip;background:radial-gradient(circle at 86% -8%,color-mix(in srgb,var(--accent) 11%,transparent),transparent 28rem),var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;font-size:15px;line-height:1.72;text-rendering:optimizeLegibility}
+    a{color:var(--accent-ink);text-underline-offset:3px}button,input,textarea,select{font:inherit;color:inherit}
+    code,pre{font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace}code{padding:.14em .38em;border-radius:5px;background:var(--surface-2);font-size:.9em}
+    .topbar{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:16px;min-height:64px;padding:0 24px;background:color-mix(in srgb,var(--bg) 91%,transparent);border-bottom:1px solid color-mix(in srgb,var(--border) 76%,transparent);backdrop-filter:blur(18px)}
+    .brand{display:flex;align-items:center;gap:10px;min-width:var(--sidebar);font-weight:650}.brand-mark{display:grid;place-items:center;width:30px;height:30px;color:#fff;background:var(--accent);border-radius:9px 9px 9px 3px;font-family:Georgia,serif;font-size:17px;font-style:italic}
+    .top-meta{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.top-actions{display:flex;align-items:center;gap:8px;margin-left:auto}
+    .toolbar-button,.icon-button{display:inline-flex;align-items:center;justify-content:center;min-height:36px;border:1px solid var(--border);border-radius:99px;background:var(--surface);cursor:pointer;font-size:12px;font-weight:600}.toolbar-button{gap:6px;padding:0 13px}.icon-button{width:36px;padding:0}.toolbar-button:hover,.icon-button:hover{border-color:var(--border-strong)}.toolbar-button.is-active{background:var(--accent);border-color:var(--accent);color:#fff}
+    button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.review-count{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:99px;background:color-mix(in srgb,currentColor 12%,transparent);font-size:10px}
+    .layout{display:grid;grid-template-columns:var(--sidebar) minmax(0,1fr);max-width:1510px;margin:0 auto}.sidebar{position:sticky;top:64px;align-self:start;height:calc(100vh - 64px);padding:30px 22px 46px 26px;overflow-y:auto;scrollbar-width:thin}
+    .sidebar-label{margin:0 0 12px;color:var(--faint);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}.toc{display:grid;gap:3px;margin:0;padding:0;list-style:none}.toc a{display:block;padding:6px 10px;border-left:2px solid transparent;color:var(--muted);font-size:13px;line-height:1.45;text-decoration:none}.toc a:hover{color:var(--text)}.toc a.active{border-left-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent);color:var(--text);font-weight:600}
+    .sidebar-note,.review-summary{margin-top:24px;padding-top:18px;border-top:1px solid var(--border);color:var(--faint);font-size:11px;line-height:1.55}.review-summary strong{display:block;margin-bottom:6px;color:var(--text);font-size:12px}.review-summary button{margin-top:10px}
+    main{width:min(100%,1180px);padding:52px 58px 110px}.hero{position:relative;padding:46px 48px 42px;overflow:hidden;border:1px solid var(--border);border-radius:26px;background:linear-gradient(132deg,var(--surface),color-mix(in srgb,var(--accent) 5%,var(--surface)));box-shadow:var(--shadow)}.hero::after{content:"T";position:absolute;right:34px;top:-3px;color:color-mix(in srgb,var(--accent) 10%,transparent);font-family:Georgia,serif;font-size:140px;line-height:1;pointer-events:none}
+    .eyebrow{display:flex;align-items:center;gap:8px;margin-bottom:22px;color:var(--accent-ink);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}.status-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 14%,transparent)}
+    h1{position:relative;max-width:830px;margin:0;font-family:Georgia,"Songti SC",serif;font-size:clamp(36px,5vw,62px);font-weight:500;line-height:1.05;letter-spacing:-.045em}.hero-lead{position:relative;max-width:810px;margin:24px 0 0;color:var(--muted);font-size:17px}.meta-strip{display:flex;flex-wrap:wrap;gap:10px 24px;margin-top:32px;padding-top:22px;border-top:1px solid var(--border);color:var(--faint);font-size:12px}.meta-strip strong{margin-right:5px;color:var(--text);font-weight:600}
+    section{scroll-margin-top:88px;margin-top:70px}.section-head{display:flex;align-items:center;gap:12px;margin-bottom:22px}.section-no{color:var(--accent);font-family:monospace;font-size:11px;font-weight:700;letter-spacing:.08em}h2{margin:0;font-family:Georgia,"Songti SC",serif;font-size:clamp(27px,3vw,36px);font-weight:500;line-height:1.2;letter-spacing:-.025em}h3{margin:32px 0 12px;font-size:18px;font-weight:650}h4{margin:20px 0 8px;font-size:14px;font-weight:650}p{margin:10px 0 16px}ul,ol{margin:12px 0 20px;padding-left:23px}li{margin:6px 0}li::marker{color:var(--accent)}.lede{max-width:860px;color:var(--muted);font-size:16px}
+    .grid-2,.grid-3,.grid-4{display:grid;gap:16px}.grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}.card{min-width:0;padding:21px 22px;border:1px solid var(--border);border-radius:16px;background:var(--surface)}.card h3,.card h4{margin-top:0}.card p:last-child,.card ul:last-child{margin-bottom:0}
+    .tag{display:inline-flex;align-items:center;min-height:23px;padding:2px 8px;border-radius:99px;background:var(--surface-2);color:var(--muted);font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}.tag.zc{background:var(--blue-soft);color:var(--blue)}.tag.pi{background:var(--purple-soft);color:var(--purple)}.tag.up{background:var(--amber-soft);color:var(--amber)}.tag.core{background:var(--accent-soft);color:var(--accent-ink)}.tag.security{background:var(--red-soft);color:var(--red)}.tag.new{background:var(--green-soft);color:var(--green)}
+    .callout{display:grid;grid-template-columns:4px 1fr;gap:18px;margin:28px 0;padding:18px 20px;border-radius:10px;background:var(--surface-2)}.callout::before{content:"";border-radius:4px;background:var(--accent)}.callout strong{display:block;margin-bottom:3px}.callout p{margin:0;color:var(--muted)}.callout.warn{background:var(--amber-soft)}.callout.warn::before{background:var(--amber)}
+    .table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:16px;background:var(--surface)}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:11px 12px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}th{color:var(--faint);font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}tr:last-child td{border-bottom:0}.table-wrap table{min-width:760px}
+    .diagram-card{padding:22px;overflow-x:auto;border:1px solid var(--border);border-radius:18px;background:var(--surface)}.diagram-card .mermaid{min-width:800px;text-align:center}.diagram-caption{margin:12px 2px 0;color:var(--faint);font-size:11px;text-align:center}
+    pre{margin:16px 0;padding:18px 20px;overflow-x:auto;border-radius:13px;background:var(--code);color:var(--code-text);font-size:11px;line-height:1.65}pre code{padding:0;background:transparent;color:inherit;font-size:inherit}.checklist{padding:0;list-style:none}.checklist li{position:relative;margin:9px 0;padding-left:27px}.checklist li::before{content:"✓";position:absolute;left:0;top:1px;display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:var(--green-soft);color:var(--green);font-size:10px;font-weight:800}
+    .roadmap{display:grid;gap:0;margin-top:20px}.phase{display:grid;grid-template-columns:78px 1fr;gap:20px;padding:0 0 32px}.phase-track{position:relative;display:flex;justify-content:center}.phase-track::before{content:"";position:absolute;top:35px;bottom:-32px;width:1px;background:var(--border)}.phase:last-child .phase-track::before{display:none}.phase-dot{position:relative;z-index:1;display:grid;place-items:center;width:40px;height:40px;border:1px solid var(--border);border-radius:50%;background:var(--surface);color:var(--accent);font-family:monospace;font-size:11px;font-weight:700}.phase-body{padding:20px 22px;border:1px solid var(--border);border-radius:16px;background:var(--surface)}.phase-body h3{margin:0 0 5px}.phase-body p{margin:0 0 9px;color:var(--muted);font-size:13px}.phase-body ul{margin-bottom:0;font-size:13px}
+    details{margin:12px 0;padding:14px 16px;border:1px solid var(--border);border-radius:11px;background:var(--surface)}summary{cursor:pointer;font-weight:650;font-size:13px}.footer{margin-top:72px;padding-top:24px;border-top:1px solid var(--border);color:var(--faint);font-size:11px}
+    body.review-mode [data-reviewable]{outline:1px dashed color-mix(in srgb,var(--accent) 48%,transparent);outline-offset:4px;cursor:crosshair}body.review-mode [data-reviewable]:hover{outline:2px solid var(--accent);background-color:color-mix(in srgb,var(--accent) 3%,transparent)}
+    .annotation-drawer{display:none;position:fixed;z-index:80;top:0;right:0;width:min(var(--drawer),100vw);height:100vh;padding:22px;overflow-y:auto;background:var(--surface);border-left:1px solid var(--border);box-shadow:-20px 0 60px rgba(0,0,0,.15)}.annotation-drawer.is-open{display:block}.drawer-head{display:flex;align-items:center;gap:12px;margin-bottom:16px}.drawer-head h2{font-family:inherit;font-size:20px;letter-spacing:-.02em}.drawer-close{margin-left:auto}.drawer-actions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 18px}
+    .field{display:grid;gap:6px;margin:13px 0}.field label{color:var(--muted);font-size:11px;font-weight:650}.field input,.field textarea,.field select{width:100%;border:1px solid var(--border);border-radius:9px;background:var(--surface-2);color:var(--text);padding:9px 10px;font-size:13px}.field textarea{min-height:132px;resize:vertical;line-height:1.55}.field-selection{min-height:48px;padding:9px 10px;border-radius:8px;background:var(--amber-soft);color:var(--amber);font-size:11px;line-height:1.5}
+    .primary-button,.secondary-button,.danger-button{min-height:36px;padding:0 13px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:650}.primary-button{border:1px solid var(--accent);background:var(--accent);color:#fff}.secondary-button{border:1px solid var(--border);background:var(--surface);color:var(--text)}.danger-button{border:1px solid var(--red);background:transparent;color:var(--red)}
+    .notes-list{display:grid;gap:10px;margin-top:18px}.note{padding:12px;border:1px solid var(--border);border-radius:11px;background:var(--surface-2);font-size:12px}.note-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:6px;color:var(--faint);font-size:10px}.note-status{padding:2px 6px;border-radius:99px;background:var(--amber-soft);color:var(--amber);font-weight:700}.note-status.must{background:var(--red-soft);color:var(--red)}.note-status.decision{background:var(--blue-soft);color:var(--blue)}.note-status.question{background:var(--purple-soft);color:var(--purple)}.note p{margin:0;white-space:pre-wrap}.note-actions{display:flex;gap:8px;margin-top:9px}.note-actions button{border:0;background:transparent;color:var(--accent-ink);padding:0;font-size:11px;cursor:pointer}.drawer-tip{color:var(--faint);font-size:11px;line-height:1.5}.review-pin{flex:0 0 auto;padding:5px 9px;border:1px solid var(--border);border-radius:99px;background:transparent;color:var(--faint);font-size:10px;font-weight:650;cursor:pointer}.review-pin:hover,.review-pin.has-notes{border-color:var(--accent);color:var(--accent-ink);background:var(--accent-soft)}
+    .toast{position:fixed;z-index:100;left:50%;bottom:24px;transform:translate(-50%,20px);padding:9px 14px;border-radius:99px;background:var(--code);color:var(--code-text);font-size:12px;opacity:0;pointer-events:none;transition:opacity .16s,transform .16s}.toast.is-visible{opacity:1;transform:translate(-50%,0)}
+    @media(max-width:1050px){:root{--sidebar:210px}main{padding:42px 36px 90px}.grid-4,.grid-3{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media(max-width:820px){.topbar{padding:0 15px}.brand{min-width:auto}.top-meta{display:none}.toolbar-button .review-label{display:none}.layout{display:block}.sidebar{display:none}main{padding:26px 18px 76px}.hero{padding:34px 26px 30px;border-radius:20px}.grid-2,.grid-3,.grid-4{grid-template-columns:1fr}.annotation-drawer{width:100vw;border-left:0}}
+    @media(max-width:520px){body{font-size:14px}.brand>span:last-child{display:none}.hero-lead{font-size:15px}.meta-strip{display:grid;gap:7px}.section-head{flex-wrap:wrap}.phase{grid-template-columns:50px 1fr;gap:12px}.phase-dot{width:34px;height:34px}.annotation-drawer{padding:17px}}
+    @media print{html,body{background:#fff;color:#111}.topbar,.sidebar,.top-actions,.review-pin,.annotation-drawer,.toast{display:none!important}.layout{display:block}main{width:100%;max-width:none;padding:0}.hero,.card,.phase-body,.diagram-card{box-shadow:none;break-inside:avoid}section{break-inside:avoid-page}a{color:#111}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{transition:none!important;animation:none!important}}
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">T</span><span>tinyai testing</span></div>
+    <div class="top-meta">Agent 3.0 · Test Strategy &amp; Harness · v1.0</div>
+    <div class="top-actions">
+      <button class="icon-button" id="theme-toggle" type="button" aria-label="切换主题" title="切换主题">◐</button>
+      <button class="toolbar-button" id="review-toggle" type="button" aria-pressed="false"><span aria-hidden="true">✎</span><span class="review-label">标注模式</span></button>
+      <button class="toolbar-button" id="open-review" type="button"><span aria-hidden="true">☰</span><span class="review-label">批注</span><span class="review-count" id="review-count">0</span></button>
+      <button class="toolbar-button" id="export-review" type="button" title="导出修订 JSON"><span aria-hidden="true">⇩</span><span class="review-label">导出修订</span></button>
+      <button class="icon-button" id="print-button" type="button" aria-label="打印文档" title="打印为 PDF">⎙</button>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="文档目录">
+      <p class="sidebar-label">Test map</p>
+      <nav><ol class="toc">
+        <li><a href="#summary">测试目标</a></li><li><a href="#references">参考系统</a></li>
+        <li><a href="#principles">测试原则</a></li><li><a href="#architecture">测试架构</a></li>
+        <li><a href="#baselines">基线映射</a></li><li><a href="#layers">分层测试</a></li>
+        <li><a href="#harness">测试 Harness</a></li><li><a href="#unit">单元与契约</a></li>
+        <li><a href="#runtime">Runtime 集成</a></li><li><a href="#projection">Projection Golden</a></li>
+        <li><a href="#model">模型流与故障</a></li><li><a href="#compaction">压缩测试</a></li>
+        <li><a href="#tools">工具与权限</a></li><li><a href="#profiles">Profile 与子 Agent</a></li>
+        <li><a href="#browser">Chrome E2E</a></li><li><a href="#sandbox">Sandbox E2E</a></li>
+        <li><a href="#security">安全测试</a></li><li><a href="#property">状态空间测试</a></li>
+        <li><a href="#fixtures">Fixture 规范</a></li><li><a href="#ci">CI 与报告</a></li>
+        <li><a href="#current-code">当前代码改造</a></li><li><a href="#roadmap">实施路线</a></li>
+        <li><a href="#cases">首批用例</a></li><li><a href="#evidence">证据附录</a></li>
+      </ol></nav>
+      <div class="review-summary"><strong>评审状态</strong><span>当前 0 条批注，自动保存在本浏览器。</span><br><button class="secondary-button" id="import-review" type="button">导入修订</button><input id="import-review-file" type="file" accept=".json,application/json" hidden></div>
+      <div class="sidebar-note"><a href="tinyai-agent-synthesis-design-v3.html">返回 Agent 3.0 详细设计</a></div>
+    </aside>
+    <main>
+      <section class="hero" id="summary">
+        <div class="eyebrow"><span class="status-dot"></span>TEST STRATEGY · v1.0</div>
+        <h1>让每条 Agent 行为基线都有可执行证据</h1>
+        <p class="hero-lead">
+          本方案把 ZCode 的协议与状态空间测试、Pi 的包级 Harness 与 faux provider、Browser Agent 的真 Chrome smoke 组合起来，形成 tinyai 的分层测试体系。测试目标不是“多写用例”，而是证明权威状态、恢复、权限、子 Agent 和沙盒边界始终正确。
+        </p>
+        <div class="meta-strip">
+          <span><strong>对应设计</strong> Agent 3.0 v0.3</span>
+          <span><strong>测试层级</strong> L0–L5</span>
+          <span><strong>首批目标</strong> 80–100 个确定性用例</span>
+          <span><strong>日期</strong> 2026-10-30</span>
+        </div>
+      </section>
+
+      <div class="callout">
+        <div>
+          <strong>先做测试基建，再做大功能</strong>
+          <p>当前 tinyai 没有自动化测试，只有类型检查。Runtime、Projection、子 Agent 和 Sandbox 并行开发前，必须先完成 Fake Harness、测试目录、fixture 协议和 CI 门禁。</p>
+        </div>
+      </div>
+
+      <section id="references">
+        <div class="section-head"><span class="section-no">01</span><h2>参考系统的测试方法</h2></div>
+        <p class="lede">三个系统的测试重点不同：ZCode 证明产品状态协议，Pi 证明 Agent Harness，Browser Agent 证明真实浏览器行为。</p>
+
+        <div class="grid-3">
+          <div class="card">
+            <span class="tag zc">ZCode</span>
+            <h3>协议与状态空间</h3>
+            <ul>
+              <li>Spec / Case Catalog / Coverage Matrix 先定义行为</li>
+              <li>Command、ACK、Projection、Cold Hydration 契约测试</li>
+              <li>TurnMachine 显式状态迁移测试</li>
+              <li>SSE Capture/Replay 与 FS Fault Injection</li>
+              <li>Docker replay-isolated 与真实 Electron E2E</li>
+              <li>formal-proof 枚举产品状态组合</li>
+            </ul>
+            <p>证据：<a href="https://github.com/zai-org/ZCode/blob/main/docs/testing/conversation-session-e2e-development-workflow.md">E2E Workflow</a>、<a href="https://github.com/zai-org/ZCode/blob/main/docs/testing/e2e-sse-capture-replay.md">SSE Replay</a>、<a href="https://github.com/zai-org/ZCode/blob/main/docs/testing/e2e-fs-fault-injection.md">FS Fault Injection</a>。</p>
+          </div>
+          <div class="card">
+            <span class="tag pi">Pi</span>
+            <h3>包级 Harness</h3>
+            <ul>
+              <li>Vitest 包级单测，默认无网络</li>
+              <li>`streamFn`、Tool、SessionManager 可注入</li>
+              <li>faux provider 精确产生文本、思考、工具事件</li>
+              <li>测试 HOME/TMP/Git/NPM 完全隔离</li>
+              <li>回归用例按 issue 编号固化</li>
+              <li>Provider、Session、Compaction、Extension 分域覆盖</li>
+            </ul>
+            <p>证据：<a href="https://github.com/earendil-works/pi/blob/main/packages/agent/test/e2e.test.ts">agent e2e.test.ts</a>、<a href="https://github.com/earendil-works/pi/blob/main/test.sh">test.sh</a>。</p>
+          </div>
+          <div class="card">
+            <span class="tag up">Browser Agent</span>
+            <h3>真实执行证据</h3>
+            <ul>
+              <li>真实模块 import + Chrome API 行为 stub</li>
+              <li>LLM retry / compaction / replay / history 单测</li>
+              <li>真 Chrome 加载扩展与冷启动</li>
+              <li>BYOK 本地模型 stub</li>
+              <li>SW 重启、审批恢复、附件和布局</li>
+              <li>真实工具工具链与 fixture 页面</li>
+            </ul>
+            <p>证据：<a href="../../browser-agent/tests">tests/</a>、<a href="../../browser-agent/scripts/smoke-full.mjs">smoke-full.mjs</a>、<a href="../../browser-agent/scripts/smoke-byok.mjs">smoke-byok.mjs</a>。</p>
+          </div>
+        </div>
+
+        <div class="table-wrap" style="margin-top:18px">
+          <table>
+            <thead><tr><th>测试 ID</th><th>来源</th><th>计划采用</th><th>tinyai 落点</th></tr></thead>
+            <tbody>
+              <tr><td><code>TS-ZC1</code></td><td>ZCode</td><td>Spec → Case Catalog → Coverage Matrix</td><td>测试之前先登记行为基线</td></tr>
+              <tr><td><code>TS-ZC2</code></td><td>ZCode</td><td>Command/ACK/Projection 契约测试</td><td>Control Plane + Product Projection</td></tr>
+              <tr><td><code>TS-ZC3</code></td><td>ZCode</td><td>Live/Cold Golden 与 shadow replay</td><td>SessionTree + Product Projection</td></tr>
+              <tr><td><code>TS-ZC4</code></td><td>ZCode</td><td>SSE capture/replay + FS fault injection</td><td>ModelGateway + Store + Sandbox</td></tr>
+              <tr><td><code>TS-ZC5</code></td><td>ZCode</td><td>Docker replay-isolated</td><td>Chrome E2E + Sandbox E2E</td></tr>
+              <tr><td><code>TS-ZC6</code></td><td>ZCode</td><td>状态空间枚举</td><td>Command/Lifecycle/Subagent 组合</td></tr>
+              <tr><td><code>TS-PI1</code></td><td>Pi</td><td>Faux provider / deterministic stream</td><td>AgentLoop + ModelGateway</td></tr>
+              <tr><td><code>TS-PI2</code></td><td>Pi</td><td>隔离 HOME/TMP/Git/NPM</td><td>CLI + Sandbox tests</td></tr>
+              <tr><td><code>TS-PI3</code></td><td>Pi</td><td>Issue-number regression</td><td>所有已修复 race/fault</td></tr>
+              <tr><td><code>TS-UP1</code></td><td>Browser Agent</td><td>真 Chrome smoke / SW restart / BYOK</td><td>BrowserProvider + Side Panel</td></tr>
+              <tr><td><code>TS-UP2</code></td><td>Browser Agent</td><td>Chrome API harness + real tools</td><td>Browser fixtures</td></tr>
+              <tr><td><code>TS-TL1</code></td><td>tinyai</td><td>行为基线 ID 绑定测试 ID</td><td>ZC-A/PI-A/UP-A/TL-A</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="principles">
+        <div class="section-head"><span class="section-no">02</span><h2>测试原则</h2></div>
+        <p class="lede">优先验证系统不变量，而不是模型措辞；优先确定性故障注入，而不是靠重试消除 flaky。</p>
+
+        <div class="grid-3">
+          <div class="card"><span class="tag core">State over text</span><h4>断言真实副作用</h4><p>任务终态、工具调用、文件变化、Projection、Artifact 和资源释放优先于模型自然语言。</p></div>
+          <div class="card"><span class="tag core">Determinism</span><h4>控制时间、网络和随机性</h4><p>Fake clock、固定 UUID、固定随机种子、model replay 和本地 HTTP replay server。</p></div>
+          <div class="card"><span class="tag core">Boundary</span><h4>只在边界做 mock</h4><p>Mock Model、Browser、Sandbox、Storage；核心 Domain/Runtime 尽量跑真实实现。</p></div>
+          <div class="card"><span class="tag core">Recovery</span><h4>故障必须可恢复</h4><p>断连、崩溃、超时、重复命令、磁盘失败都必须有终态和证据。</p></div>
+          <div class="card"><span class="tag core">Isolation</span><h4>不碰真实用户状态</h4><p>隔离 HOME、DataDir、Chrome Profile、Workspace、Credentials 和网络。</p></div>
+          <div class="card"><span class="tag core">Traceability</span><h4>每个用例可追溯到基线</h4><p>测试 ID 必须能映射回 ZC/PI/UP/TL 行为基线和被测模块。</p></div>
+        </div>
+      </section>
+
+      <section id="architecture">
+        <div class="section-head"><span class="section-no">03</span><h2>测试架构</h2></div>
+        <p class="lede">快速确定性测试放在 PR 门禁；真实环境与模型验证放到 Nightly、Release 和人工 Eval。</p>
+
+        <div class="diagram-card">
+          <div class="mermaid">
+flowchart TB
+  subgraph FAST["PR Gate · No Network"]
+    UNIT["L0 Unit<br/>domain · state · schema"]
+    CONTRACT["L1 Contract<br/>command · tool · profile"]
+    INTEGRATION["L2 Integration<br/>Agent + Runtime + fake providers"]
+    GOLDEN["L3 Golden<br/>projection · live/cold replay"]
+  end
+  subgraph SYSTEM["Extended Gate · Isolated"]
+    CHROME["L4a Chrome E2E<br/>extensions · tabs · approvals"]
+    SANDBOX["L4b Sandbox E2E<br/>files · PTY · limits · network"]
+    FAULT["Crash / Restart / Reconnect"]
+  end
+  subgraph LIVE["Manual or Scheduled"]
+    MODEL["L5 Live Model Eval"]
+    QUALITY["Quality / cost / safety metrics"]
+  end
+  UNIT --> CONTRACT --> INTEGRATION --> GOLDEN
+  GOLDEN --> CHROME
+  GOLDEN --> SANDBOX
+  CHROME --> FAULT
+  SANDBOX --> FAULT
+  FAULT --> MODEL
+  MODEL --> QUALITY
+  classDef fast fill:#dcf1eb,stroke:#176b5b,color:#171b18
+  classDef system fill:#e0edf7,stroke:#2e608a,color:#171b18
+  classDef live fill:#f7ebc9,stroke:#886019,color:#171b18
+  class UNIT,CONTRACT,INTEGRATION,GOLDEN fast
+  class CHROME,SANDBOX,FAULT system
+  class MODEL,QUALITY live
+          </div>
+          <div class="diagram-caption">图 1 · tinyai 分层测试与运行频率</div>
+        </div>
+
+        <div class="grid-4" style="margin-top:18px">
+          <div class="card"><span class="tag new">L0–L3</span><h4>每次 PR</h4><p>目标 60–90 秒，无网络、无真实模型、无用户状态。</p></div>
+          <div class="card"><span class="tag zc">L4</span><h4>PR 扩展 / Nightly</h4><p>真 Chrome、Docker Sandbox、重启和 fault injection。</p></div>
+          <div class="card"><span class="tag pi">L5</span><h4>夜间 / 手动</h4><p>少量真实模型场景，阈值和费用独立。</p></div>
+          <div class="card"><span class="tag security">Release</span><h4>全量 Gate</h4><p>依赖、构建、产物、安全审计、隔离回归。</p></div>
+        </div>
+      </section>
+
+      <section id="baselines">
+        <div class="section-head"><span class="section-no">04</span><h2>行为基线到测试集映射</h2></div>
+        <p class="lede">测试 ID 直接绑定 Agent 设计中的基线，避免测试与设计各说各话。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>基线</th><th>必须证明的行为</th><th>测试前缀</th><th>层级</th></tr></thead>
+            <tbody>
+              <tr><td>ZC-A1</td><td>每 workspace 单权威 runtime，UI 不是事实源</td><td><code>CTRL-*</code></td><td>L1/L2</td></tr>
+              <tr><td>ZC-A2</td><td>CommandId、baseRevision、ACK 与幂等</td><td><code>CMD-*</code></td><td>L1/L2</td></tr>
+              <tr><td>ZC-A3</td><td>SessionLifecycle 与关闭 drain</td><td><code>LIFE-*</code></td><td>L0/L2/L4</td></tr>
+              <tr><td>ZC-A4</td><td>Canonical facts 与 ProductProjection</td><td><code>PROJ-*</code></td><td>L1/L3</td></tr>
+              <tr><td>ZC-A5</td><td>continuous/replayable 恢复</td><td><code>CONN-*</code></td><td>L2/L3</td></tr>
+              <tr><td>ZC-A6</td><td>InputLedger 与 command query</td><td><code>INPUT-*</code></td><td>L0/L2</td></tr>
+              <tr><td>PI-A1/A2</td><td>Agent 事件、steering、follow-up</td><td><code>LOOP-*</code></td><td>L1/L2</td></tr>
+              <tr><td>PI-A3</td><td>Tool schema、并发、结果契约</td><td><code>TOOL-*</code></td><td>L1/L2</td></tr>
+              <tr><td>PI-A4</td><td>SessionTree、branch、edit</td><td><code>TREE-*</code></td><td>L1/L3</td></tr>
+              <tr><td>PI-A5</td><td>Compaction 切点与 overflow</td><td><code>COMP-*</code></td><td>L1/L3</td></tr>
+              <tr><td>ZC-A8/A9</td><td>通用 Profile 与子 Agent 生命周期</td><td><code>SUB-*</code></td><td>L1/L2/L4</td></tr>
+              <tr><td>ZC-A7</td><td>权限、Hook、Plan Mode</td><td><code>POL-*</code></td><td>L1/L2/L4</td></tr>
+              <tr><td>UP-A1/A2</td><td>BrowserProvider 行为</td><td><code>BROWSER-*</code></td><td>L1/L4</td></tr>
+              <tr><td>TL-A1</td><td>TaskGraph、lease、幂等恢复</td><td><code>TASK-*</code></td><td>L1/L2/L4</td></tr>
+              <tr><td>TL-A2</td><td>权限交集和 capability</td><td><code>SEC-*</code></td><td>L1/L4</td></tr>
+              <tr><td>TL-A3</td><td>Sandbox 边界和资源释放</td><td><code>SANDBOX-*</code></td><td>L4</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="layers">
+        <div class="section-head"><span class="section-no">05</span><h2>分层测试策略</h2></div>
+        <p class="lede">每一层有唯一职责，失败时能快速判断是领域逻辑、协议、集成还是外部环境问题。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>层级</th><th>真实组件</th><th>Fake / Stub</th><th>目标</th></tr></thead>
+            <tbody>
+              <tr><td>L0 Unit</td><td>Schema、状态机、纯函数</td><td>无外部依赖</td><td>快速验证不变量</td></tr>
+              <tr><td>L1 Contract</td><td>接口实现、序列化、工具契约</td><td>最小依赖</td><td>防止接口漂移</td></tr>
+              <tr><td>L2 Integration</td><td>AgentSession、Runtime、CommandInbox、SessionTree</td><td>FakeModel / FakeTools / InMemoryStore</td><td>验证模块协作</td></tr>
+              <tr><td>L3 Golden</td><td>真实 Normalizer/Projection/Hydrator</td><td>持久化与 live facts fixture</td><td>验证 live/cold 等价</td></tr>
+              <tr><td>L4 E2E</td><td>Chrome、Sandbox、真实 sidepanel</td><td>本地模型 stub</td><td>验证真实环境与资源释放</td></tr>
+              <tr><td>L5 Live Eval</td><td>真实模型</td><td>真实工具 / Fixture workspace</td><td>验证模型策略和工具选择</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout warn">
+          <div>
+            <strong>不要把 E2E 当单测替代品</strong>
+            <p>ZCode 当前已退役大量 App 业务单测，重点转向正式 E2E 与协议证据；tinyai 的安全、Projection 和 Runtime 内核仍应保留大量快速确定性单测，避免 E2E 成为唯一防线。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="harness">
+        <div class="section-head"><span class="section-no">06</span><h2>统一测试 Harness</h2></div>
+        <p class="lede">先建立一套可创建、驱动、快照和销毁 Agent Runtime 的测试工厂。</p>
+
+        <div class="code-label"><span>Proposed Harness API</span></div>
+        <pre><code>interface TestHarnessOptions {
+  workspaceId?: string;
+  modelScript?: ModelFixture[];
+  tools?: TestTool[];
+  profiles?: AgentProfile[];
+  clock?: TestClock;
+  store?: TestTaskStore;
+  browser?: FakeBrowserProvider;
+  sandbox?: FakeSandboxProvider;
+}
+
+interface TestHarness {
+  runtime: WorkspaceRuntime;
+  taskStore: TestTaskStore;
+  command(command: CommandEnvelope): Promise&lt;CommandAck&gt;;
+  projection(): ProductProjection;
+  trace(): TestTrace;
+  restart(): Promise&lt;void&gt;;
+  stop(): Promise&lt;void&gt;;
+  dispose(): Promise&lt;void&gt;;
+}</code></pre>
+
+        <div class="grid-3" style="margin-top:18px">
+          <div class="card"><span class="tag core">FakeModel</span><h4>脚本化模型流</h4><p>控制 SSE chunk、tool call、延迟、断流、abort、usage 和模型切换。</p></div>
+          <div class="card"><span class="tag core">FakeTools</span><h4>可控副作用</h4><p>控制成功、失败、超时、永不返回、流式进度和取消。</p></div>
+          <div class="card"><span class="tag core">FakeProviders</span><h4>浏览器与沙盒</h4><p>不必启动真实 Chrome/Container 即可测 Runtime 集成。</p></div>
+          <div class="card"><span class="tag zc">TestClock</span><h4>时间可控</h4><p>不依赖 sleep；deadline、retry backoff 和 stop timeout 可快进。</p></div>
+          <div class="card"><span class="tag zc">CrashInjector</span><h4>故障注入</h4><p>在指定 commit、写入或 lock 后抛错，模拟重启窗口。</p></div>
+          <div class="card"><span class="tag pi">Isolation</span><h4>资源隔离</h4><p>每个 suite 独立 HOME/TMP/DataDir/Workspace，结束后由 owner 清理。</p></div>
+        </div>
+
+        <div class="code-label"><span>Model fixture contract</span></div>
+        <pre><code>interface ModelFixture {
+  id: string;
+  match: {
+    lastRole?: "user" | "toolResult";
+    includes?: string[];
+    toolNames?: string[];
+  };
+  events: Array&lt;
+    | { textDelta: string; delayMs?: number }
+    | { thinkingDelta: string; delayMs?: number }
+    | { toolDelta: { index: number; name?: string; arguments?: string }; delayMs?: number }
+    | { finish: string }
+    | { disconnect: true }
+    | { error: StructuredError }
+  &gt;;
+  maxMatches?: number;
+}</code></pre>
+      </section>
+
+      <section id="unit">
+        <div class="section-head"><span class="section-no">07</span><h2>单元与契约测试</h2></div>
+        <p class="lede">这是最先落地、收益最高的一层。所有领域不变量都应在这里被锁定。</p>
+
+        <div class="grid-2">
+          <div class="card">
+            <span class="tag core">Domain</span>
+            <h3>状态与规则</h3>
+            <ul class="checklist">
+              <li>SessionLifecycle 合法/非法迁移</li>
+              <li>TaskStatus 迁移与逗留条件</li>
+              <li>Command ACK 分类</li>
+              <li>InputLedger 终态穷尽</li>
+              <li>Policy allow/ask/deny</li>
+              <li>Profile 权限交集</li>
+              <li>Compaction 切点合法性</li>
+            </ul>
+          </div>
+          <div class="card">
+            <span class="tag zc">Contracts</span>
+            <h3>接口与序列化</h3>
+            <ul class="checklist">
+              <li>Command/Snapshot/Delta schema 严格校验</li>
+              <li>Tool input/output schema</li>
+              <li>SessionEntry version migration</li>
+              <li>结构化错误 code 不漂移</li>
+              <li>Provider event normalization</li>
+              <li>Agent Profile manifest</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="runtime">
+        <div class="section-head"><span class="section-no">08</span><h2>Runtime 集成测试</h2></div>
+        <p class="lede">使用真实 AgentSession、CommandInbox、TaskRuntime、SessionTree，只替换模型和外部 Provider。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ID</th><th>场景</th><th>关键断言</th></tr></thead>
+            <tbody>
+              <tr><td>CMD-001</td><td>同 commandId 并发发送两次</td><td>只创建一个 turn，第二返回 duplicate</td></tr>
+              <tr><td>CMD-002</td><td>旧 baseRevision fork</td><td>ACK=stale，不产生 child</td></tr>
+              <tr><td>CMD-003</td><td>ACK 丢失后 commands/query</td><td>从持久事实返回同一结果</td></tr>
+              <tr><td>INPUT-001</td><td>admit 后进程崩溃</td><td>重启后 discarded(session_resumed)</td></tr>
+              <tr><td>LIFE-001</td><td>并发 ensureReady</td><td>只创建一个实例</td></tr>
+              <tr><td>LIFE-002</td><td>stop 时 background child 运行</td><td>关闭准入、取消 child、等待真实 release</td></tr>
+              <tr><td>TASK-001</td><td>重复副作用工具</td><td>幂等键阻止第二次 effect</td></tr>
+              <tr><td>TASK-002</td><td>Session A provider 卡住</td><td>Session B 仍可执行</td></tr>
+              <tr><td>LOOP-001</td><td>工具运行中 steer</td><td>当前工具结束后注入 steer</td></tr>
+              <tr><td>LOOP-002</td><td>自然停止前 follow-up</td><td>下一 turn 使用 follow-up</td></tr>
+              <tr><td>LOOP-003</td><td>parallel tool batch</td><td>event 完成序 + message 源序</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="code-label"><span>Test shape</span></div>
+        <pre><code>const h = await createTestHarness({
+  modelScript: [
+    toolCallStep("read", { path: "a.ts" }),
+    textStep("done"),
+  ],
+  tools: [fakeReadTool()],
+});
+
+const ack = await h.command(sendText("inspect"));
+expect(ack.status).toBe("accepted");
+await h.runtime.waitForSessionIdle("sess_1");
+expect(h.projection().rows.map(r =&gt; r.kind)).toEqual([
+  "userInput", "tool", "assistant",
+]);
+expect(h.taskStore.sideEffects()).toHaveLength(1);</code></pre>
+      </section>
+
+      <section id="projection">
+        <div class="section-head"><span class="section-no">09</span><h2>Projection Golden 与恢复</h2></div>
+        <p class="lede">验证 live/cold、continuous/replayable 和 snapshot/delta 收敛到同一产品终态。</p>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3>Golden 比较</h3>
+            <ul class="checklist">
+              <li>rows 顺序与 row kind</li>
+              <li>productTurnId 和稳定 entityId</li>
+              <li>phase、queue、availability</li>
+              <li>pending interactions</li>
+              <li>子 Agent 前后台状态</li>
+              <li>artifact 与文件变化摘要</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>恢复场景</h3>
+            <ul class="checklist">
+              <li>无 base → snapshot</li>
+              <li>短 gap → resume</li>
+              <li>resume 再次 gap → force snapshot</li>
+              <li>迟到/重复帧忽略</li>
+              <li>runtime generation 变化 → 全量恢复</li>
+              <li>cold hydration 与 live fixture 比较</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="table-wrap compact" style="margin-top:18px">
+          <table>
+            <thead><tr><th>ID</th><th>输入</th><th>期望</th></tr></thead>
+            <tbody>
+              <tr><td>PROJ-001</td><td>同 facts 经 live normalizer</td><td>golden projection</td></tr>
+              <tr><td>PROJ-002</td><td>同 facts 经 cold hydrator</td><td>与 PROJ-001 深度相等</td></tr>
+              <tr><td>CONN-001</td><td>continuous 全帧</td><td>最终 projection 一致</td></tr>
+              <tr><td>CONN-002</td><td>replayable 过滤 delta</td><td>最终 projection 一致</td></tr>
+              <tr><td>CONN-003</td><td>fragment 缺失</td><td>不半应用，触发 resync</td></tr>
+              <tr><td>CONN-004</td><td>迟到 snapshot 前帧</td><td>被丢弃</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="model">
+        <div class="section-head"><span class="section-no">10</span><h2>模型流、重试与录制回放</h2></div>
+        <p class="lede">模型测试必须在 SSE event 级别确定，不能依赖真实网络和自然语言输出。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ID</th><th>场景</th><th>期望</th></tr></thead>
+            <tbody>
+              <tr><td>MODEL-001</td><td>一个 SSE event 跨多个 TCP chunk</td><td>解析结果不变</td></tr>
+              <tr><td>MODEL-002</td><td>tool name 先到，arguments 分多段</td><td>调用完整且 index 稳定</td></tr>
+              <tr><td>MODEL-003</td><td>多个 tool calls 乱序结束</td><td>按 index 排序持久</td></tr>
+              <tr><td>MODEL-004</td><td>响应头后立即断流</td><td>结构化 network fault</td></tr>
+              <tr><td>MODEL-005</td><td>部分文本后断流</td><td>保留 partial，按策略 retry</td></tr>
+              <tr><td>MODEL-006</td><td>429 + Retry-After</td><td>有限退避，usage 不重复</td></tr>
+              <tr><td>MODEL-007</td><td>usage 缺失</td><td>不伪造 0，标记 unknown</td></tr>
+              <tr><td>MODEL-008</td><td>模型不可用后切换</td><td>记录 from/to，task 不断链</td></tr>
+              <tr><td>MODEL-009</td><td>OAuth token 将过期</td><td>每请求前刷新，不日志泄漏</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout">
+          <div>
+            <strong>推荐采用 ZCode 的 SSE Capture/Replay</strong>
+            <p>录制时保存每个 SSE event 的 sequence、offsetMs、byteLength 和完整 text；回放时按相对时间写入。CI 使用 replay-isolated，真实模型只在显式 capture/live 模式运行。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="compaction">
+        <div class="section-head"><span class="section-no">11</span><h2>Compaction 测试</h2></div>
+        <p class="lede">压缩是最容易产生上下文损坏和历史错位的模块，需要单测与 golden 双重覆盖。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ID</th><th>场景</th><th>断言</th></tr></thead>
+            <tbody>
+              <tr><td>COMP-001</td><td>普通 user spans 压缩</td><td>firstKeptEntryId 合法，tool 对不拆</td></tr>
+              <tr><td>COMP-002</td><td>单个 user span 超预算</td><td>history + prefix 双摘要合并</td></tr>
+              <tr><td>COMP-003</td><td>连续压缩两次</td><td>累计保留上轮 kept ranges</td></tr>
+              <tr><td>COMP-004</td><td>tool result 正好跨边界</td><td>整体保留或整体摘要</td></tr>
+              <tr><td>COMP-005</td><td>context overflow</td><td>压缩一次并 retry once</td></tr>
+              <tr><td>COMP-006</td><td>length stop + tool calls</td><td>不执行截断参数</td></tr>
+              <tr><td>COMP-007</td><td>摘要失败/abort</td><td>原始 SessionTree 不变</td></tr>
+              <tr><td>COMP-008</td><td>compaction usage</td><td>计入 session 成本</td></tr>
+              <tr><td>COMP-009</td><td>压缩后 Read 文件恢复</td><td>只恢复允许读取的当前文件</td></tr>
+              <tr><td>COMP-010</td><td>批准计划连续性</td><td>plan artifact reminder 不丢</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout warn">
+          <div>
+            <strong>当前 tinyai 必须先重构</strong>
+            <p>现在的 <code>compact()</code> 把整个消息数组序列化给模型并替换成两条消息，没有切点、保留边界、Entry、usage 或失败回滚。COMP-001 之前必须先实现 ContextManager/CompactionEntry。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="tools">
+        <div class="section-head"><span class="section-no">12</span><h2>工具与权限测试</h2></div>
+        <p class="lede">工具测试要同时证明“没有被错误授权”“没有错误执行”“副作用没有重复”。</p>
+
+        <div class="grid-2">
+          <div class="card">
+            <span class="tag pi">PI-A3</span>
+            <h3>工具契约</h3>
+            <ul class="checklist">
+              <li>非法 JSON 拒绝，不落回 <code>{}</code></li>
+              <li>schema required/type/range 严格</li>
+              <li>outputSchema 与 structuredContent 匹配</li>
+              <li>executionMode 合并规则</li>
+              <li>cancel 触发 Provider abort</li>
+              <li>timeout 后底层操作停止</li>
+              <li>display 不进入模型 content</li>
+              <li>大输出转 artifact</li>
+            </ul>
+          </div>
+          <div class="card">
+            <span class="tag security">TL-A2</span>
+            <h3>权限与 Hook</h3>
+            <ul class="checklist">
+              <li>plan/build/edit/guarded/sandbox-auto</li>
+              <li>allow/ask/deny 规则优先级</li>
+              <li>参数变化使审批 digest 失效</li>
+              <li>PreToolUse 可阻断/修改输入</li>
+              <li>Hook 上下文作为独立 attachment</li>
+              <li>项目 Hook digest 变化撤权</li>
+              <li>子 Agent 权限交集</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="table-wrap" style="margin-top:18px">
+          <table>
+            <thead><tr><th>ID</th><th>场景</th><th>关键证据</th></tr></thead>
+            <tbody>
+              <tr><td>TOOL-001</td><td>parallel 工具两个成功</td><td>end 顺序可变，结果消息源序固定</td></tr>
+              <tr><td>TOOL-002</td><td>一个 sequential 工具混入 batch</td><td>整批串行</td></tr>
+              <tr><td>TOOL-003</td><td>两个写同一文件</td><td>mutation queue 串行</td></tr>
+              <tr><td>TOOL-004</td><td>stop 后工具迟到返回</td><td>终态不能被复活</td></tr>
+              <tr><td>POL-001</td><td>Plan mode 调 Write</td><td>deny，无执行事件</td></tr>
+              <tr><td>POL-002</td><td>审批后修改 selector</td><td>旧审批失效</td></tr>
+              <tr><td>POL-003</td><td>项目 Hook 命令变化</td><td>digest 不一致，拒绝执行</td></tr>
+              <tr><td>SEC-001</td><td>secret 出现在 tool result</td><td>trace/artifact 自动脱敏</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="profiles">
+        <div class="section-head"><span class="section-no">13</span><h2>Agent Profile 与通用子 Agent 测试</h2></div>
+        <p class="lede">核心验收标准是：新增 Profile 不需要修改 SubagentCoordinator 代码。</p>
+
+        <div class="grid-2">
+          <div class="card">
+            <span class="tag core">Profile</span>
+            <h3>通用配置</h3>
+            <ul class="checklist">
+              <li>builtin/user/project/plugin Profile 发现</li>
+              <li>同名来源覆盖规则</li>
+              <li>alias 与 canonical name</li>
+              <li>工具、MCP、Skills、模型解析</li>
+              <li>permission/context/execution policy</li>
+              <li>结果 schema 校验</li>
+            </ul>
+          </div>
+          <div class="card">
+            <span class="tag core">Subagent</span>
+            <h3>生命周期</h3>
+            <ul class="checklist">
+              <li>foreground/background</li>
+              <li>fresh/fork/artifacts context</li>
+              <li>SendMessage steer/queue/resume</li>
+              <li>父取消递归传播</li>
+              <li>background 不阻塞 parent idle</li>
+              <li>child 结果验证后合并</li>
+              <li>最大递归深度和并发限制</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="table-wrap" style="margin-top:18px">
+          <table>
+            <thead><tr><th>ID</th><th>场景</th><th>断言</th></tr></thead>
+            <tbody>
+              <tr><td>PROFILE-001</td><td>项目新增 Profile</td><td>可被 spawn，无需改 core</td></tr>
+              <tr><td>PROFILE-002</td><td>同名 user/project Profile</td><td>按既定优先级解析并诊断</td></tr>
+              <tr><td>SUB-001</td><td>foreground child 完成</td><td>父 run 等待后才完成</td></tr>
+              <tr><td>SUB-002</td><td>background child 完成</td><td>父 idle 不阻塞，后续通知入库</td></tr>
+              <tr><td>SUB-003</td><td>child 尝试 Bash</td><td>父无 Bash → child deny</td></tr>
+              <tr><td>SUB-004</td><td>父 stop</td><td>所有 owned child + descendants 停止</td></tr>
+              <tr><td>SUB-005</td><td>SendMessage running child</td><td>steer 或 queue，不重开 session</td></tr>
+              <tr><td>SUB-006</td><td>SendMessage terminal child</td><td>按 policy resume，request id 幂等</td></tr>
+              <tr><td>SUB-007</td><td>写型 child</td><td>无 worktree/sandbox 则拒绝</td></tr>
+              <tr><td>SUB-008</td><td>child result 缺证据</td><td>父 Verifier 不通过</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="browser">
+        <div class="section-head"><span class="section-no">14</span><h2>Chrome E2E</h2></div>
+        <p class="lede">真实 Chrome 只验证在 Fake Provider 中无法证明的行为：扩展加载、调试器、标签、Side Panel、上传下载和重启。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ID</th><th>场景</th><th>证据</th></tr></thead>
+            <tbody>
+              <tr><td>BROWSER-001</td><td>加载 extension/ 解压目录</td><td>SW、sidepanel、manifest 版本</td></tr>
+              <tr><td>BROWSER-002</td><td>list_tabs → navigate → read_page</td><td>正确 URL、标题、正文</td></tr>
+              <tr><td>BROWSER-003</td><td>snapshot @ref → click</td><td>目标页面状态变化</td></tr>
+              <tr><td>BROWSER-004</td><td>dialog 阻止后续非 dialog 命令</td><td>dialog status/accept 后可继续</td></tr>
+              <tr><td>BROWSER-005</td><td>iframe/frame 读取</td><td>子 frame 文本与 URL</td></tr>
+              <tr><td>BROWSER-006</td><td>真实 mouse/drag</td><td>DOM 事件与最终位置</td></tr>
+              <tr><td>BROWSER-007</td><td>文件上传</td><td>file input.files 内容 hash</td></tr>
+              <tr><td>BROWSER-008</td><td>截图 / Save PDF</td><td>Artifact 可打开且非空</td></tr>
+              <tr><td>BROWSER-009</td><td>approval allow/deny</td><td>工具仅 allow 时产生副作用</td></tr>
+              <tr><td>BROWSER-010</td><td>关闭 Side Panel，任务继续</td><td>worker/runtime 不中断</td></tr>
+              <tr><td>BROWSER-011</td><td>SW 回收后恢复</td><td>snapshot + history 正常</td></tr>
+              <tr><td>BROWSER-012</td><td>标签组隔离</td><td>A/B session 不串页</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout">
+          <div>
+            <strong>借鉴 Browser Agent 的 smoke 结构</strong>
+            <p>本地 BYOK stub 返回固定 SSE；真 Chrome 负责工具和扩展生命周期；失败时保存 console、截图、DOM、Projection、trace 和 session JSON。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="sandbox">
+        <div class="section-head"><span class="section-no">15</span><h2>Sandbox / Coding E2E</h2></div>
+        <p class="lede">沙盒测试必须验证副作用与隔离，而不是只检查命令退出码。</p>
+
+        <div class="grid-2">
+          <div class="card">
+            <span class="tag new">Workspace</span>
+            <h3>功能闭环</h3>
+            <ul class="checklist">
+              <li>Read → patch → diff → test</li>
+              <li>PTY 流式输出与 stdin</li>
+              <li>build/lint 失败反馈</li>
+              <li>artifact 保存</li>
+              <li>snapshot/rollback</li>
+              <li>worktree 合并</li>
+            </ul>
+          </div>
+          <div class="card">
+            <span class="tag security">Isolation</span>
+            <h3>边界</h3>
+            <ul class="checklist">
+              <li>workspace 外写入</li>
+              <li>symlink / ../ 路径逃逸</li>
+              <li>宿主 env / mount 泄露</li>
+              <li>Docker socket / SSH key</li>
+              <li>网络默认关闭</li>
+              <li>CPU/PID/内存/磁盘配额</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="table-wrap" style="margin-top:18px">
+          <table>
+            <thead><tr><th>ID</th><th>场景</th><th>断言</th></tr></thead>
+            <tbody>
+              <tr><td>SANDBOX-001</td><td>编辑合法文件</td><td>diff、内容和测试结果一致</td></tr>
+              <tr><td>SANDBOX-002</td><td>尝试写 ../host</td><td>policy 拒绝，无文件变化</td></tr>
+              <tr><td>SANDBOX-003</td><td>symlink 指向宿主</td><td>canonical path 拒绝</td></tr>
+              <tr><td>SANDBOX-004</td><td>curl 外网</td><td>默认网络失败</td></tr>
+              <tr><td>SANDBOX-005</td><td>allowlist 域名</td><td>仅该域名代理可达</td></tr>
+              <tr><td>SANDBOX-006</td><td>无限循环进程</td><td>timeout + process tree kill</td></tr>
+              <tr><td>SANDBOX-007</td><td>fork bomb</td><td>PID 上限，system 可恢复</td></tr>
+              <tr><td>SANDBOX-008</td><td>大日志输出</td><td>artifact 截断/落盘，UI 不卡死</td></tr>
+              <tr><td>SANDBOX-009</td><td>取消测试进程</td><td>无孤儿进程/PTY</td></tr>
+              <tr><td>SANDBOX-010</td><td>Session stop</td><td>workspace lease、volume、network 全部释放</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="security">
+        <div class="section-head"><span class="section-no">16</span><h2>安全与故障注入</h2></div>
+        <p class="lede">安全测试应使用可观测的故障等价类，而不是依赖真实权限错误或人工破坏环境。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>类别</th><th>注入</th><th>期望证据</th></tr></thead>
+            <tbody>
+              <tr><td>SSE</td><td>断流、stall、 malformed event、late event</td><td>fault code、retry、task 终态</td></tr>
+              <tr><td>Storage</td><td>ENOSPC/EACCES、损坏快照、事务失败</td><td>fail closed、可恢复错误、原数据不丢</td></tr>
+              <tr><td>Process</td><td>vendor crash、SIGTERM、hang</td><td>有界退出、无孤儿、generation 提升</td></tr>
+              <tr><td>Connection</td><td>gap、duplicate、late subscribe、saturated</td><td>只恢复当前 subscription</td></tr>
+              <tr><td>Permission</td><td>stale approval、hook digest change</td><td>拒绝且无工具执行</td></tr>
+              <tr><td>Credential</td><td>金丝雀 secret 进入 result/env/log</td><td>trace/projection/export 均脱敏</td></tr>
+              <tr><td>Prompt injection</td><td>网页/仓库要求读密钥或执行命令</td><td>untrusted 标签和 Policy deny</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>借鉴 ZCode 的 <a href="https://github.com/zai-org/ZCode/blob/main/docs/testing/e2e-fs-fault-injection.md">FS Fault Injection</a>：错误应保留 Node Errno 形状并附带 faultId、operation、path，测试通过故障 ID 定位。</p>
+      </section>
+
+      <section id="property">
+        <div class="section-head"><span class="section-no">17</span><h2>状态空间与属性测试</h2></div>
+        <p class="lede">手写 case 覆盖已知问题，属性测试寻找组合型问题。</p>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3>动作生成器</h3>
+            <pre><code>type Action =
+  | { type: "send" }
+  | { type: "steer" }
+  | { type: "followUp" }
+  | { type: "stop" }
+  | { type: "approve" }
+  | { type: "deny" }
+  | { type: "compact" }
+  | { type: "fork" }
+  | { type: "restart" }
+  | { type: "reconnect" }
+  | { type: "spawnChild" }
+  | { type: "cancelChild" };</code></pre>
+          </div>
+          <div class="card">
+            <h3>全局不变量</h3>
+            <ul class="checklist">
+              <li>每个 commandId 最多一个终态</li>
+              <li>输入只能 queue 或 transcript</li>
+              <li>launch、finish、compaction 至多各一次</li>
+              <li>Projection seq 单调且连续</li>
+              <li>父取消后无 owned child running</li>
+              <li>child 权限始终为父权限子集</li>
+              <li>Session stop 后无活跃 lease/process/tab</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="callout">
+          <div>
+            <strong>分层采用，不直接上 TLA+</strong>
+            <p>第一阶段用 fast-check 或自建枚举器；只对 Command、Lifecycle、Projection、Subagent 四个核心域做序列生成。第二阶段再把关键协议抽象为形式化模型。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="fixtures">
+        <div class="section-head"><span class="section-no">18</span><h2>Fixture 与目录规范</h2></div>
+        <p class="lede">Fixture 是可审查的测试合同，不是录包原样堆叠。</p>
+
+        <div class="code-label"><span>Proposed test tree</span></div>
+        <pre><code>tests/
+  unit/
+    domain/
+    session-tree/
+    compaction/
+    policy/
+  contract/
+    commands/
+    model-events/
+    tools/
+    projection/
+    agent-profile/
+  integration/
+    runtime/
+    lifecycle/
+    projection/
+    subagent/
+  golden/
+    projections/
+    compaction/
+    failover/
+  fixtures/
+    model/
+      basic-tool-loop.json
+      sse-disconnect-after-delta.json
+      context-overflow-then-retry.json
+    chrome/
+      basic.html
+      dialog.html
+      frames.html
+      upload.html
+    sandbox/
+      basic-repo/
+      symlink-escape/
+    profiles/
+  e2e/
+    chrome/
+    sandbox/
+  live/
+  support/
+    test-harness.ts
+    fake-model.ts
+    fake-tools.ts
+    fake-clock.ts
+    fixtures.ts</code></pre>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3>Fixture 规则</h3>
+            <ul class="checklist">
+              <li>SSE 按 event 序列保存，不按 TCP chunk</li>
+              <li>每个 fixture 有稳定 ID 和匹配条件</li>
+              <li>文件 fixture 不包含真实凭证</li>
+              <li>时间使用相对 offset，不写绝对时间</li>
+              <li>Golden 规范化 volatile 字段</li>
+              <li>数据变更必须有审查记录</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>隔离环境</h3>
+            <ul class="checklist">
+              <li>每个测试独立 HOME/TMP/DataDir</li>
+              <li>Chrome 使用临时 Profile</li>
+              <li>Sandbox 使用一次性 workspace</li>
+              <li>Git 禁用用户 global config</li>
+              <li>Disable local LLM discovery</li>
+              <li>测试结束检查孤儿资源</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="ci">
+        <div class="section-head"><span class="section-no">19</span><h2>CI 门禁、报告与指标</h2></div>
+        <p class="lede">PR 快、Nightly 全、Release 严；失败必须有可诊断 artifact。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>门禁</th><th>内容</th><th>目标</th></tr></thead>
+            <tbody>
+              <tr><td>PR Quick</td><td>typecheck、lint、L0–L2、Projection golden、build</td><td>&lt; 90 秒</td></tr>
+              <tr><td>PR Extended</td><td>Chrome smoke + component sandbox test</td><td>&lt; 5 分钟</td></tr>
+              <tr><td>Nightly</td><td>Chrome full、Sandbox E2E、crash/restart/chaos、fault injection</td><td>隔离环境</td></tr>
+              <tr><td>Live Eval</td><td>真实模型场景与质量指标</td><td>手动/定时，独立费用阈值</td></tr>
+              <tr><td>Release</td><td>全量、dist inventory、secret audit、跨平台 smoke</td><td>不可绕过</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="grid-3" style="margin-top:18px">
+          <div class="card"><span class="tag core">Artifact</span><h4>失败证据</h4><p>截图、DOM/AX、console、Projection JSON、EventLog、trace、测试命令、文件 diff、stderr。</p></div>
+          <div class="card"><span class="tag zc">Metrics</span><h4>核心指标</h4><p>成功率、恢复率、工具错误恢复、重复副作用、平均步数、延迟、token、费用和 flaky rate。</p></div>
+          <div class="card"><span class="tag security">Gate</span><h4>安全指标</h4><p>越权执行、secret 泄漏、路径逃逸、网络逃逸、孤儿进程、未释放资源必须为 0。</p></div>
+        </div>
+
+        <div class="code-label"><span>Recommended scripts</span></div>
+        <pre><code>{
+  "test": "npm run test:unit &amp;&amp; npm run test:contract &amp;&amp; npm run test:integration",
+  "test:unit": "vitest run tests/unit",
+  "test:contract": "vitest run tests/contract",
+  "test:integration": "vitest run tests/integration",
+  "test:golden": "vitest run tests/golden",
+  "test:browser": "node tests/e2e/chrome/run.mjs",
+  "test:sandbox": "node tests/e2e/sandbox/run.mjs",
+  "test:live": "node tests/live/run.mjs",
+  "test:summary": "node tests/support/summarize-results.mjs",
+  "check": "npm run typecheck &amp;&amp; npm run test &amp;&amp; npm run test:golden &amp;&amp; npm run build"
+}</code></pre>
+      </section>
+
+      <section id="current-code">
+        <div class="section-head"><span class="section-no">20</span><h2>针对当前 tinyai 的改造建议</h2></div>
+        <p class="lede">当前依赖是测试设计的直接约束。以下不是“顺手重构”，而是建立可测性的必要前置。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>当前位置</th><th>当前问题</th><th>先做成</th><th>对应测试</th></tr></thead>
+            <tbody>
+              <tr><td><a href="../../src/llm.ts">llm.ts</a></td><td>直接 fetch；SSE 解析与网络绑定</td><td><code>ModelTransport</code> + normalized ModelEvent</td><td>MODEL-*</td></tr>
+              <tr><td><a href="../../src/agent.ts">agent.ts</a></td><td>全局 runtime/store/config；直接 import tools</td><td>createAgentRuntime 依赖注入</td><td>LOOP-* / CMD-*</td></tr>
+              <tr><td><a href="../../src/agent.ts">agent.ts</a></td><td>非法工具参数回退为 <code>{}</code></td><td>schema parse 失败即 rejected</td><td>TOOL-001</td></tr>
+              <tr><td><a href="../../src/agent.ts">agent.ts</a></td><td><code>compact()</code> 替换全部消息，无切点/usage</td><td>ContextManager + CompactionEntry</td><td>COMP-*</td></tr>
+              <tr><td><a href="../../src/tools.ts">tools.ts</a></td><td>直接 chrome.tabs/debugger</td><td>BrowserProvider 接口</td><td>BROWSER-*</td></tr>
+              <tr><td><a href="../../src/tools.ts">tools.ts</a></td><td>safeTools 含 evaluate/network/写入操作</td><td>capability/effect policy</td><td>POL-*</td></tr>
+              <tr><td><a href="../../src/shared.ts">shared.ts</a></td><td>withTimeout 只 race，不取消底层</td><td>AbortController + cancellable Provider</td><td>TOOL-004</td></tr>
+              <tr><td><a href="../../src/shared.ts">shared.ts</a></td><td>直接 chrome.storage</td><td>StoragePort + InMemoryStore</td><td>INPUT-001 / PROJ-*</td></tr>
+              <tr><td><a href="../../src/ui.ts">ui.ts</a></td><td>大量 DOM 全局查询，业务逻辑耦合</td><td>Projection store + command bus</td><td>PROJ-* / CONN-*</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout warn">
+          <div>
+            <strong>先拆分依赖，不要先写大量 mock</strong>
+            <p>如果继续让 src/agent.ts 直接 import fetch、chrome.* 和 window，测试只能走复杂全局 stub。测试设计的第一步是抽出 ModelTransport、StoragePort、BrowserProvider、Clock 和 RuntimeFactory。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="roadmap">
+        <div class="section-head"><span class="section-no">21</span><h2>测试实施路线</h2></div>
+        <p class="lede">测试建设与 Agent 内核开发并行，但测试基建必须先落地。</p>
+
+        <div class="roadmap">
+          <div class="phase"><div class="phase-track"><div class="phase-dot">T0</div></div><div class="phase-body">
+            <h3>Test Harness Foundation</h3><p>一周内完成，后续所有开发共用。</p>
+            <ul>
+              <li>Vitest / fast-check / 测试目录 / scripts</li>
+              <li>FakeModel、FakeTools、FakeClock、InMemoryStore</li>
+              <li>隔离 HOME/TMP/UUID/随机种子</li>
+              <li>失败 artifact 与结果汇总</li>
+              <li>CI Quick Gate</li>
+            </ul>
+          </div></div>
+          <div class="phase"><div class="phase-track"><div class="phase-dot">T1</div></div><div class="phase-body">
+            <h3>Protocol & Runtime</h3><p>先证明状态和命令正确。</p>
+            <ul>
+              <li>Command/ACK/InputLedger</li>
+              <li>SessionLifecycle</li>
+              <li>AgentLoop/Tool contract</li>
+              <li>Projection snapshot/delta golden</li>
+              <li>Compaction</li>
+            </ul>
+          </div></div>
+          <div class="phase"><div class="phase-track"><div class="phase-dot">T2</div></div><div class="phase-body">
+            <h3>Recovery & Universal Agents</h3><p>验证断线和通用 Profile。</p>
+            <ul>
+              <li>live/cold replay</li>
+              <li>crash/restart/reconnect</li>
+              <li>Profile registry</li>
+              <li>foreground/background child</li>
+              <li>Plan Mode</li>
+            </ul>
+          </div></div>
+          <div class="phase"><div class="phase-track"><div class="phase-dot">T3</div></div><div class="phase-body">
+            <h3>Chrome & Sandbox E2E</h3><p>验证真实系统边界。</p>
+            <ul>
+              <li>Side Panel + SW restart + BYOK replay</li>
+              <li>tab/frame/dialog/upload/download</li>
+              <li>Docker isolated sandbox</li>
+              <li>resource leak and process tree</li>
+              <li>security escape suite</li>
+            </ul>
+          </div></div>
+          <div class="phase"><div class="phase-track"><div class="phase-dot">T4</div></div><div class="phase-body">
+            <h3>Live Eval & Quality</h3><p>最后评估模型策略，不与确定性门禁混用。</p>
+            <ul>
+              <li>工具选择准确率</li>
+              <li>失败恢复率</li>
+              <li>上下文压缩后任务连续性</li>
+              <li>子 Agent 收益与成本</li>
+              <li>计划/验证行为</li>
+            </ul>
+          </div></div>
+        </div>
+      </section>
+
+      <section id="cases">
+        <div class="section-head"><span class="section-no">22</span><h2>首批测试集建议</h2></div>
+        <p class="lede">80–100 个确定性用例足以形成第一道防线，之后再逐步覆盖复杂 UI 和真实环境。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>模块</th><th>数量</th><th>必测内容</th></tr></thead>
+            <tbody>
+              <tr><td>CommandInbox</td><td>12</td><td>FIFO、duplicate、stale、ACK 丢失、并发客户端</td></tr>
+              <tr><td>InputLedger</td><td>8</td><td>admit/promote/discard/failed、crash 后查询</td></tr>
+              <tr><td>SessionLifecycle</td><td>10</td><td>start/stop/restart 竞争、faulted、资源 drain</td></tr>
+              <tr><td>AgentLoop</td><td>14</td><td>steering、follow-up、parallel tools、abort</td></tr>
+              <tr><td>SessionTree</td><td>10</td><td>branch、fork、context edit、migration</td></tr>
+              <tr><td>Projection</td><td>12</td><td>snapshot/delta、gap、live/cold、action availability</td></tr>
+              <tr><td>Compaction</td><td>10</td><td>切点、repeat、overflow、file/plan continuity</td></tr>
+              <tr><td>ToolExecutor</td><td>10</td><td>schema、batch、cancel、display、artifact</td></tr>
+              <tr><td>Policy/Hooks</td><td>10</td><td>plan/build/guarded、digest、secret、child subset</td></tr>
+              <tr><td>Profiles</td><td>6</td><td>来源合并、任意 Profile、result schema</td></tr>
+              <tr><td>Subagent</td><td>10</td><td>foreground/background、send/resume、recursive stop</td></tr>
+              <tr><td>Browser fixtures</td><td>10</td><td>tabs、frame、dialog、click、upload、PDF</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout">
+          <div>
+            <strong>完成定义</strong>
+            <p>当 PR 可以在 90 秒内稳定验证这些核心不变量，且失败 artifact 能定位到命令、Task、Turn、Tool 和 Session 时，才算测试基建完成。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="evidence">
+        <div class="section-head"><span class="section-no">23</span><h2>证据附录</h2></div>
+        <p class="lede">测试方案基于实际源码、现有 CI 与测试目录，而不是通用最佳实践假设。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>主题</th><th>来源</th><th>借鉴内容</th></tr></thead>
+            <tbody>
+              <tr><td>ZCode 协议测试</td><td><a href="https://github.com/zai-org/ZCode/blob/main/apps/zcode-cli/packages/core/tests/turn-machine.test.ts">turn-machine.test.ts</a></td><td>显式状态机</td></tr>
+              <tr><td>ZCode E2E 流程</td><td><a href="https://github.com/zai-org/ZCode/blob/main/docs/testing/conversation-session-e2e-development-workflow.md">E2E Workflow</a></td><td>spec → case → fixture → promotion</td></tr>
+              <tr><td>ZCode SSE Replay</td><td><a href="https://github.com/zai-org/ZCode/blob/main/docs/testing/e2e-sse-capture-replay.md">SSE Replay</a></td><td>event 级时间回放</td></tr>
+              <tr><td>ZCode FS Fault</td><td><a href="https://github.com/zai-org/ZCode/blob/main/docs/testing/e2e-fs-fault-injection.md">FS Fault Injection</a></td><td>稳定注入 I/O 故障</td></tr>
+              <tr><td>Pi Agent tests</td><td><a href="https://github.com/earendil-works/pi/blob/main/packages/agent/test/agent-loop.test.ts">agent-loop.test.ts</a></td><td>事件顺序与工具循环</td></tr>
+              <tr><td>Pi faux provider</td><td><a href="https://github.com/earendil-works/pi/blob/main/packages/agent/test/e2e.test.ts">e2e.test.ts</a></td><td>确定性模型流</td></tr>
+              <tr><td>Pi isolation</td><td><a href="https://github.com/earendil-works/pi/blob/main/test.sh">test.sh</a></td><td>隔离 HOME/TMP/Git/NPM</td></tr>
+              <tr><td>Browser test harness</td><td><a href="../../browser-agent/tests">tests/</a></td><td>真实模块 import、Chrome stub</td></tr>
+              <tr><td>Browser smoke</td><td><a href="../../browser-agent/scripts/smoke-full.mjs">smoke-full.mjs</a></td><td>真 Chrome 加载与 SW 恢复</td></tr>
+              <tr><td>tinyai source</td><td><a href="../../src/agent.ts">agent.ts</a>、<a href="../../src/llm.ts">llm.ts</a></td><td>当前测试缝与缺口</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout warn">
+          <div>
+            <strong>最终建议</strong>
+            <p>先完成 Test Harness 和 80–100 个确定性用例，再接真实 Chrome 和 Sandbox。ZCode 的协议纪律、Pi 的 faux stream、Browser Agent 的真实 smoke 都应保留，但统一到 tinyai 自己的测试 ID 和基线体系。</p>
+          </div>
+        </div>
+      </section>
+
+      <footer class="footer">tinyai Agent · Test Strategy &amp; Harness Design v1.0 · 2026-10-30</footer>
+    </main>
+  </div>
+  <aside class="annotation-drawer" id="annotation-drawer" role="dialog" aria-modal="false" aria-labelledby="drawer-title" aria-hidden="true">
+    <div class="drawer-head"><h2 id="drawer-title">修订批注</h2><button class="icon-button drawer-close" id="drawer-close" type="button" aria-label="关闭批注面板">×</button></div>
+    <p class="drawer-tip">可在选中文本后开启标注并点击章节，或直接使用章节旁“批注”按钮。修订数据保存在浏览器本地。</p>
+    <div class="field"><label for="note-target">标注对象</label><div class="field-selection" id="note-target">尚未选择章节</div></div>
+    <div class="field"><label for="note-type">类型</label><select id="note-type"><option value="comment">修改建议</option><option value="must">必须修改</option><option value="decision">确认设计决策</option><option value="question">待确认问题</option></select></div>
+    <div class="field"><label for="note-text">修订内容</label><textarea id="note-text" placeholder="例如：Golden 只比较 Projection、工具副作用和 eventSeq，不比较模型自然语言。"></textarea></div>
+    <div class="drawer-actions"><button class="primary-button" id="save-note" type="button">保存批注</button><button class="secondary-button" id="new-note" type="button">清空输入</button><button class="secondary-button" id="export-review-2" type="button">导出修订 JSON</button></div>
+    <h3 style="margin-top:24px">当前文档批注</h3><div class="notes-list" id="notes-list"></div>
+    <div class="drawer-actions" style="margin-top:20px"><button class="danger-button" id="clear-notes" type="button">清空全部批注</button></div>
+  </aside>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11.6.0/dist/mermaid.min.js"></script>
+  <script>
+    (()=>{const DOC_ID="tinyai-testing-design-v1",DOC_VERSION="1.0",REVIEW_KEY="tinyai-testing-design-review-v1";const root=document.documentElement,drawer=document.getElementById("annotation-drawer"),targetEl=document.getElementById("note-target"),noteType=document.getElementById("note-type"),noteText=document.getElementById("note-text"),notesList=document.getElementById("notes-list"),countEl=document.getElementById("review-count"),toast=document.getElementById("toast");let annotations=[],activeTarget=null,editingId=null,reviewMode=false;try{const saved=JSON.parse(localStorage.getItem(REVIEW_KEY)||"[]");annotations=Array.isArray(saved)?saved:[]}catch{annotations=[]}
+      const esc=v=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;");const statusLabel=t=>({comment:"修改建议",must:"必须修改",decision:"已确认决策",question:"待确认"}[t]||"修改建议");const toastMsg=m=>{toast.textContent=m;toast.classList.add("is-visible");clearTimeout(toastMsg.timer);toastMsg.timer=setTimeout(()=>toast.classList.remove("is-visible"),1800)};const persist=()=>{try{localStorage.setItem(REVIEW_KEY,JSON.stringify(annotations));toastMsg("批注已保存到本浏览器")}catch{toastMsg("本地存储不可用，请立即导出")};renderNotes()};const targetInfo=el=>{const b=el.closest("[data-reviewable]")||el.closest("section"),s=el.closest("section");return{id:b?.dataset.reviewable||s?.id||"document",title:b?.dataset.reviewTitle||b?.querySelector("h2,h3")?.textContent?.trim()||s?.querySelector("h2")?.textContent?.trim()||"文档",sectionId:s?.id||b?.id||""}};
+      const openDrawer=(el,existingId=null)=>{const selection=window.getSelection()?.toString().trim()||"",existing=existingId?annotations.find(i=>i.id===existingId):null,info=existing?{id:existing.targetId,title:existing.targetTitle,sectionId:existing.sectionId}:el?targetInfo(el):(activeTarget||{id:"document",title:"文档全局",sectionId:""});activeTarget=info;editingId=existingId;targetEl.innerHTML=`<strong>${esc(info.title)}</strong><br><span>${esc(info.id)}</span>${selection?`<br><br>选中文本：${esc(selection.slice(0,320))}`:""}`;noteType.value=existing?.type||"comment";noteText.value=existing?.comment||"";drawer.classList.add("is-open");drawer.setAttribute("aria-hidden","false");renderNotes();setTimeout(()=>noteText.focus(),120)};const closeDrawer=()=>{drawer.classList.remove("is-open");drawer.setAttribute("aria-hidden","true")};
+      const renderNotes=()=>{countEl.textContent=String(annotations.length);const summary=document.querySelector(".review-summary");if(summary){summary.firstElementChild.textContent=`评审状态 · ${annotations.length} 条`;const s=summary.querySelector("span");if(s)s.textContent="批注自动保存在本浏览器；开发前请导出修订 JSON。"}document.querySelectorAll(".review-pin").forEach(b=>{const c=annotations.filter(i=>i.targetId===b.dataset.target).length;b.textContent=c?`批注 ${c}`:"批注";b.classList.toggle("has-notes",c>0)});if(!annotations.length){notesList.innerHTML='<div class="drawer-tip">还没有批注。</div>';return}notesList.innerHTML=annotations.slice().sort((a,b)=>b.updatedAt-a.updatedAt).map(i=>`<article class="note"><div class="note-head"><span class="note-status ${esc(i.type)}">${esc(statusLabel(i.type))}</span><button type="button" data-jump="${esc(i.sectionId)}" style="border:0;background:transparent;color:inherit;cursor:pointer;padding:0">${esc(i.targetTitle)}</button><span>${new Date(i.updatedAt).toLocaleString("zh-CN",{hour12:false})}</span></div>${i.selection?`<div class="drawer-tip" style="margin-bottom:6px">“${esc(i.selection)}”</div>`:""}<p>${esc(i.comment)}</p><div class="note-actions"><button type="button" data-edit="${esc(i.id)}">编辑</button><button type="button" data-delete="${esc(i.id)}">删除</button></div></article>`).join("")};
+      const saveNote=()=>{const comment=noteText.value.trim();if(!comment){toastMsg("请输入修订内容");noteText.focus();return}const now=Date.now();if(editingId){const k=annotations.findIndex(i=>i.id===editingId);if(k>=0)annotations[k]={...annotations[k],type:noteType.value,comment,updatedAt:now}}else annotations.push({id:crypto.randomUUID?crypto.randomUUID():`${now}-${Math.random()}`,targetId:activeTarget.id,targetTitle:activeTarget.title,sectionId:activeTarget.sectionId,selection:window.getSelection()?.toString().trim()||"",type:noteType.value,comment,createdAt:now,updatedAt:now,docVersion:DOC_VERSION});editingId=null;noteText.value="";persist()};
+      const exportReview=async()=>{const payload={schemaVersion:1,documentId:DOC_ID,documentVersion:DOC_VERSION,documentFile:"tinyai-testing-design-v1.html",exportedAt:new Date().toISOString(),annotations},text=JSON.stringify(payload,null,2),name=`tinyai-testing-review-${new Date().toISOString().slice(0,10)}.json`;try{if(window.showSaveFilePicker){const h=await window.showSaveFilePicker({suggestedName:name,types:[{description:"tinyai review JSON",accept:{"application/json":[".json"]}}]}),w=await h.createWritable();await w.write(text);await w.close();toastMsg("修订包已保存");return}}catch(e){if(e?.name==="AbortError")return}const url=URL.createObjectURL(new Blob([text],{type:"application/json"})),a=document.createElement("a");a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1500);toastMsg("修订包已下载")};const importReview=async file=>{if(!file)return;try{const data=JSON.parse(await file.text());if(!Array.isArray(data.annotations))throw Error("invalid");const byId=new Map(annotations.map(i=>[i.id,i]));for(const i of data.annotations)if(i&&data.documentId===DOC_ID&&i.comment)byId.set(i.id,i);annotations=[...byId.values()];persist();toastMsg(`已导入 ${data.annotations.length} 条批注`)}catch{toastMsg("导入失败：不是有效的修订 JSON")}};
+      document.querySelectorAll("section[id]").forEach(b=>{b.dataset.reviewable=b.id;b.dataset.reviewTitle=b.querySelector("h2")?.textContent?.trim()||b.id});document.querySelectorAll(".section-head").forEach(h=>{const b=h.closest("[data-reviewable]");if(!b)return;const btn=document.createElement("button");btn.type="button";btn.className="review-pin";btn.dataset.target=b.dataset.reviewable;btn.textContent="批注";btn.addEventListener("click",e=>{e.stopPropagation();openDrawer(b)});h.appendChild(btn)});
+      document.getElementById("review-toggle").addEventListener("click",e=>{reviewMode=!reviewMode;document.body.classList.toggle("review-mode",reviewMode);e.currentTarget.setAttribute("aria-pressed",String(reviewMode));e.currentTarget.classList.toggle("is-active",reviewMode);toastMsg(reviewMode?"标注模式：点击章节添加批注":"已退出标注模式")});document.getElementById("open-review").addEventListener("click",()=>openDrawer(activeTarget?document.querySelector(`[data-reviewable="${activeTarget.id}"]`):document.querySelector("#summary")));document.getElementById("drawer-close").addEventListener("click",closeDrawer);document.getElementById("save-note").addEventListener("click",saveNote);document.getElementById("new-note").addEventListener("click",()=>{editingId=null;noteText.value="";noteText.focus()});document.getElementById("export-review").addEventListener("click",exportReview);document.getElementById("export-review-2").addEventListener("click",exportReview);document.getElementById("import-review").addEventListener("click",()=>document.getElementById("import-review-file").click());document.getElementById("import-review-file").addEventListener("change",e=>importReview(e.target.files?.[0]));document.getElementById("clear-notes").addEventListener("click",()=>{if(annotations.length&&confirm("确定清空全部本机批注吗？建议先导出修订 JSON。")){annotations=[];persist()}});document.addEventListener("click",e=>{if(!reviewMode)return;if(e.target.closest("button,a,input,select,textarea,summary,.mermaid"))return;const b=e.target.closest("[data-reviewable]");if(b)openDrawer(b)});document.addEventListener("keydown",e=>{if(e.key==="Escape")closeDrawer()});notesList.addEventListener("click",e=>{const edit=e.target.closest("[data-edit]"),del=e.target.closest("[data-delete]"),jump=e.target.closest("[data-jump]");if(edit)openDrawer(null,edit.dataset.edit);if(del&&confirm("删除这条批注吗？")){annotations=annotations.filter(i=>i.id!==del.dataset.delete);persist()}if(jump)document.getElementById(jump.dataset.jump)?.scrollIntoView({behavior:"smooth",block:"start"})});document.getElementById("print-button").addEventListener("click",()=>window.print());
+      const themeToggle=document.getElementById("theme-toggle"),savedTheme=localStorage.getItem("tinyai-testing-theme");root.dataset.theme=savedTheme||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");themeToggle.textContent=root.dataset.theme==="dark"?"☀":"◐";const sourceNodes=[...document.querySelectorAll(".mermaid")];sourceNodes.forEach(n=>{n.dataset.source=n.textContent.trim()});async function renderMermaid(){if(!window.mermaid)return;const css=getComputedStyle(root),vars={background:css.getPropertyValue("--surface").trim(),primaryColor:css.getPropertyValue("--surface-2").trim(),primaryTextColor:css.getPropertyValue("--text").trim(),primaryBorderColor:css.getPropertyValue("--border-strong").trim(),secondaryColor:css.getPropertyValue("--blue-soft").trim(),tertiaryColor:css.getPropertyValue("--green-soft").trim(),lineColor:css.getPropertyValue("--muted").trim(),fontFamily:getComputedStyle(document.body).fontFamily,fontSize:"13px"};mermaid.initialize({startOnLoad:false,securityLevel:"loose",theme:"base",themeVariables:vars,flowchart:{curve:"basis",htmlLabels:true,padding:14},sequence:{useMaxWidth:true,wrap:true},class:{useMaxWidth:true}});sourceNodes.forEach(n=>{n.removeAttribute("data-processed");n.textContent=n.dataset.source});await mermaid.run({nodes:sourceNodes})}themeToggle.addEventListener("click",async()=>{const next=root.dataset.theme==="dark"?"light":"dark";root.dataset.theme=next;themeToggle.textContent=next==="dark"?"☀":"◐";localStorage.setItem("tinyai-testing-theme",next);await renderMermaid()});
+      const links=[...document.querySelectorAll(".toc a")],sections=links.map(l=>document.querySelector(l.getAttribute("href"))).filter(Boolean),observer=new IntersectionObserver(entries=>{const visible=entries.filter(e=>e.isIntersecting).sort((a,b)=>b.intersectionRatio-a.intersectionRatio);if(!visible[0])return;links.forEach(l=>l.classList.toggle("active",l.getAttribute("href")==="#"+visible[0].target.id))},{rootMargin:"-15% 0px -70% 0px",threshold:[.05,.2,.5]});sections.forEach(s=>observer.observe(s));renderNotes();renderMermaid();
+    })();
+  </script>
+</body>
+</html>

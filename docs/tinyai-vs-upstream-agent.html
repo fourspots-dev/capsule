@@ -1,0 +1,1232 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="tinyai Agent 2.0 目标设计与 fourspots-dev/browser-agent 上游实现的架构和能力差异。">
+  <title>tinyai Agent 2.0 vs 上游 Agent</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f2f0ea;
+      --surface: #fffdf8;
+      --surface-2: #eae6dc;
+      --surface-3: #dcd6c9;
+      --text: #191a17;
+      --muted: #686a62;
+      --faint: #8d8f86;
+      --border: #d8d2c6;
+      --border-strong: #b6afa1;
+      --accent: #cf5531;
+      --accent-soft: #fde6de;
+      --accent-ink: #8b2c17;
+      --green: #257052;
+      --green-soft: #def0e7;
+      --blue: #2f608c;
+      --blue-soft: #e0edf7;
+      --amber: #8d5b16;
+      --amber-soft: #f8ebc9;
+      --purple: #6a508d;
+      --purple-soft: #eee5f7;
+      --red: #a32e36;
+      --red-soft: #f8e1e2;
+      --code: #20211e;
+      --code-text: #f1eee7;
+      --shadow: 0 18px 50px rgba(55, 42, 28, .08);
+      --sidebar: 238px;
+    }
+
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #11120f;
+      --surface: #1a1c18;
+      --surface-2: #24271f;
+      --surface-3: #30342b;
+      --text: #efede5;
+      --muted: #aaa99e;
+      --faint: #85877e;
+      --border: #373a31;
+      --border-strong: #55594d;
+      --accent: #ef7854;
+      --accent-soft: #3d241c;
+      --accent-ink: #ffc4b1;
+      --green: #72cba4;
+      --green-soft: #19362a;
+      --blue: #8bc3ed;
+      --blue-soft: #1c3041;
+      --amber: #e1ba73;
+      --amber-soft: #382e1b;
+      --purple: #c1a8e8;
+      --purple-soft: #30243f;
+      --red: #f0898f;
+      --red-soft: #401f22;
+      --code: #0d0e0c;
+      --code-text: #e9e7df;
+      --shadow: 0 18px 52px rgba(0, 0, 0, .25);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 82% -10%, color-mix(in srgb, var(--blue) 10%, transparent), transparent 28rem),
+        var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 15px;
+      line-height: 1.72;
+      text-rendering: optimizeLegibility;
+    }
+
+    a { color: var(--accent-ink); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    button { font: inherit; color: inherit; }
+    code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+    code { padding: .14em .38em; border-radius: 5px; background: var(--surface-2); font-size: .9em; }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      min-height: 64px;
+      padding: 0 28px;
+      background: color-mix(in srgb, var(--bg) 90%, transparent);
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+      backdrop-filter: blur(18px);
+    }
+
+    .brand { display: flex; align-items: center; gap: 10px; min-width: var(--sidebar); font-weight: 650; }
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      color: #fff;
+      background: var(--accent);
+      border-radius: 9px 9px 9px 3px;
+      font-family: Georgia, serif;
+      font-size: 17px;
+      font-style: italic;
+    }
+
+    .top-meta { display: flex; gap: 9px; min-width: 0; color: var(--muted); font-size: 12px; }
+    .top-actions { display: flex; gap: 8px; margin-left: auto; }
+    .icon-button {
+      display: grid;
+      place-items: center;
+      width: 36px;
+      height: 36px;
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      background: var(--surface);
+      cursor: pointer;
+    }
+
+    .icon-button:hover { border-color: var(--border-strong); }
+    .icon-button:focus-visible, .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: var(--sidebar) minmax(0, 1fr);
+      max-width: 1480px;
+      margin: 0 auto;
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 64px;
+      align-self: start;
+      height: calc(100vh - 64px);
+      padding: 30px 24px 48px 28px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+    }
+
+    .sidebar-label {
+      margin: 0 0 12px;
+      color: var(--faint);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .toc { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
+    .toc a {
+      display: block;
+      padding: 6px 10px;
+      border-left: 2px solid transparent;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+      text-decoration: none;
+    }
+
+    .toc a:hover { color: var(--text); }
+    .toc a.active { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--text); font-weight: 600; }
+    .sidebar-note { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--faint); font-size: 11px; line-height: 1.55; }
+
+    main { width: min(100%, 1140px); padding: 52px 58px 110px; }
+    .hero {
+      position: relative;
+      padding: 46px 48px 42px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 26px;
+      background: linear-gradient(132deg, var(--surface), color-mix(in srgb, var(--blue) 5%, var(--surface)));
+      box-shadow: var(--shadow);
+    }
+
+    .hero::after {
+      content: "A/B";
+      position: absolute;
+      right: 30px;
+      top: 8px;
+      color: color-mix(in srgb, var(--blue) 11%, transparent);
+      font-family: Georgia, serif;
+      font-size: 130px;
+      line-height: 1;
+      letter-spacing: -.08em;
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 22px;
+      color: var(--accent-ink);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent); }
+    h1 {
+      position: relative;
+      max-width: 780px;
+      margin: 0;
+      font-family: Georgia, "Songti SC", serif;
+      font-size: clamp(36px, 5vw, 62px);
+      font-weight: 500;
+      line-height: 1.05;
+      letter-spacing: -.045em;
+    }
+
+    .hero-lead { position: relative; max-width: 760px; margin: 24px 0 0; color: var(--muted); font-size: 17px; }
+    .meta-strip { display: flex; flex-wrap: wrap; gap: 10px 24px; margin-top: 32px; padding-top: 22px; border-top: 1px solid var(--border); color: var(--faint); font-size: 12px; }
+    .meta-strip strong { margin-right: 5px; color: var(--text); font-weight: 600; }
+
+    section { scroll-margin-top: 88px; margin-top: 70px; }
+    .section-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 22px; }
+    .section-no { color: var(--accent); font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px; font-weight: 700; letter-spacing: .08em; }
+    h2 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: clamp(27px, 3vw, 36px); font-weight: 500; line-height: 1.2; letter-spacing: -.025em; }
+    h3 { margin: 34px 0 12px; font-size: 18px; font-weight: 650; letter-spacing: -.015em; }
+    h4 { margin: 22px 0 8px; font-size: 14px; font-weight: 650; }
+    p { margin: 10px 0 16px; }
+    ul, ol { margin: 12px 0 20px; padding-left: 23px; }
+    li { margin: 6px 0; }
+    li::marker { color: var(--accent); }
+    .lede { max-width: 820px; color: var(--muted); font-size: 16px; }
+
+    .grid-2, .grid-3, .grid-4 { display: grid; gap: 16px; }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+    .card {
+      min-width: 0;
+      padding: 21px 22px;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: var(--surface);
+    }
+
+    .card h3, .card h4 { margin-top: 0; }
+    .card p:last-child, .card ul:last-child { margin-bottom: 0; }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 23px;
+      padding: 2px 8px;
+      border-radius: 99px;
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .tag.target { background: var(--blue-soft); color: var(--blue); }
+    .tag.upstream { background: var(--green-soft); color: var(--green); }
+    .tag.gap { background: var(--amber-soft); color: var(--amber); }
+    .tag.risk { background: var(--red-soft); color: var(--red); }
+    .tag.design { background: var(--purple-soft); color: var(--purple); }
+
+    .callout {
+      display: grid;
+      grid-template-columns: 4px 1fr;
+      gap: 18px;
+      margin: 28px 0;
+      padding: 18px 20px;
+      border-radius: 10px;
+      background: var(--surface-2);
+    }
+
+    .callout::before { content: ""; border-radius: 4px; background: var(--accent); }
+    .callout strong { display: block; margin-bottom: 3px; }
+    .callout p { margin: 0; color: var(--muted); }
+    .callout.info::before { background: var(--blue); }
+    .callout.warn { background: var(--amber-soft); }
+    .callout.warn::before { background: var(--amber); }
+
+    .compare {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin: 18px 0;
+    }
+
+    .compare > article {
+      padding: 23px;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: var(--surface);
+    }
+
+    .compare.upstream > article:first-child { border-top: 3px solid var(--green); }
+    .compare.target > article:first-child { border-top: 3px solid var(--blue); }
+    .compare h3 { margin: 12px 0 8px; }
+    .compare p { color: var(--muted); font-size: 13px; }
+
+    .verdict-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+    .verdict {
+      padding: 20px;
+      border-top: 3px solid var(--blue);
+      background: var(--surface);
+      border-radius: 0 0 14px 14px;
+    }
+
+    .verdict strong { display: block; margin: 8px 0 4px; font-size: 15px; }
+    .verdict span { color: var(--muted); font-size: 12px; }
+
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { color: var(--faint); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    .table-wrap table { min-width: 780px; }
+    .table-wrap.compact table { min-width: 650px; }
+
+    .diagram-card {
+      padding: 22px;
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: var(--surface);
+    }
+
+    .diagram-card .mermaid { min-width: 760px; text-align: center; }
+    .diagram-caption { margin: 12px 2px 0; color: var(--faint); font-size: 11px; text-align: center; }
+
+    .bar {
+      display: grid;
+      grid-template-columns: 152px 1fr;
+      gap: 12px;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+    }
+
+    .bar:last-child { border-bottom: 0; }
+    .bar-label { color: var(--muted); }
+    .dual-track { display: grid; gap: 6px; }
+    .track-row { display: grid; grid-template-columns: 74px 1fr; gap: 8px; align-items: center; }
+    .track-row span { color: var(--faint); font-size: 10px; }
+    .track { height: 8px; overflow: hidden; border-radius: 99px; background: var(--surface-2); }
+    .track i { display: block; height: 100%; border-radius: inherit; background: var(--green); }
+    .track.target i { background: var(--blue); }
+
+    .tabs { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+    .tab { padding: 7px 13px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; }
+    .tab[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 8px rgba(0, 0, 0, .06); }
+    .tab-panel { margin-top: 15px; padding: 22px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }
+    .tab-panel h3 { margin-top: 0; }
+    .delta { display: grid; grid-template-columns: 145px 1fr; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+    .delta:last-child { border-bottom: 0; }
+    .delta b { color: var(--accent-ink); }
+
+    .score { display: grid; gap: 7px; }
+    .score-row { display: grid; grid-template-columns: 135px 1fr 1fr; gap: 8px; align-items: center; font-size: 11px; }
+    .score-row strong { color: var(--text); font-size: 12px; }
+    .pill { display: inline-flex; justify-content: center; padding: 4px 8px; border-radius: 99px; font-size: 10px; font-weight: 700; }
+    .pill.green { background: var(--green-soft); color: var(--green); }
+    .pill.blue { background: var(--blue-soft); color: var(--blue); }
+    .pill.gray { background: var(--surface-2); color: var(--muted); }
+    .pill.amber { background: var(--amber-soft); color: var(--amber); }
+
+    .decision { display: grid; grid-template-columns: 170px 1fr; gap: 14px; padding: 13px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+    .decision:last-child { border-bottom: 0; }
+    .decision b { color: var(--accent-ink); }
+
+    pre {
+      margin: 16px 0;
+      padding: 18px 20px;
+      overflow-x: auto;
+      border-radius: 13px;
+      background: var(--code);
+      color: var(--code-text);
+      font-size: 11px;
+      line-height: 1.65;
+    }
+
+    pre code { padding: 0; background: transparent; color: inherit; font-size: inherit; }
+    .checklist { padding: 0; list-style: none; }
+    .checklist li { position: relative; margin: 9px 0; padding-left: 27px; }
+    .checklist li::before {
+      content: "✓";
+      position: absolute;
+      left: 0;
+      top: 1px;
+      display: grid;
+      place-items: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--green-soft);
+      color: var(--green);
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .roadmap { display: grid; gap: 0; margin-top: 20px; }
+    .phase { display: grid; grid-template-columns: 86px 1fr; gap: 22px; padding: 0 0 34px; }
+    .phase-track { position: relative; display: flex; justify-content: center; }
+    .phase-track::before { content: ""; position: absolute; top: 35px; bottom: -34px; width: 1px; background: var(--border); }
+    .phase:last-child .phase-track::before { display: none; }
+    .phase-dot { position: relative; z-index: 1; display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid var(--border); border-radius: 50%; background: var(--surface); color: var(--accent); font-family: monospace; font-size: 11px; font-weight: 700; }
+    .phase-body { padding: 21px 23px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }
+    .phase-body h3 { margin: 0 0 6px; }
+    .phase-body > p { margin-top: 0; color: var(--muted); font-size: 13px; }
+    .phase-body ul { margin-bottom: 0; font-size: 13px; }
+
+    details { margin: 12px 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); }
+    summary { cursor: pointer; font-weight: 650; font-size: 13px; }
+    details p:last-child, details ul:last-child { margin-bottom: 0; }
+    .footer { margin-top: 72px; padding-top: 24px; border-top: 1px solid var(--border); color: var(--faint); font-size: 11px; }
+
+    @media (max-width: 1050px) {
+      :root { --sidebar: 206px; }
+      main { padding: 42px 36px 90px; }
+      .grid-4, .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 820px) {
+      .topbar { padding: 0 18px; }
+      .brand { min-width: auto; }
+      .top-meta { display: none; }
+      .layout { display: block; }
+      .sidebar { display: none; }
+      main { padding: 26px 18px 76px; }
+      .hero { padding: 34px 26px 30px; border-radius: 20px; }
+      .hero::after { font-size: 86px; opacity: .7; }
+      .grid-2, .grid-3, .grid-4, .compare, .verdict-grid { grid-template-columns: 1fr; }
+      .delta { grid-template-columns: 112px 1fr; }
+      .decision { grid-template-columns: 130px 1fr; }
+    }
+
+    @media (max-width: 520px) {
+      body { font-size: 14px; }
+      .hero-lead { font-size: 15px; }
+      .meta-strip { display: grid; gap: 7px; }
+      .phase { grid-template-columns: 52px 1fr; gap: 12px; }
+      .phase-dot { width: 34px; height: 34px; }
+      .bar { grid-template-columns: 1fr; }
+      .score-row { grid-template-columns: 105px 1fr 1fr; }
+    }
+
+    @media print {
+      html, body { background: #fff; color: #111; }
+      .topbar, .sidebar, .top-actions, .tabs { display: none !important; }
+      .layout { display: block; }
+      main { width: 100%; max-width: none; padding: 0; }
+      .hero, .card, .phase-body, .tab-panel, .diagram-card { box-shadow: none; break-inside: avoid; }
+      .tab-panel { display: block !important; margin-top: 18px; }
+      section { break-inside: avoid-page; }
+      a { color: #111; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { transition: none !important; animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">Δ</span><span>agent comparison</span></div>
+    <div class="top-meta"><span>tinyai Agent 2.0</span><span>vs</span><span>fourspots-dev/browser-agent</span><span>·</span><span>2026-10-30</span></div>
+    <div class="top-actions">
+      <button class="icon-button" id="theme-toggle" type="button" aria-label="切换主题" title="切换主题">◐</button>
+      <button class="icon-button" id="print-button" type="button" aria-label="打印文档" title="打印为 PDF">⇩</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar" aria-label="文档目录">
+      <p class="sidebar-label">Contents</p>
+      <nav>
+        <ol class="toc">
+          <li><a href="#summary">结论摘要</a></li>
+          <li><a href="#baseline">比较基线</a></li>
+          <li><a href="#positioning">产品定位</a></li>
+          <li><a href="#architecture">架构差异</a></li>
+          <li><a href="#matrix">能力矩阵</a></li>
+          <li><a href="#runtime">运行与恢复</a></li>
+          <li><a href="#context">上下文压缩</a></li>
+          <li><a href="#subagents">子 Agent</a></li>
+          <li><a href="#permissions">权限与审批</a></li>
+          <li><a href="#tools">工具与模型</a></li>
+          <li><a href="#sandbox">沙盒与 Coding</a></li>
+          <li><a href="#quality">工程成熟度</a></li>
+          <li><a href="#borrow">复用策略</a></li>
+          <li><a href="#roadmap">收敛路线</a></li>
+          <li><a href="#evidence">证据附录</a></li>
+        </ol>
+      </nav>
+      <div class="sidebar-note">对比对象是目标设计，不是 tinyai 当前 0.1.0 的全部能力。上游数据来自本地 clone 的实际源码。</div>
+    </aside>
+
+    <main>
+      <section class="hero" id="summary">
+        <div class="eyebrow"><span class="status-dot"></span>ARCHITECTURE COMPARISON</div>
+        <h1>同源目标，不同阶段</h1>
+        <p class="hero-lead">
+          上游已经是一个功能完整、测试充分的真实浏览器 Agent；tinyai Agent 2.0 则是一份面向可恢复运行时和未来代码沙盒的内核设计。前者胜在已落地和功能广度，后者胜在边界清晰、权限粒度与恢复模型。
+        </p>
+        <div class="meta-strip">
+          <span><strong>对比对象</strong> 目标设计 vs 上游实现</span>
+          <span><strong>上游版本</strong> 0.15.1</span>
+          <span><strong>上游规模</strong> 67,613 行源码</span>
+          <span><strong>基准日期</strong> 2026-10-30</span>
+        </div>
+      </section>
+
+      <div class="callout info">
+        <div>
+          <strong>一句话结论</strong>
+          <p>如果现在要比“谁更完整”，上游明显领先；如果比“谁更适合继续扩展成 Web + 受限沙盒 Coding Agent”，目标设计的架构方向更合理，但关键能力仍停留在设计阶段。</p>
+        </div>
+      </div>
+
+      <div class="grid-4" style="margin-top:28px">
+        <div class="card"><span class="tag upstream">上游领先</span><h4>已实现功能</h4><p>浏览器工具、附件、压缩、子 Agent、模型路由和真机回归已落地。</p></div>
+        <div class="card"><span class="tag target">设计领先</span><h4>内核边界</h4><p>显式状态机、事件日志、写入租约和能力级审批更便于长期演进。</p></div>
+        <div class="card"><span class="tag design">设计领先</span><h4>沙盒方向</h4><p>目标设计预留 ExecutionProvider、WorkspaceProvider 和受限沙盒边界。</p></div>
+        <div class="card"><span class="tag gap">双方不足</span><h4>真正 Coding</h4><p>两边都还没有生产级的代码工作区、PTY、文件系统和测试执行闭环。</p></div>
+      </div>
+
+      <section id="baseline">
+        <div class="section-head"><span class="section-no">01</span><h2>比较基线</h2></div>
+        <p class="lede">为了避免把“设计里写了”误认为“已经实现”，本文始终区分目标设计和上游当前代码。</p>
+
+        <div class="compare target">
+          <article>
+            <span class="tag design">A · TARGET DESIGN</span>
+            <h3>tinyai Agent 2.0</h3>
+            <p>基于上一份详细设计文档的系统目标。强调持久任务、事件日志、结构化工具协议、上下文预算、能力权限、子 Agent 与未来沙盒。</p>
+            <ul>
+              <li>状态：设计基线，不是现有实现</li>
+              <li>目标：通用 Agent Kernel</li>
+              <li>优势：边界统一、可扩展、安全模型更细</li>
+              <li>风险：尚未经过实现和评测验证</li>
+            </ul>
+          </article>
+          <article>
+            <span class="tag upstream">B · UPSTREAM</span>
+            <h3>fourspots-dev/browser-agent</h3>
+            <p>本地实际源码与构建产物。WXT + React 扩展，拥有后台会话循环、浏览器工具、上下文压缩、子 Agent 和大量单元/真机测试。</p>
+            <ul>
+              <li>状态：可运行的真实工程</li>
+              <li>目标：完整浏览器 Agent 产品</li>
+              <li>优势：能力广度、行为细节、回归覆盖</li>
+              <li>风险：大模块、浏览器域权限模型、无代码沙盒</li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="table-wrap compact" style="margin-top:18px">
+          <table>
+            <thead><tr><th>比较口径</th><th>解释</th><th>使用方式</th></tr></thead>
+            <tbody>
+              <tr><td>已实现</td><td>上游源码中可定位到实际逻辑和测试</td><td>可作为行为和实现参考</td></tr>
+              <tr><td>设计目标</td><td>tinyai 设计文档中定义，但尚未实现</td><td>作为架构决策与落地清单</td></tr>
+              <tr><td>双方缺口</td><td>两边都没有生产级实现</td><td>作为下一阶段新增能力</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="positioning">
+        <div class="section-head"><span class="section-no">02</span><h2>产品定位差异</h2></div>
+        <p class="lede">上游是“在用户真实浏览器里完成网页任务”的成品型 Agent；目标设计更像“可承载多种执行环境的 Agent 操作系统内核”。</p>
+
+        <div class="grid-3">
+          <div class="card">
+            <span class="tag upstream">上游</span>
+            <h3>真实浏览器操作员</h3>
+            <p>按标签组组织任务，直接复用用户登录态，强调网页观察、点击、输入、文件上传、下载、录制和技能复用。</p>
+          </div>
+          <div class="card">
+            <span class="tag target">目标设计</span>
+            <h3>Agent Kernel</h3>
+            <p>把任务状态、上下文、工具、权限和执行环境抽象为独立模块，浏览器只是第一个 Provider，后续可接容器或 WASM。</p>
+          </div>
+          <div class="card">
+            <span class="tag gap">尚未覆盖</span>
+            <h3>完整 Coding Agent</h3>
+            <p>需要工作区、代码编辑、测试、PTY、网络隔离、artifact、diff 审阅和合并协议，双方都还没有形成完整闭环。</p>
+          </div>
+        </div>
+
+        <div class="verdict-grid">
+          <div class="verdict"><span class="tag upstream">胜出</span><strong>用户能力与产品完整度</strong><span>上游已有真实 UI、丰富工具和浏览器边界细节。</span></div>
+          <div class="verdict"><span class="tag target">胜出</span><strong>长期架构可演进性</strong><span>目标设计把运行、执行和权限解耦得更彻底。</span></div>
+          <div class="verdict"><span class="tag gap">共同缺口</span><strong>受限代码执行环境</strong><span>需要全新沙盒、工作区和验证产品面。</span></div>
+        </div>
+      </section>
+
+      <section id="architecture">
+        <div class="section-head"><span class="section-no">03</span><h2>架构差异</h2></div>
+        <p class="lede">两边都采用“UI → Agent 循环 → 工具 → 事件回 UI”的结构，但上游更偏浏览器产品实现，目标设计更偏通用运行时分层。</p>
+
+        <div class="diagram-card">
+          <div class="mermaid">
+flowchart LR
+  subgraph U["上游 · 当前实现"]
+    UI1["Side Panel / React"]
+    BG1["Background session-loop&lt;br/&gt;队列、持久时间线、审批路由"]
+    SDK1["Agent Step Loop&lt;br/&gt;工具批次、压缩、模型恢复"]
+    T1["Browser Tools&lt;br/&gt;tabs / CDP / frames"]
+    P1["AgentGW / OpenAI / Anthropic&lt;br/&gt;BYOK / 模型发现"]
+    IDB1["IndexedDB&lt;br/&gt;chat records / blobs / replay"]
+    UI1 <--> BG1
+    BG1 --> SDK1
+    SDK1 --> T1
+    SDK1 --> P1
+    BG1 --> IDB1
+  end
+  subgraph T["tinyai · 目标设计"]
+    UI2["UI Bridge&lt;br/&gt;Command / Event"]
+    RT2["AgentRuntime&lt;br/&gt;持久状态机"]
+    K2["Context / Planner / Verifier"]
+    SC2["SubagentCoordinator"]
+    TE2["ToolExecutor&lt;br/&gt;Schema / Idempotency"]
+    PE2["PolicyEngine&lt;br/&gt;Capability Decision"]
+    EP2["ExecutionProvider&lt;br/&gt;Browser / Sandbox"]
+    LOG2["Event Log + Artifact Store"]
+    UI2 <--> RT2
+    RT2 --> K2
+    RT2 --> SC2
+    RT2 --> TE2
+    TE2 --> PE2
+    TE2 --> EP2
+    RT2 --> LOG2
+  end
+  classDef u fill:#def0e7,stroke:#257052,color:#191a17
+  classDef t fill:#e0edf7,stroke:#2f608c,color:#191a17
+  class UI1,BG1,SDK1,T1,P1,IDB1 u
+  class UI2,RT2,K2,SC2,TE2,PE2,EP2,LOG2 t
+          </div>
+          <div class="diagram-caption">图 1 · 产品型实现与通用运行时设计的边界对比</div>
+        </div>
+
+        <h3>关键判断</h3>
+        <div class="grid-2">
+          <div class="card">
+            <h3>上游架构强项</h3>
+            <ul>
+              <li>事件、时间线、持久化和 UI 已有闭环。</li>
+              <li>工具批次调度、路径冲突调度、取消和审批均已实现。</li>
+              <li>上下文溢出、媒体降级、模型恢复已有真实代码路径。</li>
+              <li>大量迁移自真实产品的边界行为，细节更可靠。</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>目标设计强项</h3>
+            <ul>
+              <li>状态机、快照、事件和写入租约是显式内核契约。</li>
+              <li>能力级权限可覆盖文件、进程、网络，而不只浏览器动作。</li>
+              <li>ModelGateway、ToolExecutor、ExecutionProvider 边界更清晰。</li>
+              <li>未来沙盒不必修改 Agent 主循环。</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="matrix">
+        <div class="section-head"><span class="section-no">04</span><h2>能力矩阵</h2></div>
+        <p class="lede">这里的“目标设计”表示方案已经定义，不代表代码已经完成。“领先”只针对该维度，不代表整体优劣。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>维度</th><th>上游当前实现</th><th>tinyai 目标设计</th><th>判断</th></tr></thead>
+            <tbody>
+              <tr><td>浏览器 Agent</td><td>完整：标签组、CDP、frame、附件、下载、录制</td><td>以现有 30 个工具为起点，统一 Provider</td><td><span class="tag upstream">上游领先</span></td></tr>
+              <tr><td>任务执行</td><td>后台 session-loop、单回合队列、AbortController</td><td>持久任务状态机、租约、恢复检查点</td><td><span class="tag target">目标更强</span></td></tr>
+              <tr><td>上下文压缩</td><td>自动溢出恢复、摘要、媒体降级、保留用户消息</td><td>预算分区、自动压缩、artifact 引用、来源标签</td><td><span class="tag upstream">上游成熟</span></td></tr>
+              <tr><td>子 Agent</td><td>单类型、独立 context、实时事件、父取消</td><td>角色化、权限求交集、预算隔离、最多两层</td><td><span class="tag design">各有优势</span></td></tr>
+              <tr><td>权限模型</td><td>域 + 动作授权；审批/完全授权</td><td>能力级；action digest + revision + TTL</td><td><span class="tag target">目标更细</span></td></tr>
+              <tr><td>模型兼容</td><td>AgentGW、OpenAI 兼容、Anthropic、模型发现</td><td>统一 ModelGateway，能力待实现</td><td><span class="tag upstream">上游领先</span></td></tr>
+              <tr><td>持久化</td><td>IndexedDB records/blobs/chats、回放、历史修复</td><td>快照 + append-only 事件 + 写入租约</td><td><span class="tag design">目标更严格</span></td></tr>
+              <tr><td>代码沙盒</td><td>无完整代码工作区/PTY/测试闭环</td><td>已预留 Workspace/Sandbox Provider</td><td><span class="tag gap">双方缺口</span></td></tr>
+              <tr><td>测试与发布</td><td>171 个测试文件、1,353 个测试入口、真机 smoke</td><td>设计包含评测方案，尚无实现</td><td><span class="tag upstream">上游领先</span></td></tr>
+              <tr><td>工程结构</td><td>功能丰富，但存在 1,800–3,800 行迁移模块</td><td>模块拆分明晰，但可能过度设计</td><td><span class="tag design">目标更清晰</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>非量化成熟度</h3>
+        <div class="card" style="margin-top:16px">
+          <div class="score">
+            <div class="score-row"><strong>用户功能</strong><span class="pill green">上游：完整</span><span class="pill gray">目标：部分规划</span></div>
+            <div class="score-row"><strong>任务恢复</strong><span class="pill green">上游：已有回放</span><span class="pill blue">目标：更严格</span></div>
+            <div class="score-row"><strong>安全粒度</strong><span class="pill amber">上游：浏览器域</span><span class="pill blue">目标：能力级</span></div>
+            <div class="score-row"><strong>子 Agent</strong><span class="pill green">上游：已运行</span><span class="pill blue">目标：更可治理</span></div>
+            <div class="score-row"><strong>上下文</strong><span class="pill green">上游：已验证</span><span class="pill blue">目标：更系统</span></div>
+            <div class="score-row"><strong>Coding 沙盒</strong><span class="pill gray">上游：未覆盖</span><span class="pill amber">目标：只有边界</span></div>
+            <div class="score-row"><strong>工程验证</strong><span class="pill green">上游：充分</span><span class="pill gray">目标：待建立</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="runtime">
+        <div class="section-head"><span class="section-no">05</span><h2>运行与恢复</h2></div>
+        <p class="lede">上游的运行机制已经比“聊天 + Promise”成熟很多，但目标设计把可恢复性提升为系统级不变量。</p>
+
+        <div class="compare">
+          <article>
+            <span class="tag upstream">UPSTREAM · IMPLEMENTED</span>
+            <h3>后台会话循环</h3>
+            <p>每个会话有内存 loop、队列、时间线、AbortController、挂起审批与端口订阅。会话可以通过回放记录和 IndexedDB 恢复。</p>
+            <ul>
+              <li>回合期间拒绝新的普通回合，支持消息排队。</li>
+              <li>工具批次支持并发调度和路径冲突控制。</li>
+              <li>停止使用 AbortController，并传播到工具、模型和子 Agent。</li>
+              <li>上下文溢出后可以自动压缩并继续。</li>
+            </ul>
+          </article>
+          <article>
+            <span class="tag design">TARGET · DESIGNED</span>
+            <h3>持久任务状态机</h3>
+            <p>任务从创建开始就有明确状态、revision、事件日志和写入租约。模型、工具、审批和人工等待都是状态的一部分。</p>
+            <ul>
+              <li>快照用于快速恢复，事件用于审计和 UI 重放。</li>
+              <li>同一任务只有一个写入者，降低多上下文竞争。</li>
+              <li>副作用有幂等键，恢复前必须确认动作结果。</li>
+              <li>取消状态可跨进程持续，而不是只存在内存中。</li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="delta"><b>关键差异</b><span>上游已有运行闭环，但会话 loop 仍带大量内存状态；目标设计更重视跨进程一致性，不过代码尚未验证这些不变量。</span></div>
+        <div class="delta"><b>目标设计要学习</b><span>上游的队列、端口订阅、挂起审批对账、标签页恢复、回放时间线和真机 smoke 都是目标设计必须补齐的实现细节。</span></div>
+        <div class="delta"><b>上游需要目标设计</b><span>如果把 Agent 从浏览器产品扩展成代码 Agent，单进程 session loop 和浏览器域权限不足以覆盖工作区租约、进程和文件副作用。</span></div>
+      </section>
+
+      <section id="context">
+        <div class="section-head"><span class="section-no">06</span><h2>上下文压缩与溢出恢复</h2></div>
+        <p class="lede">这是上游明显领先、最值得优先移植的模块。</p>
+
+        <div class="grid-2">
+          <div class="card">
+            <span class="tag upstream">上游已实现</span>
+            <h3>CompactionManager</h3>
+            <ul>
+              <li>估算文本、工具 schema 和媒体 token。</li>
+              <li>保留近期用户消息，生成第一人称 handoff 摘要。</li>
+              <li>工具结果规范化、缺失结果合成、重复调用去重。</li>
+              <li>媒体块转换为标签、降级请求、移除媒体后重试。</li>
+              <li>上下文溢出时压缩后重试，并提供失败分类。</li>
+              <li>UI 有上下文余量、压缩进度、摘要查看与取消。</li>
+            </ul>
+          </div>
+          <div class="card">
+            <span class="tag design">目标设计</span>
+            <h3>预算化 ContextManager</h3>
+            <ul>
+              <li>规则、计划、对话、观察和输出预留分区。</li>
+              <li>70%/85%/95% 分级处理。</li>
+              <li>大结果进入 ArtifactStore，只回传摘要和引用。</li>
+              <li>页面、文件、工具结果带来源与信任标签。</li>
+              <li>结构化 checkpoint 保留计划、证据、决策和未解决问题。</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="callout">
+          <div>
+            <strong>结论</strong>
+            <p>目标设计的上下文分区和 artifact 思路更通用，但当前没有实现。近期不应重新发明压缩算法，应先以“上游 CompactionManager 为行为基线”实现目标内核的 ContextManager，再增加来源标签和 artifact 引用。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="subagents">
+        <div class="section-head"><span class="section-no">07</span><h2>子 Agent 差异</h2></div>
+        <p class="lede">上游已经有真实子 Agent；目标设计的主要增量是权限、预算和写隔离。</p>
+
+        <div class="diagram-card">
+          <div class="mermaid">
+flowchart TB
+  subgraph UP["上游子 Agent"]
+    PU["父 Agent"]
+    AU["agent Tool"]
+    CU["Child Agent Loop&lt;br/&gt;zero context"]
+    TU["Child Tab / Group"]
+    EU["subagent_event&lt;br/&gt;实时卡片"]
+    PU -->|"prompt + description"| AU
+    AU --> CU
+    CU --> TU
+    CU -->|"每条事件"| EU
+    EU --> PU
+    PU -.->|"Abort"| CU
+  end
+  subgraph TD["目标设计"]
+    PT["父 Task"]
+    SC["SubagentCoordinator"]
+    CT1["Researcher&lt;br/&gt;read-only"]
+    CT2["Reviewer&lt;br/&gt;read-only"]
+    CT3["Implementer&lt;br/&gt;future sandbox"]
+    PH["Policy ∩ Role Allowlist"]
+    RT["Structured ChildResult"]
+    PT --> SC
+    SC --> PH
+    PH --> CT1
+    PH --> CT2
+    PH --> CT3
+    CT1 --> RT
+    CT2 --> RT
+    CT3 --> RT
+    RT --> PT
+  end
+  classDef up fill:#def0e7,stroke:#257052,color:#191a17
+  classDef target fill:#e0edf7,stroke:#2f608c,color:#191a17
+  class PU,AU,CU,TU,EU up
+  class PT,SC,CT1,CT2,CT3,PH,RT target
+          </div>
+          <div class="diagram-caption">图 2 · 已运行的单类型子 Agent 与目标中的治理型子任务树</div>
+        </div>
+
+        <div class="table-wrap compact" style="margin-top:18px">
+          <table>
+            <thead><tr><th>方面</th><th>上游</th><th>目标设计</th></tr></thead>
+            <tbody>
+              <tr><td>上下文</td><td>独立、从零开始，由父 Agent 写完整 brief</td><td>独立 brief + artifact 引用 + 来源白名单</td></tr>
+              <tr><td>角色</td><td>一个通用子 Agent 类型</td><td>Researcher / Reviewer / Implementer</td></tr>
+              <tr><td>执行环境</td><td>同进程 loop，创建子标签页</td><td>同一 Runtime 类型，未来可在隔离跑运行</td></tr>
+              <tr><td>权限</td><td>与父 Agent 基本同工具面</td><td>父权限与角色白名单求交集</td></tr>
+              <tr><td>预算</td><td>没有看到独立 token/费用配额设计</td><td>每子任务独立步骤、token、时间和费用预算</td></tr>
+              <tr><td>结果</td><td>最终文本返回父 Agent，事件实时显示</td><td>摘要、证据、artifact、改动和未解决问题</td></tr>
+              <tr><td>取消</td><td>父 AbortSignal 传播到子 AbortController</td><td>递归取消整棵任务树</td></tr>
+              <tr><td>并发写</td><td>浏览器标签由 tab-group 管理</td><td>未来写任务必须使用独立 worktree/沙盒</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="permissions">
+        <div class="section-head"><span class="section-no">08</span><h2>权限与审批</h2></div>
+        <p class="lede">上游优化真实浏览器产品的用户摩擦；目标设计优化跨文件、进程和沙盒的可扩展安全边界。</p>
+
+        <div class="compare">
+          <article>
+            <span class="tag upstream">上游实现</span>
+            <h3>域 + 浏览器动作</h3>
+            <p>权限按域名保存，动作限定为 <code>navigate</code>、<code>interact</code>、<code>read_page</code>、<code>execute_js</code>。产品提供逐次审批和完全授权两种模式。</p>
+            <ul>
+              <li>适合浏览器场景，用户可以直接“在这个站点始终允许”。</li>
+              <li>只读工具通常自动放行，交互和 JS 执行可被拦截。</li>
+              <li>页面目标、元素选择器和动作影响已有较细 UI 描述。</li>
+              <li>完全授权模式仍然扩大了整体信任边界。</li>
+            </ul>
+          </article>
+          <article>
+            <span class="tag design">目标设计</span>
+            <h3>能力 + 动作摘要</h3>
+            <p>策略关注 <code>browser.action</code>、<code>fs.write</code>、<code>process.exec</code>、<code>network.connect</code> 等能力，审批绑定具体动作摘要、任务 revision 和 TTL。</p>
+            <ul>
+              <li>能统一覆盖浏览器、文件、命令和子 Agent。</li>
+              <li>参数变化后旧审批失效，降低重放风险。</li>
+              <li>更适合未来沙盒和生产代码操作。</li>
+              <li>交互复杂，必须通过 Eval 和可用性测试校准。</li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="callout warn">
+          <div>
+            <strong>不能简单判断谁更安全</strong>
+            <p>上游已经有经过测试的站点授权和挂起审批恢复；目标设计纸面上更精细，但还没证明不会产生审批疲劳或策略绕过。最合理方式是保留上游的站点授权 UX，同时引入目标设计的能力级后端策略。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="tools">
+        <div class="section-head"><span class="section-no">09</span><h2>工具与模型协议</h2></div>
+        <p class="lede">上游在协议容错和工具执行细节上领先不少，目标设计主要加强工具契约和 Provider 抽象。</p>
+
+        <div class="grid-2">
+          <div class="card">
+            <span class="tag upstream">上游已实现</span>
+            <h3>协议与工具执行</h3>
+            <ul>
+              <li>非法 JSON 和 schema 不通过会生成明确错误结果，而不是执行空参数。</li>
+              <li>一次模型响应中的多个工具调用可按批次调度。</li>
+              <li><code>PathAccessScheduler</code> 处理工具之间的路径冲突。</li>
+              <li>工具停止、用户中断、超时和最终结果拥有不同语义。</li>
+              <li>OpenAI、Anthropic、AgentGW 和 BYOK 端点统一到 ChatProvider。</li>
+              <li>支持 429、网络重试、模型切换、媒体降级和严格重发。</li>
+            </ul>
+          </div>
+          <div class="card">
+            <span class="tag design">目标设计</span>
+            <h3>结构化、跨环境契约</h3>
+            <ul>
+              <li>每个工具声明 capability、effect、risk、timeout、cancel、idempotent。</li>
+              <li>输入和输出都带 schema，输出可引用 artifact。</li>
+              <li>ModelGateway 统一模型事件、usage、错误和重试策略。</li>
+              <li>ExecutionProvider 可承载浏览器、容器、WASM 和进程。</li>
+              <li>工具实现不直接依赖具体浏览器 API。</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="table-wrap compact" style="margin-top:18px">
+          <table>
+            <thead><tr><th>协议点</th><th>上游</th><th>目标设计</th></tr></thead>
+            <tbody>
+              <tr><td>参数校验</td><td>已实现 JSON + schema 校验</td><td>设计为强制契约</td></tr>
+              <tr><td>工具并发</td><td>已有批次调度与路径冲突锁</td><td>设计为执行器能力，未实现</td></tr>
+              <tr><td>取消</td><td>AbortSignal 贯穿模型、工具和子 Agent</td><td>每个工具声明 cancellable，目标更严格</td></tr>
+              <tr><td>幂等</td><td>部分工具自身描述幂等，缺少统一副作用账本</td><td>统一 idempotency key + ledger</td></tr>
+              <tr><td>模型恢复</td><td>已实现重试、降级和模型切换</td><td>设计为 ModelGateway 策略</td></tr>
+              <tr><td>结果类型</td><td>文本、图像、结构化工具结果</td><td>结构化结果 + artifact 引用</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="sandbox">
+        <div class="section-head"><span class="section-no">10</span><h2>沙盒与 Coding Agent</h2></div>
+        <p class="lede">这是双方真正的共同空白，也是两套设计区别最大的未来方向。</p>
+
+        <div class="grid-3">
+          <div class="card">
+            <span class="tag upstream">上游</span>
+            <h3>真实浏览器为主</h3>
+            <p>浏览器标签组、CDP、页面工具和 AgentGW 已经完整。仓库里没有面向代码工作区、PTY、测试和受限文件写入的产品级闭环。</p>
+          </div>
+          <div class="card">
+            <span class="tag design">目标设计</span>
+            <h3>已定义执行边界</h3>
+            <p>定义 WorkspaceProvider、SandboxProvider、ArtifactStore、SecretBroker 和独立 ExecutionProvider，但还没有实现。</p>
+          </div>
+          <div class="card">
+            <span class="tag gap">仍需补齐</span>
+            <h3>真正的 Coding UX</h3>
+            <p>文件树、diff 审阅、终端、测试失败、任务检查点、补丁合并、资源配额和回滚。</p>
+          </div>
+        </div>
+
+        <h3>面向受限沙盒的必要差异</h3>
+        <div class="delta"><b>执行位置</b><span>上游主要执行浏览器工具；Coding Agent 需要独立进程或 microVM，不能让扩展直接获得宿主文件系统权限。</span></div>
+        <div class="delta"><b>权限模型</b><span>域名授权无法覆盖 <code>fs.write</code>、<code>process.exec</code> 和 <code>network.connect</code>，因此目标设计的能力级策略更合适。</span></div>
+        <div class="delta"><b>并发写</b><span>上游子 Agent 可操作浏览器标签组；未来多个 Coding Agent 必须使用独立 worktree 或 sandbox。</span></div>
+        <div class="delta"><b>验证闭环</b><span>网页 Agent 更看重观察和操作成功；Coding Agent 必须以测试、build、lint、diff 和独立审查作为完成标准。</span></div>
+        <div class="delta"><b>网络隔离</b><span>浏览器 Agent 依赖现实网络和登录态；沙盒默认应禁网，只开放明确的依赖与 API allowlist。</span></div>
+      </section>
+
+      <section id="quality">
+        <div class="section-head"><span class="section-no">11</span><h2>工程成熟度</h2></div>
+        <p class="lede">上游最大的护城河不是某个功能，而是大量边界行为和回归验证。</p>
+
+        <div class="grid-4">
+          <div class="card"><span class="tag upstream">实测</span><h4>67,613 行</h4><p>lib + entrypoints 的 JS/TS/CSS 源码规模。</p></div>
+          <div class="card"><span class="tag upstream">实测</span><h4>171 个测试文件</h4><p>覆盖 Provider、工具、存储、时间线、子 Agent 和 UI。</p></div>
+          <div class="card"><span class="tag upstream">实测</span><h4>1,353 个测试入口</h4><p>由 tests/*.mjs 中的 test(...) 统计，不等同于断言总数。</p></div>
+          <div class="card"><span class="tag upstream">流程</span><h4>真机 Smoke</h4><p>加载扩展到一个真实 Chrome，验证选项页、BYOK、附件和多宽度布局。</p></div>
+        </div>
+
+        <h3>上游工程优势</h3>
+        <ul>
+          <li>WXT 管理入口、构建、打包和 manifest。</li>
+          <li>单测直接 import 真实模块，大量协作方通过接口注入。</li>
+          <li>真机套件覆盖扩展加载、Service Worker 重启、BYOK 路由和布局。</li>
+          <li>版本号、产物清单、CSS 类名和协议均有闸门。</li>
+          <li>迁移自真实产品的异常、竞态和兼容行为无法靠短时间重写补齐。</li>
+        </ul>
+
+        <h3>但工程成本也很高</h3>
+        <ul>
+          <li>多个模块达到 1,800–3,800 行，阅读和修改成本高。</li>
+          <li>迁移注释和兼容层占比较大，目标和新架构并不完全一致。</li>
+          <li>浏览器域权限与同进程子 Agent 难以直接扩展到代码沙盒。</li>
+          <li>高测试量值得借鉴，但不应把现有大模块原样搬进新内核。</li>
+        </ul>
+      </section>
+
+      <section id="borrow">
+        <div class="section-head"><span class="section-no">12</span><h2>复用策略</h2></div>
+        <p class="lede">最有效的路线不是二选一，而是“目标设计定边界，上游实现做行为基线”。</p>
+
+        <div class="tabs" role="tablist" aria-label="复用策略">
+          <button class="tab" type="button" role="tab" aria-selected="true" aria-controls="borrow-now" id="tab-borrow-now" data-target="borrow-now">立即复用</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="borrow-port" id="tab-borrow-port" data-target="borrow-port">改造后移植</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="borrow-avoid" id="tab-borrow-avoid" data-target="borrow-avoid">不要照搬</button>
+        </div>
+
+        <div class="tab-panel" id="borrow-now" role="tabpanel" aria-labelledby="tab-borrow-now">
+          <h3>可立即作为行为基线和测试资产</h3>
+          <ul class="checklist">
+            <li>上下文 token 估算、溢出恢复、媒体降级和压缩摘要规则</li>
+            <li>非法工具参数、缺失工具、重复工具结果和孤儿工具结果处理</li>
+            <li>工具批次调度、路径冲突控制、Abort 传播和超时语义</li>
+            <li>子 Agent 实时事件、父子取消和卡片状态机</li>
+            <li>模型发现、429 重试、模型不可用切换和 provider 错误分类</li>
+            <li>IndexedDB 记录结构、回放、挂起审批对账和真机 smoke fixture</li>
+          </ul>
+        </div>
+
+        <div class="tab-panel" id="borrow-port" role="tabpanel" aria-labelledby="tab-borrow-port" hidden>
+          <h3>需要抽象后接入目标内核</h3>
+          <ul class="checklist">
+            <li>把会话时间线映射成 TaskSnapshot + AgentEvent</li>
+            <li>把浏览器工具包装成 ExecutionProvider</li>
+            <li>把产品级审批模式映射到 PolicyEngine profile</li>
+            <li>把同进程子 Agent 改为 SubagentCoordinator 管理的子任务</li>
+            <li>把聊天回放升级为可审计事件重放和写入租约</li>
+            <li>把 UI 组件保留为事件投影，不直接调用工具</li>
+          </ul>
+        </div>
+
+        <div class="tab-panel" id="borrow-avoid" role="tabpanel" aria-labelledby="tab-borrow-avoid" hidden>
+          <h3>不建议直接复制</h3>
+          <ul>
+            <li>把 1,800–3,800 行迁移模块整体搬入新内核。</li>
+            <li>让所有子 Agent 与父 Agent 共享同一进程和写权限。</li>
+            <li>延续“浏览器域名 + 四个动作”作为唯一权限模型。</li>
+            <li>用一次完全授权覆盖未来文件、命令和网络执行。</li>
+            <li>用聊天消息数组代替任务状态、审批和副作用记录。</li>
+            <li>在未测量前引入无限层级 Agent 或复杂多 Agent 编排。</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="roadmap">
+        <div class="section-head"><span class="section-no">13</span><h2>收敛路线</h2></div>
+        <p class="lede">先对齐上游最成熟的行为，再验证目标设计新增的运行时和权限约束，最后接沙盒。</p>
+
+        <div class="roadmap">
+          <div class="phase">
+            <div class="phase-track"><div class="phase-dot">A0</div></div>
+            <div class="phase-body">
+              <h3>建立上游行为语料</h3>
+              <p>不做重构，先从上游测试和真机套件提取可重复场景。</p>
+              <ul>
+                <li>压缩前后 token 与保留消息 fixture</li>
+                <li>非法工具、工具并发、取消和父任务中断 fixture</li>
+                <li>子 Agent 事件序列与最终结果 fixture</li>
+                <li>Provider 重试、模型恢复和媒体降级 fixture</li>
+              </ul>
+            </div>
+          </div>
+          <div class="phase">
+            <div class="phase-track"><div class="phase-dot">A1</div></div>
+            <div class="phase-body">
+              <h3>对齐任务与上下文</h3>
+              <p>让目标内核先达到上游已经证明的工作能力。</p>
+              <ul>
+                <li>持久任务、事件回放和写入租约</li>
+                <li>上下文自动压缩与 overflow recovery</li>
+                <li>工具 schema 校验、批处理和真实取消</li>
+                <li>Provider 重试、模型切换和错误分类</li>
+              </ul>
+            </div>
+          </div>
+          <div class="phase">
+            <div class="phase-track"><div class="phase-dot">A2</div></div>
+            <div class="phase-body">
+              <h3>对齐子 Agent</h3>
+              <p>先移植研究员与审查员的只读子任务。</p>
+              <ul>
+                <li>父上下文 brief 与独立 child context</li>
+                <li>实时子时间线、预算和递归取消</li>
+                <li>父权限与角色白名单求交集</li>
+                <li>结构化结果与证据校验</li>
+              </ul>
+            </div>
+          </div>
+          <div class="phase">
+            <div class="phase-track"><div class="phase-dot">A3</div></div>
+            <div class="phase-body">
+              <h3>安全差异化</h3>
+              <p>引入目标设计真正优于浏览器产品的部分。</p>
+              <ul>
+                <li>能力级 PolicyEngine 与 action approval</li>
+                <li>来源标签与提示注入隔离</li>
+                <li>ArtifactStore、SecretBroker 和审计 trace</li>
+                <li>确定性 Eval + 真实 Chrome A/B</li>
+              </ul>
+            </div>
+          </div>
+          <div class="phase">
+            <div class="phase-track"><div class="phase-dot">A4</div></div>
+            <div class="phase-body">
+              <h3>Coding 沙盒</h3>
+              <p>只有完成 A1–A3 后再接代码执行。</p>
+              <ul>
+                <li>Workspace、PTY、文件、patch 和测试</li>
+                <li>只写工作区、网络 allowlist、资源限制</li>
+                <li>独立 worktree 与写型子 Agent</li>
+                <li>diff、测试报告、回滚和合并</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="evidence">
+        <div class="section-head"><span class="section-no">14</span><h2>证据附录</h2></div>
+        <p class="lede">以下路径对应本次实际核对的本地源码。目标设计文档也一并链接。</p>
+
+        <div class="table-wrap compact">
+          <table>
+            <thead><tr><th>主题</th><th>源码证据</th><th>观察</th></tr></thead>
+            <tbody>
+              <tr><td>目标设计</td><td><a href="tinyai-agent-design.html">tinyai-agent-design.html</a></td><td>状态机、模块、类图、沙盒与路线</td></tr>
+              <tr><td>后台运行</td><td><a href="../../browser-agent/lib/background/session-loop.js">session-loop.js</a></td><td>runTurn、队列、审批路由、回放和子事件</td></tr>
+              <tr><td>Agent 循环</td><td><a href="../../browser-agent/lib/background/agent-tools.js">agent-tools.js</a></td><td>默认 1000 步、工具批次、校验、子 Agent</td></tr>
+              <tr><td>上下文</td><td><a href="../../browser-agent/lib/background/compaction.js">compaction.js</a></td><td>token 估算、摘要、媒体降级和 overflow 策略</td></tr>
+              <tr><td>权限</td><td><a href="../../browser-agent/lib/background/storage.js">storage.js</a></td><td>域 + 动作权限、挂起审批和自动批准</td></tr>
+              <tr><td>模型协议</td><td><a href="../../browser-agent/lib/background/providers.js">providers.js</a></td><td>OpenAI/Anthropic/AgentGW、重试和错误分类</td></tr>
+              <tr><td>持久化</td><td><a href="../../browser-agent/lib/background/keepalive-transcript.js">keepalive-transcript.js</a></td><td>聊天记录、回放和 keepalive</td></tr>
+              <tr><td>测试</td><td><a href="../../browser-agent/tests">tests/</a></td><td>171 个测试文件；真实模块 import</td></tr>
+              <tr><td>工程闸门</td><td><a href="../../browser-agent/package.json">package.json</a></td><td>lint、test、inventory、smoke 与 check</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <details>
+          <summary>统计方法与限制</summary>
+          <ul>
+            <li>源码行数统计 lib 与 entrypoints 下的 JS、TS、TSX、CSS 文件，不包含 dist、node_modules 和测试。</li>
+            <li>测试文件与测试入口通过 tests/*.mjs 中 test(...) 的静态计数获得，不使用 README 的历史数字。</li>
+            <li>没有执行上游完整 check 套件，因为本文是架构对比，完整真机回归耗时且会启动 Chrome。</li>
+            <li>目标设计的“领先”是架构判断，不代表已经通过实现验证。</li>
+          </ul>
+        </details>
+
+        <div class="callout warn">
+          <div>
+            <strong>最终建议</strong>
+            <p>短期不要试图证明新设计全面超越上游。先让目标内核在压缩、工具错误恢复、子 Agent 和模型降级上达到上游行为基线，再用能力级权限、事件一致性和沙盒边界建立真正的差异化。</p>
+          </div>
+        </div>
+      </section>
+
+      <footer class="footer">
+        tinyai Agent 2.0 vs fourspots-dev/browser-agent · Architecture Comparison · 2026-10-30
+      </footer>
+
+      <!-- DOCUMENT_CONTENT -->
+    </main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11.6.0/dist/mermaid.min.js"></script>
+  <script>
+    (() => {
+      const root = document.documentElement;
+      const toggle = document.getElementById("theme-toggle");
+      const printButton = document.getElementById("print-button");
+      const storedTheme = localStorage.getItem("tinyai-comparison-theme");
+      const preferredDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      root.dataset.theme = storedTheme || (preferredDark ? "dark" : "light");
+      toggle.textContent = root.dataset.theme === "dark" ? "☀" : "◐";
+
+      const sourceNodes = Array.from(document.querySelectorAll(".mermaid"));
+      sourceNodes.forEach((node) => { node.dataset.source = node.textContent.trim(); });
+
+      async function renderMermaid() {
+        if (!window.mermaid) return;
+        const css = getComputedStyle(root);
+        const vars = {
+          background: css.getPropertyValue("--surface").trim(),
+          primaryColor: css.getPropertyValue("--surface-2").trim(),
+          primaryTextColor: css.getPropertyValue("--text").trim(),
+          primaryBorderColor: css.getPropertyValue("--border-strong").trim(),
+          secondaryColor: css.getPropertyValue("--blue-soft").trim(),
+          tertiaryColor: css.getPropertyValue("--green-soft").trim(),
+          lineColor: css.getPropertyValue("--muted").trim(),
+          fontFamily: getComputedStyle(document.body).fontFamily,
+          fontSize: "13px"
+        };
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: "loose",
+          theme: "base",
+          themeVariables: vars,
+          flowchart: { curve: "basis", htmlLabels: true, padding: 14 },
+          sequence: { useMaxWidth: true, wrap: true }
+        });
+        sourceNodes.forEach((node) => {
+          node.removeAttribute("data-processed");
+          node.textContent = node.dataset.source;
+        });
+        await mermaid.run({ nodes: sourceNodes });
+      }
+
+      toggle.addEventListener("click", async () => {
+        const next = root.dataset.theme === "dark" ? "light" : "dark";
+        root.dataset.theme = next;
+        toggle.textContent = next === "dark" ? "☀" : "◐";
+        localStorage.setItem("tinyai-comparison-theme", next);
+        await renderMermaid();
+      });
+
+      printButton.addEventListener("click", () => window.print());
+
+      const tabs = Array.from(document.querySelectorAll("[role=tab][data-target]"));
+      tabs.forEach((tab) => {
+        tab.addEventListener("click", () => {
+          tabs.forEach((item) => {
+            const selected = item === tab;
+            item.setAttribute("aria-selected", String(selected));
+            const panel = document.getElementById(item.dataset.target);
+            if (panel) panel.hidden = !selected;
+          });
+        });
+      });
+
+      const links = Array.from(document.querySelectorAll(".toc a"));
+      const sections = links.map((link) => document.querySelector(link.getAttribute("href"))).filter(Boolean);
+      const navObserver = new IntersectionObserver((entries) => {
+        const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+        if (!visible[0]) return;
+        links.forEach((link) => link.classList.toggle("active", link.getAttribute("href") === "#" + visible[0].target.id));
+      }, { rootMargin: "-15% 0px -70% 0px", threshold: [0.05, 0.2, 0.5] });
+      sections.forEach((section) => navObserver.observe(section));
+
+      renderMermaid();
+    })();
+  </script>
+</body>
+</html>
