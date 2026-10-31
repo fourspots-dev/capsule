@@ -34,7 +34,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <div class="card"><h3 class="ok">实现验收：通过</h3><p>P1–P7 都已有可执行实现、自动化测试和端到端证据；没有只存在于接口或文档中的阶段交付。</p></div>
 <div class="card"><h3>生产发布：有条件</h3><p>当前环境没有 <code>DEEPSEEK_API_KEY</code>，live smoke 被跳过；8 小时 Soak 已启动但尚未结束。1GB Workspace 的范围读取与内存上限验收已通过。</p></div>
 </div>
-<div class="rule">最新确定性结果：78 个常规测试文件通过、3 个 opt-in 文件跳过，共 282 个测试通过；短时 Soak 另行执行 60 秒并完成 587 个生产节奏循环，堆增长约 2MB；1GB Workspace 范围读取通过且 RSS 增量低于 256MB。Chrome E2E：5 个测试通过。</div>
+<div class="rule">最新确定性结果：78 个常规测试文件通过、3 个 opt-in 文件跳过，共 282 个测试通过；短时 Soak 另行执行 60 秒并完成 587 个生产节奏循环，堆增长约 2MB；1GB 大文件 + 10,000 文件仓库在 1.8 秒内通过，RSS 增量约 29MB。Chrome E2E：5 个测试通过。</div>
 </section>
 
 <section id="matrix">
@@ -157,7 +157,8 @@ npm run test:live
   requires DEEPSEEK_API_KEY; current process environment is unset, therefore skipped
 
 npm run test:large:1gb
-  1GB sparse workspace range-read acceptance passed</pre>
+  1GB sparse file + 10,000 files in 1,805ms
+  RSS growth: 29MB</pre>
 <p>另外执行了 <code>TINYAI_SOAK=1 TINYAI_SOAK_DURATION_MS=60000 TINYAI_SOAK_INTERVAL_MS=100</code>：60.05 秒内完成 587 个生产节奏循环，堆增长约 2MB，低于 512MB 有界门限。</p>
 </section>
 
