@@ -69,9 +69,9 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <section id="p1">
 <div class="phase-head"><div class="phase-no">P1</div><div><h2>可信赖的 macOS TUI</h2><p><span class="status next">下一阶段</span></p></div></div>
 <div class="grid">
-<div class="feature"><h3>F1.1 交互式 Coding Session</h3><div class="goal">目标：用户可以在终端内连续对话和开发，而不是每次提交一条命令等待最终答案。</div><ul><li>流式显示回答、Reasoning 和工具状态。</li><li>支持多行输入、中断、继续、补充目标和排队消息。</li><li>保持代码块、diff、命令输出可读。</li></ul><p class="accept">验收：不使用旁路编辑器，可完成一次完整的多轮开发任务。</p></div>
-<div class="feature"><h3>F1.2 实时执行视图</h3><div class="goal">目标：长任务始终可观察。</div><ul><li>展示当前文件、命令、测试和耗时。</li><li>命令输出可滚动、可折叠、可中断。</li><li>失败时明确显示失败位置和后续动作。</li></ul><p class="accept">验收：测试运行超过 30 秒时，用户清楚知道系统正在做什么。</p></div>
-<div class="feature"><h3>F1.3 会话恢复</h3><div class="goal">目标：关闭终端或程序崩溃后继续上次工作。</div><ul><li>Session 自动保存。</li><li>支持列出、恢复、重命名和删除。</li><li>恢复后展示未完成任务和最后验证状态。</li></ul><p class="accept">验收：终止进程后重新打开，历史与工作区可继续使用。</p></div>
+<div class="feature"><h3>F1.1 交互式多 Session Coding Workspace</h3><div class="goal">目标：用户可以在终端内连续对话、开发，并在多个并行 Session 间切换。</div><ul><li>流式显示回答、Reasoning 和工具状态。</li><li>支持多行输入、中断、继续、补充目标和排队消息。</li><li>支持 Session 列表、新建、搜索、切换、重命名和删除。</li><li>每个 Session 保留独立草稿、附件、滚动位置和展开状态；切换不停止后台任务。</li></ul><p class="accept">验收：不使用旁路编辑器，可完成一次完整的多轮开发任务；快速切换 Session 不串历史、不丢草稿。</p></div>
+<div class="feature"><h3>F1.2 实时执行与紧凑状态栏</h3><div class="goal">目标：长任务始终可观察，同时不挤占主对话。</div><ul><li>默认只常驻一行状态栏；展示阻塞、任务、Session、Workspace、队列和 Agent 摘要。</li><li>窄屏按优先级降级，P0/P1 状态永不隐藏；完整状态通过详情视图查看。</li><li>命令输出可滚动、可折叠、可中断；失败时明确显示位置和后续动作。</li></ul><p class="accept">验收：80×24 与 60×20 终端中无永久侧栏，测试运行超过 30 秒时用户仍清楚系统正在做什么。</p></div>
+<div class="feature"><h3>F1.3 会话与 UI 状态恢复</h3><div class="goal">目标：关闭终端或程序崩溃后继续上次工作。</div><ul><li>Session 自动保存。</li><li>支持列出、恢复、重命名和删除。</li><li>恢复最后活动 Session、每 Session 草稿、滚动和选择，但不把 UI 状态写入 Session。</li><li>恢复后展示未完成任务和最后验证状态。</li></ul><p class="accept">验收：终止进程后重新打开，历史、工作区、草稿和导航位置可继续使用。</p></div>
 <div class="feature"><h3>F1.4 基础工作模式</h3><div class="goal">目标：在自主执行与用户可管理之间取得平衡。</div><ul><li>Plan、Build、Review 三种工作方式。</li><li>高风险操作按项目确认。</li><li>可停止、回滚未提交修改。</li></ul><p class="accept">验收：普通沙箱操作无需反复确认，高风险动作有明确提示。</p></div>
 </div>
 </section>
@@ -117,7 +117,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <div class="grid">
 <div class="feature"><h3>F6.1 通用子 Agent</h3><div class="goal">不是固定 Researcher/Reviewer，而是由任务动态定义。</div><ul><li>任意 Profile、目标和工具子集。</li><li>前台与后台任务。</li><li>结果、证据、未解决项和预算。</li></ul><p class="accept">验收：用户可定义“迁移模块”“补测试”“调查构建失败”等任意子任务。</p></div>
 <div class="feature"><h3>F6.2 隔离 Workspace</h3><div class="goal">并行修改不互相污染。</div><ul><li>独立分支或工作树。</li><li>文件所有权与冲突提示。</li><li>显式合并和审阅。</li></ul><p class="accept">验收：两个子 Agent 并行修改后，主 Agent 能安全审阅并合并。</p></div>
-<div class="feature"><h3>F6.3 跨端子 Agent 可视化</h3><div class="goal">用户能看见每个子任务的进展和影响范围。</div><ul><li>TUI 树状任务视图。</li><li>Chrome 中的任务摘要与状态。</li><li>停止、继续和查看子任务。</li></ul><p class="accept">验收：并行任务不隐藏失败，不混淆父子上下文。</p></div>
+<div class="feature"><h3>F6.3 跨端通用子 Agent 可视化</h3><div class="goal">用户能看见任意 Profile 子任务的进展和影响范围。</div><ul><li>TUI 使用临时全屏看板展示通用父子树，不假设固定 Researcher/Reviewer 角色。</li><li>Chrome 显示任务摘要、attention 与状态。</li><li>从看板进入子 Session，支持停止、继续、Diff/Merge 审阅，并返回原导航位置。</li></ul><p class="accept">验收：并行任务不隐藏失败，不混淆父子上下文；看板不永久占用主屏幕。</p></div>
 </div>
 </section>
 <section id="p7">

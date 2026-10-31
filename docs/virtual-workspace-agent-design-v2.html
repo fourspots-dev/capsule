@@ -16,6 +16,8 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 .rule{padding:13px 15px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#f5f3ff}.warn{border-color:var(--warn);background:#fff8e8}.danger{border-color:var(--danger);background:#fff1f0}
 .phase{display:flex;align-items:center;gap:11px;margin-bottom:13px}.phase-no{display:grid;place-items:center;width:43px;height:43px;border-radius:12px;background:#efedff;color:var(--accent);font-weight:750}.phase h2{margin:0;font-size:22px}.phase p{margin:2px 0 0;color:var(--muted);font-size:12px}
 .req{display:inline-block;padding:1px 7px;border-radius:6px;background:#f0efff;color:var(--accent);font-size:11px;font-family:var(--mono)}
+.diagram{background:#f8f8fb;color:#292a33;border:1px solid var(--line)}
+.pill{display:inline-block;padding:1px 7px;border-radius:999px;background:#eef8f2;color:var(--ok);font-size:11px;white-space:nowrap}.pill.p1{background:#f0efff;color:var(--accent)}.pill.p2{background:#f5f5f7;color:var(--muted)}
 @media(max-width:850px){.grid3{grid-template-columns:1fr}}@media(max-width:720px){.grid{grid-template-columns:1fr}.hero h1{font-size:28px}.wrap{padding:20px 12px 70px}section{padding:20px}}
 </style>
 </head>
@@ -25,7 +27,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <small>TINYAI / VIRTUAL WORKSPACE CODING AGENT / V2</small>
 <h1>虚拟 Workspace<br>通用 Coding Agent 详细设计</h1>
 <p>Agent 包内置虚拟文件系统、Virtual Shell、Snapshot VCS、Patch/Search/Diff 和确定性工具语义。宿主只提供最小桥接能力；不要求预装 Bash、Git，也不把开发工具链二进制打包进 Agent。需要真实编译器时通过可选 Provider 执行。</p>
-<div class="chips"><span class="chip">Portable Core</span><span class="chip">Virtual File System</span><span class="chip">Virtual Shell</span><span class="chip">Snapshot VCS</span><span class="chip">Minimal Host Bridge</span><span class="chip">macOS TUI + Chrome</span></div>
+<div class="chips"><span class="chip">Portable Core</span><span class="chip">Virtual File System</span><span class="chip">Virtual Shell</span><span class="chip">Snapshot VCS</span><span class="chip">Minimal Host Bridge</span><span class="chip">Multi-Session TUI</span><span class="chip">Agent Board</span></div>
 </header>
 <nav><a href="#decision">核心决策</a><a href="#scope">范围</a><a href="#arch">分层架构</a><a href="#vfs">VFS</a><a href="#shell">Virtual Shell</a><a href="#vcs">VCS</a><a href="#provider">Toolchain Provider</a><a href="#host">Host Bridge</a><a href="#core">Agent Core</a><a href="#tui">TUI</a><a href="#chrome">Chrome</a><a href="#subagent">子Agent</a><a href="#states">状态机</a><a href="#data">数据安全</a><a href="#phases">阶段</a><a href="#acceptance">验收</a></nav>
 <section id="decision">
@@ -106,7 +108,7 @@ snapshot / restore</pre>
 <h2>5. Virtual Shell</h2>
 <p>目标不是完整复制 Bash，而是提供开发任务所需的稳定 Shell 语义，并避免把宿主 Bash 当作运行前提。</p>
 <h3>首版兼容子集</h3>
-<ul><li>命令、参数、引号和转义。</li><li>环境变量、局部变量和命令替换的可控子集。</li><li>管道、重定向、`&&`、`||`、`;`。</li><li>工作目录、退出码、stdout/stderr。</li><li>后台任务、取消和输出上限。</li><li>内建 `pwd`、`cd`、`ls`、`cat`、`mkdir`、`cp`、`mv`、`rm`、`echo`、`test`。</li><li>内建 `grep`/`rg` 兼容子集、`find`/glob、`diff`、`patch`。</li></ul>
+<ul><li>命令、参数、引号和转义。</li><li>环境变量、局部变量和命令替换的可控子集。</li><li>管道、重定向、<code>&amp;&amp;</code>、<code>||</code>、<code>;</code>。</li><li>工作目录、退出码、stdout/stderr。</li><li>后台任务、取消和输出上限。</li><li>内建 <code>pwd</code>、<code>cd</code>、<code>ls</code>、<code>cat</code>、<code>mkdir</code>、<code>cp</code>、<code>mv</code>、<code>rm</code>、<code>echo</code>、<code>test</code>。</li><li>内建 <code>grep</code>/<code>rg</code> 兼容子集、<code>find</code>/glob、<code>diff</code>、<code>patch</code>。</li></ul>
 <h3>执行分层</h3>
 <pre>Shell Parser → AST → Executor
 Executor
@@ -173,123 +175,330 @@ previewMerge / applyPatch / exportPatch</pre>
 </section>
 <section id="tui">
 <h2>10. macOS TUI 交互规范</h2>
-<div class="rule">设计目标：键盘优先、默认单视图、内容优先。永久占位只有一行状态栏和输入区；多会话、子 Agent 看板、审阅和扩展功能通过临时视图打开，关闭后立即把屏幕还给对话。</div>
-<h3>10.1 默认屏幕布局</h3>
-<pre>────────────────────────────────────────────────────────────
-当前会话 · 任务状态 · 项目/分支 · 模型 · 队列 · Agents · 审批
-────────────────────────────────────────────────────────────
-                                                                
-                     Conversation / Work Timeline               
-                                                                
-  streamed answer, reasoning, tools, command output, diffs      
-                                                                
-────────────────────────────────────────────────────────────
-> [输入区，1–6 行，自动增长]                           [Send]
-Enter 发送 · Shift+Enter 换行 · Ctrl+C 停止 · Ctrl+K 会话
-────────────────────────────────────────────────────────────</pre>
-<table><thead><tr><th>区域</th><th>高度预算</th><th>说明</th></tr></thead><tbody>
-<tr><td>状态栏</td><td>固定 1 行</td><td>只显示高价值摘要；完整状态通过详情层查看</td></tr>
-<tr><td>对话/工作历史</td><td>剩余全部空间</td><td>默认唯一主视图</td></tr>
-<tr><td>Composer</td><td>1–6 行</td><td>基础操作自动高度；不常驻工具栏</td></tr>
-<tr><td>键位提示</td><td>0–1 行</td><td>首次使用和窄屏时显示，可关闭</td></tr>
-<tr><td>Toast/通知</td><td>最多 1 行，短时显示</td><td>不得把主要内容向上挤走而不恢复</td></tr>
-<tr><td>侧边栏</td><td>默认 0</td><td>不创建常驻 Session、Agent 或扩展侧栏</td></tr>
+<div class="rule">设计目标：键盘优先、默认单视图、内容优先。默认只常驻一行状态栏与 Composer；多 Session、动态子 Agent 树、审阅、状态详情和扩展能力使用临时主视图。复杂能力必须可发现，但不能长期占用对话空间。</div>
+
+<h3>10.0 TUI 需求基线</h3>
+<table><thead><tr><th>ID</th><th>优先级</th><th>需求</th><th>可验收结果</th></tr></thead><tbody>
+<tr><td><code>TUI-R01</code></td><td><span class="pill">P0</span></td><td>基础工作流只需“输入、发送、停止”</td><td>首次用户无需理解 Session、Agent、Profile、Provider 或模式即可发送任务。</td></tr>
+<tr><td><code>TUI-R02</code></td><td><span class="pill">P0</span></td><td>支持多 Session 的查看、新建、搜索、切换、重命名和删除</td><td>同一 TUI 实例可在至少 3 个 Session 间切换；列表和操作不需要离开主界面。</td></tr>
+<tr><td><code>TUI-R03</code></td><td><span class="pill">P0</span></td><td>Session 之间隔离输入与视图状态</td><td>草稿、附件、Skill、展开项、滚动锚点、选择项和未读位置互不污染。</td></tr>
+<tr><td><code>TUI-R04</code></td><td><span class="pill">P0</span></td><td>切换 Session 不停止后台任务，且丢弃迟到 Projection</td><td>A→B→C 快速切换后，C 不显示 A/B 的事件；A 的运行状态仍可由列表和状态汇总观察。</td></tr>
+<tr><td><code>TUI-R05</code></td><td><span class="pill">P0</span></td><td>支持通用、配置驱动的子 Agent 树</td><td>看板可显示任意 Profile 名称、父子层级、状态、任务摘要、运行模式、耗时和 Workspace 结果，不依赖固定角色枚举。</td></tr>
+<tr><td><code>TUI-R06</code></td><td><span class="pill p1">P1</span></td><td>可从看板进入子 Agent Session，再返回原导航位置</td><td>Enter 进入子 Session；Esc 返回保留过滤、选择和滚动位置的看板；再 Esc 返回原父对话。</td></tr>
+<tr><td><code>TUI-R07</code></td><td><span class="pill">P0</span></td><td>状态栏完整呈现运行、阻塞、连接和后台活动</td><td>P0/P1 状态在 60 列终端也不丢失；模型、Token、Workspace、Provider 等完整信息可从详情查看。</td></tr>
+<tr><td><code>TUI-R08</code></td><td><span class="pill">P0</span></td><td>默认屏幕紧凑，扩展不得挤压主对话</td><td>80×24 下最多 1 行状态栏、0 行永久侧栏/标签栏；扩展只通过受控 cell、摘要和详情贡献。</td></tr>
+<tr><td><code>TUI-R09</code></td><td><span class="pill p1">P1</span></td><td>所有操作具备键盘路径和明确焦点</td><td>IME、粘贴、resize、无颜色和常用终端快捷键不影响发送、切换或返回。</td></tr>
+<tr><td><code>TUI-R10</code></td><td><span class="pill p1">P1</span></td><td>UI 视图状态可恢复，Runtime 事实不复制</td><td>TUI 重启后恢复上次 Session、草稿和滚动位置；任务、队列、审批和 Agent 状态来自 Runtime。</td></tr>
+<tr><td><code>TUI-R11</code></td><td><span class="pill p1">P1</span></td><td>危险操作先确认，操作结果以 Runtime ACK 为准</td><td>停止、删除、合并等操作不乐观伪装成功；运行中删除必须先停止并二次确认。</td></tr>
 </tbody></table>
-<h3>10.2 完备状态栏</h3>
-<p>状态栏采用单行分格布局，信息按重要性排序并可降级；不依赖颜色表达状态。</p>
-<table><thead><tr><th>优先级</th><th>字段</th><th>示例</th></tr></thead><tbody>
-<tr><td>P0</td><td>错误/阻塞</td><td><code>ERR 1</code>、<code>APPROVAL</code>、<code>OFFLINE</code></td></tr>
-<tr><td>P1</td><td>当前任务</td><td><code>RUN 02:14</code>、<code>VERIFY</code>、<code>WAIT</code>、<code>FAILED</code></td></tr>
-<tr><td>P2</td><td>Session</td><td><code>fix-auth</code>、<code>3 sessions</code></td></tr>
-<tr><td>P3</td><td>项目与版本</td><td><code>tinyai</code>、<code>main*</code>、<code>rev 12</code></td></tr>
-<tr><td>P4</td><td>后台活动</td><td><code>queue 2</code>、<code>agents 3 (1!)</code></td></tr>
-<tr><td>P5</td><td>环境</td><td><code>gpt-x</code>、<code>build</code>、<code>local</code>、<code>proc ✓</code></td></tr>
+<h3>10.0.1 明确非目标</h3>
+<div class="grid">
+<div class="card"><h3>不做常驻多栏 IDE</h3><p>不设置永久 Session 栏、Agent 栏、文件树或多 pane；这些能力以全屏临时视图出现。</p></div>
+<div class="card"><h3>不固定子 Agent 角色</h3><p>Researcher、Reviewer、Implementer 只是可能的 Profile 实例，不在 TUI 或 Runtime 中做角色枚举。</p></div>
+<div class="card"><h3>不在客户端重建事实</h3><p>TUI 不自行推导任务是否完成、子 Agent 是否仍运行或审批是否已处理，只展示 Runtime 提供的事实。</p></div>
+<div class="card"><h3>不要求鼠标或富终端</h3><p>默认兼容普通 ANSI 终端；鼠标、颜色、动画和超链接均为可选增强。</p></div>
+</div>
+
+<h3>10.1 默认屏幕布局与空间预算</h3>
+<pre>┌──────────────────────────────────────────────────────────────┐
+│ fix-auth · RUN 02:14 · tinyai main* · queue 2 · agents 3 (1!)│  1 行
+├──────────────────────────────────────────────────────────────┤
+│                                                              │
+│  User: 修复登录超时并补测试                                  │
+│                                                              │
+│  Worked 38s · Inspect auth middleware                 [展开] │
+│  Running · npm test                                   [实时] │
+│                                                              │
+│  已定位到 token refresh 竞态，正在验证修复……                  │
+│                                                              │
+├──────────────────────────────────────────────────────────────┤
+│ > 输入任务，Enter 发送，Shift+Enter 换行                     │
+│   [附件 1] [skill: review]                         1–6 行   │
+└──────────────────────────────────────────────────────────────┘
+Enter 发送 · Ctrl+C 停止 · Ctrl+K 会话 · ? 帮助        按需提示</pre>
+<table><thead><tr><th>区域</th><th>高度/宽度预算</th><th>固定性</th><th>设计约束</th></tr></thead><tbody>
+<tr><td>状态栏</td><td>1 行</td><td>固定</td><td>只放 P0/P1 摘要和高价值上下文；完整信息进入 <code>Ctrl+I</code> 详情。</td></tr>
+<tr><td>对话/工作历史</td><td>优先占满剩余高度</td><td>固定主区域</td><td>渲染只消费 Projection 和 Artifact；大日志与 Diff 虚拟滚动。</td></tr>
+<tr><td>Composer</td><td>1–6 行</td><td>固定</td><td>随内容增长；达到 6 行后内部滚动。附件与 Skill 作为内联窄条，不新开工具栏。</td></tr>
+<tr><td>键位提示</td><td>0–1 行</td><td>可关闭</td><td>首次启动或临时视图内显示；老用户可永久隐藏。</td></tr>
+<tr><td>Toast/通知</td><td>0 行或复用状态栏短暂 flash</td><td>瞬时</td><td>不永久增加高度；重要失败留在时间线和状态详情。</td></tr>
+<tr><td>Session/Agent 侧栏</td><td>0</td><td>禁止常驻</td><td>统一使用全屏临时视图，关闭后完整归还屏幕。</td></tr>
 </tbody></table>
-<p>正常宽度显示：<code>fix-auth · RUN 02:14 · tinyai main* · gpt-x · queue 2 · agents 3</code>。窄屏依次省略环境细节、项目路径、非活动 Session 计数，但 P0/P1 状态不得隐藏。</p>
-<p><code>Ctrl+I</code> 打开完整状态详情：模型、Provider、Workspace revision、Token/费用、后台命令、Session 列表摘要、审批和最近错误。详情层关闭后恢复原对话滚动位置。</p>
+<div class="rule">高度不变量：<code>status(1) + transcript(remainder) + composer(1..6) + hint(0..1) ≤ terminalHeight</code>。当高度不足时先隐藏 hint，再降低 composer 最大高度，最后压缩 transcript；状态栏和一行 Composer 始终保留。</div>
+
+<h3>10.2 基础交互和导航</h3>
+<div class="grid">
+<div class="card"><h3>默认只学三个动作</h3><p><b>输入</b>任务、<b>Enter</b> 发送、<b>Ctrl+C</b> 停止。高级导航只在状态栏或帮助中渐进提示。</p></div>
+<div class="card"><h3>单一焦点规则</h3><p>任意时刻只有 Composer、Transcript 或当前临时视图之一持有焦点；打开/关闭视图后回到进入前焦点。</p></div>
+</div>
+<table><thead><tr><th>快捷键</th><th>Conversation 中</th><th>临时视图中</th><th>边界规则</th></tr></thead><tbody>
+<tr><td><code>Enter</code></td><td>发送当前输入</td><td>执行选中项/打开</td><td>空输入不发送；列表项无动作时不得冒泡成发送。</td></tr>
+<tr><td><code>Shift+Enter</code><br><code>Ctrl+J</code></td><td>Composer 换行</td><td>保留为文本换行/无动作</td><td><code>Ctrl+J</code> 作为部分终端无法区分 Shift+Enter 的兼容路径。</td></tr>
+<tr><td><code>Ctrl+C</code></td><td>有运行任务：停止当前 Session；空闲：两次确认退出</td><td>关闭当前临时视图</td><td>绝不停止其他 Session；列表视图内不直接退出整个 TUI。</td></tr>
+<tr><td><code>Ctrl+K</code></td><td>打开 Session 切换器</td><td>全局移到 Session 切换器</td><td>当前选择优先定位当前 Session。</td></tr>
+<tr><td><code>Ctrl+G</code></td><td>打开当前 Session 的 Agent 看板</td><td>切到同族 Agent 看板</td><td>没有子 Agent 时显示空状态和使用说明，不生成伪造记录。</td></tr>
+<tr><td><code>Ctrl+I</code></td><td>打开完整状态详情</td><td>切到状态详情</td><td>只读；关闭后恢复原视图与滚动位置。</td></tr>
+<tr><td><code>Ctrl+O</code></td><td>打开 Review</td><td>切到 Review</td><td>无变更时显示明确空状态，不打开空白大面板。</td></tr>
+<tr><td><code>Ctrl+P</code></td><td>命令面板</td><td>命令面板</td><td>只列出当前 Host 和 Session 可执行命令；不可用项给出原因。</td></tr>
+<tr><td><code>Esc</code></td><td>取消补全/选择；不清空草稿</td><td>返回上一路由</td><td>导航栈为空时回到 Conversation。</td></tr>
+<tr><td><code>PageUp/PageDown</code></td><td>滚动 Transcript</td><td>滚动结果列表或详情</td><td>Composer 内使用 Option/Alt 或标准编辑键移动光标。</td></tr>
+<tr><td><code>?</code></td><td>Composer 为空时打开帮助</td><td>打开按键帮助</td><td>有草稿时不拦截；不得把 <code>?</code> 误发到模型。</td></tr>
+</tbody></table>
+<p>鼠标点击和滚轮是可选的辅助路径，不定义唯一操作方式。所有列表都使用同一组选择语义：方向键移动、Enter 打开、Esc 返回；搜索框激活时普通字符进入查询，不要求用户先学习 Vim 模式。</p>
+
 <h3>10.3 多 Session 管理</h3>
 <pre>Ctrl+K
-┌ Sessions ───────────────────────────────────────────┐
-│ > [搜索会话、项目、分支]                             │
-│                                                     │
-│ ● fix-auth        tinyai/main   RUN 02:14   2 queues│
-│ ○ docs-update     tinyai/main   DONE        1 agent │
-│ ! release-check   app/main*     NEEDS INPUT         │
-│                                                     │
-│ Enter 切换 · N 新建 · R 重命名 · D 删除 · Esc 返回  │
-└─────────────────────────────────────────────────────┘</pre>
-<ul><li>切换只改变当前客户端视图，不停止旧 Session 的后台任务。</li><li>每个 Session 保留独立草稿、附件、Skill、展开状态和滚动位置。</li><li>当前会话有明确标记；运行中、失败、等待审批和未读状态可见。</li><li>新建 Session、恢复历史、重命名和删除在同一视图完成。</li><li>默认不显示顶部 Tab 栏；Session 数量通过状态栏和快捷键访问。</li><li>切换过程使用 generation 丢弃旧 Projection，防止串话。</li><li>删除运行中的 Session 必须二次确认并先停止任务。</li></ul>
-<h3>10.4 子 Agent 看板</h3>
+┌ Sessions · 5 · 2 running · 1 needs input ────────────────────┐
+│ / [搜索标题、项目、分支、状态]                               │
+│                                                              │
+│ ● fix-auth        tinyai/main    RUN 02:14    2 queue  2 new  │
+│ ○ docs-update     tinyai/main    DONE         1 agent        │
+│ ! release-check   app/main*      NEEDS INPUT  approval       │
+│ · refactor-parser server/main    PAUSED       rev 18         │
+│                                                              │
+│ Enter 切换 · N 新建 · R 重命名 · D 删除 · Esc 返回          │
+└──────────────────────────────────────────────────────────────┘</pre>
+<p>Session 切换器是 Runtime 会话的只读列表加受控命令入口。每行至少包含明确的选择标记、Session 标题、项目/分支、任务状态、活动/未读摘要和阻塞原因；子 Agent Session 还显示父 Session 标识。</p>
+<table><thead><tr><th>操作</th><th>交互</th><th>行为与约束</th></tr></thead><tbody>
+<tr><td>切换</td><td>选择后 Enter</td><td>只改变当前客户端观察目标，不停止旧 Session 的任务。成功后更新 <code>lastActiveSessionId</code>。</td></tr>
+<tr><td>新建</td><td><code>N</code></td><td>建立本地 Draft Session；首次发送时才创建/激活 Runtime Session，避免空会话污染历史。</td></tr>
+<tr><td>重命名</td><td><code>R</code></td><td>只修改显示标题，不改变 Session ID；标题失败不影响对话。</td></tr>
+<tr><td>删除</td><td><code>D</code></td><td>空闲 Session 二次确认后删除。运行中的 Session 先说明任务仍活跃，再由用户确认“停止并删除”或取消。</td></tr>
+<tr><td>搜索</td><td>输入字符</td><td>匹配标题、项目、分支、任务状态和子 Agent Profile；结果顺序稳定，当前 Session 永远可定位。</td></tr>
+<tr><td>恢复</td><td>选择历史 Session</td><td>先显示缓存快照，再请求 Runtime hydration；期间保留输入能力并明确显示 <code>LOADING</code>。</td></tr>
+</tbody></table>
+<h4>每 Session UI 状态</h4>
+<pre>SessionUiState {
+  sessionId
+  draftText, cursor, attachments, selectedSkill
+  scrollAnchor, expandedItemIds, selectionId
+  lastSeenEventSeq, unreadMarkers
+  routeStack, boardFilter, boardSelection
+}</pre>
+<p>这些状态保存在 TUI Adapter 的持久化命名空间中，按 Session ID 分区；它们不得写入 Session Snapshot、Agent 上下文或跨客户端 Projection。Runtime 侧只提供会话事实。</p>
+<h4>切换一致性</h4>
+<pre>generation := (sessionId, logEpoch, subscriptionGeneration)
+
+切换：
+1. flush 当前草稿和滚动锚点
+2. subscriptionGeneration += 1
+3. 取消旧 subscription，订阅目标 Session
+4. 仅接受 sessionId、logEpoch、generation 三者匹配的 Projection
+5. 收到 snapshot/gap 后重建目标时间线
+6. 恢复目标 Session 的 Composer 草稿和选择</pre>
+<div class="warn rule">当前 Runtime 的 Projection 消息只携带 Frame。正式实现 TUI 前必须给事件增加 <code>sessionId</code>（或带同一语义的 envelope），否则多订阅或快速退订时无法可靠排除迟到帧。该字段属于端无关协议，不是 TUI 私有字段。</div>
+<ul><li>每个 Session 的后台任务由 Runtime 持续运行；Agent 看板关闭、客户端断线或另一个 Session 获得焦点都不暂停它。</li><li>非活动 Session 的运行/失败/审批通过轻量 Session 摘要显示；完整时间线只在打开时 hydrate。</li><li>未读位置使用 <code>lastSeenEventSeq</code>，不按“最后一条消息文本”猜测。</li><li>快速 A→B→C 切换必须丢弃 A/B 的迟到帧；目标 Session 不存在时回到列表并展示 <code>SESSION_NOT_FOUND</code>。</li><li>删除当前 Session 后选择时间上最近的可用 Session；没有历史时创建空 Draft，不自动发送内容。</li></ul>
+
+<h3>10.4 通用子 Agent 看板</h3>
 <pre>Ctrl+G
-┌ Agents · 4 total · 2 running · 1 failed ─────────────┐
-│ [全部] [运行中] [失败] [已完成]                      │
-│                                                     │
-│ ▼ parent · fix-auth                                 │
-│   ├─ ● inspect-api      RUN 01:12   virtual-fork-1  │
-│   ├─ ✓ add-tests        DONE        +12/-2          │
-│   ├─ ! migrate-config   FAILED      conflict        │
-│   └─ ○ review-final     QUEUED                      │
-│                                                     │
-│ Enter 查看 · S 停止 · R 重试 · M Merge Preview · Esc │
-└─────────────────────────────────────────────────────┘</pre>
-<ul><li>看板是临时主视图，替代对话区域，不新增常驻侧栏。</li><li>默认显示父子树，可按运行中、失败、完成过滤。</li><li>状态栏只保留紧凑汇总，例如 <code>agents 4 · 1!</code>。</li><li>查看子 Agent 时进入独立 Session 视图，<code>Esc</code> 返回父 Agent。</li><li>可停止、重试、查看日志、Workspace Diff、验证和待合并结果。</li><li>Merge Preview 展示冲突和证据，不能自动覆盖父 Workspace。</li></ul>
-<h3>10.5 基础操作够简单</h3>
-<div class="grid">
-<div class="card"><h3>日常只使用三个动作</h3><p>输入任务、Enter 发送、Ctrl+C 停止。用户无需先了解 Session、Agent、Provider 或模式。</p></div>
-<div class="card"><h3>渐进披露</h3><p>Advanced 能力藏在快捷键和命令面板，不占用常驻按钮。首次提示只显示核心三键。</p></div>
-</div>
-<table><thead><tr><th>快捷键</th><th>行为</th><th>冲突策略</th></tr></thead><tbody>
-<tr><td>Enter</td><td>发送</td><td>Shift+Enter 换行</td></tr>
-<tr><td>Ctrl+C</td><td>有运行任务时停止；空闲时二次确认退出</td><td>不误退整个应用</td></tr>
-<tr><td>Ctrl+K</td><td>Session 快速切换</td><td>覆盖只读提示</td></tr>
-<tr><td>Ctrl+G</td><td>子 Agent 看板</td><td>无子 Agent 时显示空看板</td></tr>
-<tr><td>Ctrl+O</td><td>Diff/Review</td><td>无变更时禁用并提示</td></tr>
-<tr><td>Ctrl+I</td><td>完整状态详情</td><td>只读</td></tr>
-<tr><td>Ctrl+P</td><td>命令面板</td><td>可搜索全部功能</td></tr>
-<tr><td>Esc</td><td>关闭临时视图</td><td>不清空 composer</td></tr>
-<tr><td>?</td><td>帮助与全部快捷键</td><td>仅 composer 为空时可触发</td></tr>
+┌ Agents · 6 total · 2 running · 1 failed · max depth 3 ───────┐
+│ [ALL] [ACTIVE] [ATTENTION] [DONE]       schema migration    │
+│                                                              │
+│ ▼ main · fix-auth                         RUN   parent       │
+│   ├─ ● map-call-sites      worker-v2      RUN   00:42  fork-1│
+│   │    └─ ✓ add-fixtures   test-helper    DONE  +8/-0        │
+│   ├─ ✓ audit-permissions   policy-audit   DONE  +12/-2       │
+│   ├─ ! migrate-config      migrator       FAIL  conflict     │
+│   └─ ○ benchmark-paths     arbitrary-task QUEUED             │
+│                                                              │
+│ Enter 查看 · S 停止 · R 继续 · D Diff · M Merge · Esc 返回   │
+└──────────────────────────────────────────────────────────────┘</pre>
+<ul><li>树节点来自 Runtime 的父子关系和 Session 摘要；Profile 名称是数据，不是 TUI 分支逻辑。任意合法 Profile 都可显示。</li><li>默认按父子树排列，同层按创建时间稳定排序；过滤只改变可见节点，不改变父子事实或 Runtime 状态。</li><li>每行显示 Profile、任务摘要/名称、状态、执行模式、耗时、Workspace/Fork 标识，以及结果数量或冲突摘要。</li><li>运行中的 Agent 保持活跃并在看板中周期刷新；失败项进入 <code>ATTENTION</code>，完成项在 <code>DONE</code> 中加入结果和验证摘要。</li><li>看板打开时不会额外启动 Agent；<code>R</code> 只对 Runtime 明确允许 resume 的终止任务可用，不把“继续”误解为重复执行原副作用。</li><li>Enter 进入子 Agent Session；导航栈保存父 Session、当前过滤、选中节点和滚动位置。Esc 返回看板，不直接丢失上下文。</li><li>可在子 Session 中补充消息、观察 Reasoning/Tool/命令、停止或继续任务；其状态栏使用子 Session 标识和父 Session breadcrumb。</li><li><code>D</code> 打开该子任务的 Diff/证据；<code>M</code> 打开 Merge Preview，展示冲突、测试、风险和待应用 Patch，绝不自动合并。</li><li>嵌套层级受 Runtime 的 max depth 约束；超过可视宽度时用缩进和父路径面包屑，不创建横向多栏。</li></ul>
+<h4>看板状态与动作契约</h4>
+<table><thead><tr><th>事实/动作</th><th>来源</th><th>UI 行为</th></tr></thead><tbody>
+<tr><td>节点、父子关系、Profile、状态</td><td>Projection children + Session summary</td><td>只读派生，不在 TUI 维护副本。</td></tr>
+<tr><td>日志、Reasoning、工具步骤</td><td>子 Session Projection/Artifact</td><td>打开子 Session 后按需加载，不预拉全部历史。</td></tr>
+<tr><td>停止</td><td><code>stop_agent</code>/Session command ACK</td><td>请求期间显示 pending；ACK 成功后等待下一次事实更新。</td></tr>
+<tr><td>继续/重发</td><td>Coordinator resume capability</td><td>能力缺失时禁用并显示原因，不提供假按钮。</td></tr>
+<tr><td>Diff/Merge</td><td>Workspace Fork/VCS 结果</td><td>打开 Review/Merge Preview；无结果时说明尚未产生可审阅变更。</td></tr>
 </tbody></table>
-<h3>10.6 工作历史与扩展 UI 约束</h3>
-<ul><li>工具、Reasoning、命令和子 Agent 默认以单行摘要出现在工作历史中。</li><li>单行摘要可展开原始参数、输出、Artifact 和 Diff。</li><li>运行中工作历史完整展开；完成后折叠为 <code>Worked 2m</code>，最终回答保留在外。</li><li>插件只能贡献状态栏 cell、命令面板项、单行活动摘要和详情视图。</li><li>扩展详情默认通过 Enter 打开；禁止自动添加永久侧栏、顶部栏或大面积 Dashboard。</li><li>状态栏扩展 cell 有数量预算；超出时合并为 <code>extensions 3</code>。</li><li>任何扩展不得抢走 composer 焦点或隐藏 P0/P1 状态。</li></ul>
-<h3>10.7 Review 视图</h3>
-<ul><li><code>Ctrl+O</code> 打开变更审阅，替代主历史区域。</li><li>顶部显示文件数、增删行、验证状态和风险数。</li><li>左侧不常驻文件树；使用文件列表切换或筛选。</li><li>支持文件 Diff、测试证据、Artifact 和 Patch 导出。</li><li>无变更时明确提示，不展示空面板。</li><li>关闭后恢复原 Session 和滚动位置。</li></ul>
-<h3>10.8 UI 状态模型</h3>
-<pre>TuiView =
-  conversation | session-switcher | agent-board |
-  review | command-palette | status-inspector | help
 
-Focus =
-  composer | transcript | overlay
-
-Persistent UI State (by session):
-  draft, attachments, selected skill,
-  scroll anchor, expanded item ids
-
-Transient UI State:
-  active overlay, filter, selected row,
-  toast, generation, pending approval
-
-Runtime Facts:
-  sessions, task status, queue, children,
-  approvals, workspace revision, provider</pre>
-<p>UI State 与 Runtime Facts 分离。客户端不维护第二份任务、队列或子 Agent 状态。</p>
-<h3>10.9 响应式与无障碍</h3>
-<table><thead><tr><th>宽度</th><th>行为</th></tr></thead><tbody>
-<tr><td>≥120 列</td><td>状态栏完整；工作历史可显示文件/命令上下文</td></tr>
-<tr><td>80–119 列</td><td>省略路径和非关键扩展 cell；保持 P0/P1 状态</td></tr>
-<tr><td>60–79 列</td><td>状态栏合并计数；Session/Agent 使用全屏视图</td></tr>
-<tr><td>&lt;60 列</td><td>单栏降级，隐藏装饰，使用纯文本状态和可滚动详情</td></tr>
+<h3>10.5 完备状态栏</h3>
+<p>“完备”指所有运行所需状态均可从 TUI 获得，而不是要求全部字段同时出现在一行。状态栏是事实的优先级投影，完整数据在 <code>Ctrl+I</code>。</p>
+<table><thead><tr><th>优先级</th><th>状态</th><th>典型值</th><th>显示规则</th></tr></thead><tbody>
+<tr><td>P0</td><td>阻塞、错误、连接</td><td><code>APPROVAL</code> <code>ERR 1</code> <code>OFFLINE</code> <code>RECONNECT</code></td><td>永不被响应式布局或扩展隐藏；阻断动作需要可读修复提示时进入详情。</td></tr>
+<tr><td>P1</td><td>当前任务</td><td><code>QUEUED</code> <code>RUN 02:14</code> <code>WAIT</code> <code>FAILED</code></td><td>当前选中 Session 的状态；子 Session 显示 <code>child · child-session</code>。</td></tr>
+<tr><td>P2</td><td>Session 身份</td><td><code>fix-auth</code> <code>child session</code></td><td>名称优先；超长时 Unicode 安全截断。</td></tr>
+<tr><td>P3</td><td>Workspace</td><td><code>tinyai</code> <code>main*</code> <code>rev 12</code></td><td>脏标记、分支与 revision；无 Workspace 时省略。</td></tr>
+<tr><td>P4</td><td>后台活动</td><td><code>queue 2</code> <code>agents 3 (1!)</code></td><td>跨 Session 摘要只显示计数和 attention；详情列出全部。</td></tr>
+<tr><td>P5</td><td>环境</td><td><code>deepseek-chat</code> <code>local</code> <code>proc ✓</code></td><td>模型、Provider、Host 能力摘要；最容易被省略。</td></tr>
+<tr><td>P6</td><td>扩展</td><td><code>ext 2</code></td><td>只显示计数，不追加多个第三方 cell。</td></tr>
 </tbody></table>
-<ul><li>颜色之外还有文字、图标和状态词。</li><li>支持无颜色、低动画和屏幕阅读器友好的纯文本模式。</li><li>鼠标可选，不是主要交互方式。</li><li>IME、粘贴和终端 resize 不丢输入。</li></ul>
-<h3>10.10 TUI 内部模块</h3>
+<h4>响应式降级</h4>
+<table><thead><tr><th>终端宽度</th><th>示例</th><th>取舍</th></tr></thead><tbody>
+<tr><td>≥120 列</td><td><code>fix-auth · RUN 02:14 · tinyai main* · deepseek-chat · queue 2 · agents 3 (1!)</code></td><td>可显示 P0–P5。</td></tr>
+<tr><td>90–119 列</td><td><code>fix-auth · RUN 02:14 · tinyai main* · queue 2 · agents 3 (1!)</code></td><td>先省略 Provider/模型细节。</td></tr>
+<tr><td>70–89 列</td><td><code>APPROVAL · fix-auth · RUN 02:14 · q2 · ag3!</code></td><td>省略项目细节及扩展 cell；P0/P1 保持。</td></tr>
+<tr><td>50–69 列</td><td><code>APPROVAL · fix-auth · RUN 02:14</code></td><td>只保留阻塞、当前任务和 Session 名称；其他计数进详情。</td></tr>
+<tr><td>&lt;50 列</td><td><code>APPROVAL · RUN 02:14</code> 或 <code>ERR · OFFLINE</code></td><td>紧急降级仍保留 P0 与 P1；任何低优先级字段都可省略。</td></tr>
+</tbody></table>
+<ul><li>状态来自 <code>ProductProjection</code>、Session summary、Workspace status、Host capability 和审批事件；TUI 不通过回答文本猜任务状态。</li><li>状态栏按显示宽度而不是字符串长度裁剪，正确处理中文、Emoji、组合字符和零宽字符。</li><li>标题与控制字符先清洗；外部命令输出中的 ANSI/OSC 序列不得直接进入状态栏。</li><li>状态闪烁只用于短暂确认；失败、审批和离线不自动消失。</li><li><code>Ctrl+I</code> 显示：完整 Session 树、任务/队列、当前任务耗时、模型与 Provider、Token/成本、Workspace revision、后台命令、子 Agent、审批、最近错误和 Host 能力。</li></ul>
+
+<h3>10.6 TUI 内部模块与核心对象</h3>
+<pre class="diagram">+----------------------+       +--------------------------+
+|        TuiApp        |&lt;-----&gt;|      RouteController     |
+| lifecycle, commands  |       | conversation/sessions/   |
+| activeSessionId      |       | agents/review/status/... |
++----------+-----------+       +------------+-------------+
+           |                                |
+           v                                v
++----------------------+       +--------------------------+
+|   SessionController  |       |       ViewStateStore     |
+| switch/subscribe/    |       | draft, scroll, selection |
+| generation guard     |       | per-session persistence  |
++----------+-----------+       +------------+-------------+
+           |                                |
+           v                                v
++----------------------+       +--------------------------+
+|    TuiRuntimePort    |       |    ProjectionCache       |
+| summaries/projection |       | snapshot + revision      |
+| commands/ACK         |       | per-session state        |
++----------+-----------+       +------------+-------------+
+           |                                |
+           v                                v
++----------------------+       +--------------------------+
+| WorkspaceRuntime /   |       |   Presentation Models    |
+| RuntimeGateway       |       | StatusBar/Session/Agents |
++----------------------+       +------------+-------------+
+                                             |
+                                             v
+                              +--------------------------+
+                              |     Renderer/Keymap      |
+                              | unicode, overlay, focus  |
+                              +------------+-------------+
+                                           |
+                                           v
+                              +--------------------------+
+                              |   TerminalHostBridge     |
+                              | raw input, size, output  |
+                              +--------------------------+</pre>
+<table><thead><tr><th>对象</th><th>职责</th><th>不负责</th></tr></thead><tbody>
+<tr><td><code>TuiApp</code></td><td>TUI 生命周期、活动 Session、命令分发、Host 事件接入。</td><td>Agent Loop、任务状态推理、持久化 Session 内容。</td></tr>
+<tr><td><code>RouteController</code></td><td>唯一活动视图、导航栈、返回语义、焦点转移。</td><td>在导航栈中保存 Runtime 事实副本。</td></tr>
+<tr><td><code>SessionController</code></td><td>Session 列表、切换、订阅 generation、hydration、删除/重命名命令。</td><td>渲染或维护 Conversation 文本。</td></tr>
+<tr><td><code>ViewStateStore</code></td><td>按 Session 保存本地草稿、附件、滚动锚点、展开项、过滤和选择。</td><td>把 UI 布局写入 Session Snapshot。</td></tr>
+<tr><td><code>ProjectionCache</code></td><td>缓存收到的 snapshot/delta、记录 revision、在 gap 时请求重建。</td><td>生成第二份任务状态或补全缺失事件。</td></tr>
+<tr><td><code>StatusBarPresenter</code></td><td>把事实映射为优先级 segment，执行宽度预算与纯文本降级。</td><td>自行查询模型、队列或 Agent 状态。</td></tr>
+<tr><td><code>SessionListPresenter</code></td><td>排序、搜索、状态摘要、当前/未读标记。</td><td>删除或停止 Session。</td></tr>
+<tr><td><code>AgentBoardPresenter</code></td><td>根据父子事实构造树、过滤、稳定排序、选择映射。</td><td>假定固定角色或创建 Agent。</td></tr>
+<tr><td><code>Keymap</code></td><td>将按键按焦点/路由映射为 Intent；处理终端差异。</td><td>直接修改 Runtime。</td></tr>
+<tr><td><code>OverlayHost</code></td><td>一次只承载一个临时主视图，管理返回与焦点恢复。</td><td>常驻侧栏或重复叠加多层 UI。</td></tr>
+<tr><td><code>Renderer</code></td><td>增量渲染、虚拟滚动、Unicode 宽度、安全文本、无颜色模式。</td><td>解析业务事件或访问存储。</td></tr>
+<tr><td><code>TerminalHostBridge</code></td><td>raw mode、输入、resize、输出和可选鼠标能力。</td><td>理解 Session、Agent 或 Coding 语义。</td></tr>
+<tr><td><code>ExtensionUiRegistry</code></td><td>注册受控的状态 cell、命令、活动摘要和详情视图。</td><td>允许扩展注入任意布局或抢焦点。</td></tr>
+</tbody></table>
+<h4>端无关的最小数据契约</h4>
+<pre>type TuiRoute =
+  | { kind: 'conversation' }
+  | { kind: 'sessions'; query: string; selectedId?: string }
+  | { kind: 'agents'; rootSessionId: string; selectedId?: string }
+  | { kind: 'review'; targetSessionId: string }
+  | { kind: 'status'; targetSessionId: string }
+  | { kind: 'commands'; query: string }
+  | { kind: 'help' }
+
+interface RuntimeSessionSummary {
+  sessionId; parentSessionId?; title; project?; branch?
+  taskStatus; lifecycle; revision; eventSeq; updatedAt
+  queueLength?; attentionCount?; childCount?; lastError?
+}
+
+interface TuiRuntimePort {
+  listSessions(): Promise&lt;RuntimeSessionSummary[]&gt;
+  loadProjection(sessionId: string): Promise&lt;ProductProjection&gt;
+  subscribe(sessionId: string, generation: number,
+            listener: (envelope: ProjectionEnvelope) =&gt; void): Promise&lt;() =&gt; void&gt;
+  command(command: CommandEnvelope): Promise&lt;CommandAck&gt;
+  stopSession(sessionId: string): Promise&lt;void&gt;
+  deleteSession(sessionId: string): Promise&lt;void&gt;
+  renameSession(sessionId: string, title: string): Promise&lt;void&gt;
+}</pre>
+<p><code>TuiRuntimePort</code> 位于 TUI Adapter 与通用 Runtime/Protocol 之间；Core 不导入它。Projection envelope 至少包含 <code>sessionId</code>、<code>logEpoch</code> 和 Frame，TUI 再叠加本地 subscription generation。这样其他客户端可以使用相同的防串话协议。</p>
+
+<h3>10.7 关键模块交互</h3>
+<h4>切换 Session</h4>
+<pre>Keymap(Ctrl+K) → RouteController(session-switcher)
+选择 Enter → SessionController.switch(target)
+  → ViewStateStore.flush(current)
+  → generation++
+  → unsubscribe(current)
+  → load/cached snapshot(target)
+  → subscribe(target, generation)
+  → ProjectionCache.validate(envelope)
+  → ViewStateStore.restore(target)
+  → Renderer.render(conversation)
+
+旧任务的 Runtime 执行不受 unsubscribe 或 UI 导航影响。</pre>
+<h4>进入子 Agent Session</h4>
+<pre>Ctrl+G → AgentBoardPresenter.build(current.children)
+Enter → RouteController.push(agent-board state)
+      → SessionController.switch(childSessionId)
+      → conversation(child)
+Esc   → SessionController.switch(parentSessionId, from=board)
+      → RouteController.pop()
+      → restore filter, selectedId, scrollAnchor
+Esc   → conversation(parent)</pre>
+<h4>断线重连</h4>
+<pre>Host/Runtime disconnected
+  → status segment RECONNECT/OFFLINE
+  → Composer 保留草稿但禁止可能重复的发送
+  → reconnect
+  → get_projection(target)
+  → snapshot replaces cache
+  → 恢复路由、选择、滚动和待处理用户的输入
+  → 对不确定是否提交的 Command 使用 commandId/query ACK 对账</pre>
+<h4>后台 Agent 完成</h4>
+<pre>Runtime child projection changes
+  → active Session: 更新 Agent row/board
+  → inactive Session: 更新 summary 的 attention/unread
+  → status: agents count + attention marker
+  → 不抢 Composer 焦点
+  → 用户 Ctrl+G 后按需加载完整树</pre>
+<div class="rule">所有用户动作遵循“输入 Intent → 发送 Command/调用 Runtime Port → 等待 ACK/Projection → 更新 UI”。停止、删除、Resume 和 Merge 不做乐观状态翻转；允许在等待期间显示 <code>pending</code>，但不能伪装为成功。</div>
+
+<h3>10.8 工作历史与 Review</h3>
+<ul><li>工具、Reasoning、命令和子 Agent 默认是单行摘要，显示状态、耗时和关键结果；Enter/点击可展开原始参数、输出、Artifact 和 Diff。</li><li>运行中的内容保持可见；完成的成功 Work 可折叠为 <code>Worked 2m</code>，失败 Work 默认展开并保留失败证据。</li><li>最终回答不因 Work 折叠而消失；状态栏只保留当前运行摘要，不在底部堆叠多个进度条。</li><li><code>Ctrl+O</code> 打开 Review 临时主视图：文件数、增删行、验证状态、风险、Diff、测试证据、Artifact 和 Patch 导出。</li><li>Review 无变更时给出明确说明；大 Diff/10 万行日志采用虚拟滚动与按需加载，不阻塞输入。</li><li>Review 中的合并或保存操作需要明确确认，并使用 Runtime/Workspace ACK；关闭后恢复原 Session 和滚动位置。</li></ul>
+
+<h3>10.9 扩展 UI 协议与空间约束</h3>
+<table><thead><tr><th>扩展贡献</th><th>允许形式</th><th>限制</th></tr></thead><tbody>
+<tr><td>状态栏 cell</td><td><code>{key, priority, text, detailAction?}</code></td><td>所有扩展合计最多贡献 2 个可见 cell 或状态栏宽度的 20%；超出合并为 <code>ext n</code>；不能覆盖 P0/P1。</td></tr>
+<tr><td>命令面板项</td><td>标题、描述、availability、handler</td><td>按 Host/Session 能力求交集；handler 必须可取消且错误可见。</td></tr>
+<tr><td>活动摘要</td><td>单行 Work summary</td><td>不能永久展开、不能注入多行 ANSI/图像、不能自动滚动主历史。</td></tr>
+<tr><td>详情视图</td><td>受控全屏 overlay</td><td>Enter 打开、Esc 返回；不得抢 Composer 焦点或修改其他 Session。</td></tr>
+<tr><td>命令/审批</td><td>通过 Runtime Command/Approval</td><td>扩展不能直接修改 Session 事实或伪造审批结果。</td></tr>
+</tbody></table>
+<div class="warn rule">禁止扩展声明“常驻侧栏、顶部 Dashboard、第二 Composer、全局快捷键劫持”。扩展安装不能改变默认屏幕布局；用户启用后才在命令面板/状态详情中出现。</div>
+
+<h3>10.10 响应式、无障碍与终端兼容</h3>
+<table><thead><tr><th>条件</th><th>行为</th></tr></thead><tbody>
+<tr><td>resize</td><td>重排当前路由；保留 cursor、draft、scroll anchor 与 selected row；不重新执行任务。</td></tr>
+<tr><td>无颜色/无动画</td><td>状态以文字和符号表达；<code>RUN</code>/<code>FAIL</code>/<code>APPROVAL</code> 可辨识。</td></tr>
+<tr><td>窄屏</td><td>状态栏降级，Session/Agent/Status 全部使用全屏视图；列表省略次要列，详情不截断关键错误。</td></tr>
+<tr><td>IME</td><td>组合输入期间不误触发 Enter/Ctrl 快捷键；提交后光标与草稿保持一致。</td></tr>
+<tr><td>粘贴</td><td>多行粘贴按文本处理；大于阈值转附件/Artifact，不一次性渲染全部内容。</td></tr>
+<tr><td>终端控制字符</td><td>外部文本清洗后再渲染，不允许改变光标、清屏、读取剪贴板或触发 OSC。</td></tr>
+<tr><td>屏幕阅读器/辅助模式</td><td>提供纯文本行和明确状态词；不依赖 ASCII 绘线表达层级。</td></tr>
+</tbody></table>
+
+<h3>10.11 持久化、恢复与性能</h3>
 <div class="grid">
-<div class="card"><h3>TuiApp</h3><p>生命周期、Session 切换、Runtime Client、事件路由。</p></div>
-<div class="card"><h3>ViewModel</h3><p>Projection 到状态栏、时间线、看板和审阅的只读派生。</p></div>
-<div class="card"><h3>Renderer</h3><p>增量渲染、虚拟滚动、Unicode 宽度和安全文本。</p></div>
-<div class="card"><h3>Keymap</h3><p>模式化快捷键，处理覆盖层和焦点。</p></div>
-<div class="card"><h3>Overlay</h3><p>Session、Agents、Review、Status、Commands、Help。</p></div>
-<div class="card"><h3>TerminalBridge</h3><p>Host 提供的 raw mode、size、input/output。</p></div>
+<div class="card"><h3>持久化</h3><p>TUI 只持久化路由、最后活动 Session、每 Session 草稿/附件引用/滚动锚点/展开项/过滤与未读位置；Session 与 Workspace 数据由 Runtime/Store 恢复。</p></div>
+<div class="card"><h3>恢复顺序</h3><p>Host 能力 → Session summary → 最后活动 Session 的 Projection → 本地 UI 状态。任一阶段失败都可回到 Session 列表，不能因布局恢复失败隐藏会话。</p></div>
+<div class="card"><h3>渲染性能</h3><p>流式事件 16–33ms 合并渲染；Transcript 虚拟滚动；只重绘变化区域；大 Artifact 按需读。</p></div>
+<div class="card"><h3>交互预算</h3><p>按键到屏幕反馈 p95 ≤ 50ms；缓存 Session 切换 p95 ≤ 100ms；冷 hydration 先出现明确 loading，输入不被冻结。</p></div>
 </div>
+<ul><li>高频工具输出必须节流并保留“有更多输出”提示；不能因渲染队列无限增长而阻塞 Composer。</li><li>Session 切换、看板打开、resize 和 Overlay 关闭都不得重新请求已缓存且 revision 一致的完整历史。</li><li>崩溃恢复不重放不确定命令；Command ID、ACK 和 Event Seq 用于对账。</li><li>大量 Session 的列表按需分页/虚拟滚动；看板只加载当前父 Session 的直接子树摘要，详情按需 hydrate。</li></ul>
+
+<h3>10.12 TUI 完成定义</h3>
+<table><thead><tr><th>维度</th><th>完成标准</th></tr></thead><tbody>
+<tr><td>基础体验</td><td>80×24 终端内可完成输入、发送、观察流式输出、停止、恢复和退出；默认无永久侧栏。</td></tr>
+<tr><td>多 Session</td><td>列表、新建、搜索、切换、重命名、删除和草稿恢复可用；后台任务不受切换影响；迟到帧不串 Session。</td></tr>
+<tr><td>子 Agent</td><td>任意 Profile 的父子树、状态、过滤、停止/继续、Diff/Merge 预览和子 Session 查看可用；Esc 导航层级一致。</td></tr>
+<tr><td>状态栏</td><td>P0/P1 永不因宽度或扩展隐藏；完整状态详情可访问；所有事实可追踪到 Runtime/Projection/Workspace/Host。</td></tr>
+<tr><td>空间与扩展</td><td>默认 1 行状态、1–6 行 Composer、0 行常驻侧栏；扩展不能永久占用主历史，也不能抢焦点。</td></tr>
+<tr><td>可靠性</td><td>断线、Session 删除、Runtime 重启、resize、IME、无颜色和大量输出下输入仍可用且导航可恢复。</td></tr>
+<tr><td>性能</td><td>高频流式、长历史、大 Diff 和大量 Session 下达到 10.11 的交互预算。</td></tr>
+</tbody></table>
 </section>
 <section id="chrome">
 <h2>11. Chrome 工作流</h2>
