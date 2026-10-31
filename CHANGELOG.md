@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+### Documentation
+
+- `REQ-ENG-002`: add repository-level `AGENTS.md` covering requirement ids,
+  semantic versioning, design/test traceability, commit trailers, verification
+  and release rules.
+
 ## 0.2.0
 
 ### Features

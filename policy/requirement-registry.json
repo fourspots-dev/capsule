@@ -49,6 +49,18 @@
       "testDesign": "docs/engineering-versioning-and-traceability.html#verification",
       "acceptance": "Every new requirement has unique identity, linked design and test documents, a target version, and a traceable commit message enforced by tooling.",
       "legacyAliases": []
+    },
+    {
+      "id": "REQ-ENG-002",
+      "title": "Repository-level agent instructions",
+      "type": "documentation",
+      "priority": "P0",
+      "status": "verified",
+      "targetVersion": "0.2.1",
+      "design": "docs/engineering-versioning-and-traceability.html#agent-instructions",
+      "testDesign": "docs/engineering-versioning-and-traceability.html#verification",
+      "acceptance": "Repository-level AGENTS.md makes requirement, version, commit, verification and release rules mandatory for every coding agent.",
+      "legacyAliases": []
     }
   ]
 }

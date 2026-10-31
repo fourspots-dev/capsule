@@ -8,6 +8,7 @@ unique `REQ-<AREA>-<NNN>` id and must link both a design section and a test
 design section.
 
 - Policy: [`docs/engineering-versioning-and-traceability.html`](docs/engineering-versioning-and-traceability.html)
+- Agent instructions: [`AGENTS.md`](AGENTS.md)
 - Registry: [`policy/requirement-registry.json`](policy/requirement-registry.json)
 - Templates: [`docs/requirements/`](docs/requirements/)
 - Validate registry: `npm run requirements:check`
