@@ -94,6 +94,19 @@ describe('ChromeSessionStore', () => {
     expect(storage.removals).toEqual([store.storageKey('session_a')]);
   });
 
+  it('clears only session snapshots while preserving unrelated extension storage', async () => {
+    const storage = new MemoryStorage();
+    const store = new ChromeSessionStore({ storage });
+    await store.save(snapshot('session_a'));
+    await store.save(snapshot('session_b'));
+    storage.values.set('tinyai:v2:config', { approval: 'ask' });
+
+    await store.clear();
+
+    expect(await store.list()).toEqual([]);
+    expect(storage.values.get('tinyai:v2:config')).toEqual({ approval: 'ask' });
+  });
+
   it('serializes overlapping writes in invocation order and makes later reads observe them', async () => {
     const storage = new MemoryStorage();
     let releaseFirst!: () => void;

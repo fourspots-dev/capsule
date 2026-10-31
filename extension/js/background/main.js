@@ -151,7 +151,7 @@
         try {
           binding.groupId = await this.tabs.group({ tabIds: [Number(selected.id)] });
           await this.tabGroups?.update(binding.groupId, {
-            title: `tinyai \xB7 ${sessionId.slice(0, 24)}`,
+            title: tabGroupTitle(selected.title),
             color: "blue"
           });
         } catch {
@@ -160,7 +160,7 @@
       this.sessions.set(sessionId, binding);
       return this.groupRef(sessionId, binding);
     }
-    async setWorkingTab(sessionId, tabId) {
+    async setWorkingTab(sessionId, tabId, options = {}) {
       const tab = await this.getTab(tabId);
       if (!tab) throw new AgentError("BROWSER_TAB_NOT_FOUND", `Tab not found: ${tabId}`);
       const binding = this.sessions.get(sessionId) ?? {
@@ -170,7 +170,10 @@
       };
       binding.tabId = tabId;
       this.sessions.set(sessionId, binding);
-      await this.activateTab(tabId);
+      if (binding.groupId !== void 0) {
+        await this.tabGroups?.update(binding.groupId, { title: tabGroupTitle(tab.title) }).catch(() => void 0);
+      }
+      if (options.activate !== false) await this.activateTab(tabId);
     }
     async getWorkingTab(sessionId) {
       const binding = this.sessions.get(sessionId);
@@ -186,6 +189,7 @@
       const closedTabs = [];
       const errors = [];
       for (const tabId of binding.attached) {
+        if (!this.attachedTabs.has(tabId)) continue;
         try {
           await this.detach(tabId);
           detachedTabs.push(tabId);
@@ -205,6 +209,18 @@
       this.refs.clear();
       this.frameContexts.clear();
       return { sessionId, detachedTabs, closedTabs, errors };
+    }
+    async releaseSession(sessionId) {
+      const binding = this.sessions.get(sessionId);
+      if (!binding) return;
+      for (const tabId of binding.attached) {
+        await this.detach(tabId).catch(() => void 0);
+      }
+      const groupedTabs = new Set([binding.tabId, ...binding.ownedTabs].filter(Boolean));
+      if (this.tabs.ungroup && groupedTabs.size) {
+        await this.tabs.ungroup([...groupedTabs].map(Number)).catch(() => void 0);
+      }
+      this.sessions.delete(sessionId);
     }
     async listFrames(tabId) {
       const result = await this.cdp(tabId, "Page.getFrameTree");
@@ -768,6 +784,10 @@
       ...tab.groupId === void 0 || tab.groupId === -1 ? {} : { groupId: tab.groupId }
     };
   }
+  function tabGroupTitle(title) {
+    const compact = (title ?? "").replace(/\s+/g, " ").trim();
+    return compact ? `tinyai \xB7 ${compact.slice(0, 28)}` : "tinyai";
+  }
   function isInspectable(url) {
     return /^(https?|file):/.test(String(url ?? "")) || url === "about:blank";
   }
@@ -1097,6 +1117,13 @@
       return this.enqueue(key, async () => {
         await this.storage.remove(key);
       });
+    }
+    async clear() {
+      await Promise.all(this.tails.values());
+      const all = await this.storage.get(null);
+      const keys = Object.keys(all).filter((key) => key.startsWith(this.keyPrefix));
+      if (keys.length) await this.storage.remove(keys);
+      this.tails.clear();
     }
     async list() {
       const all = await this.storage.get(null);
@@ -2806,6 +2833,10 @@
       await bundle?.dispose();
       this.runtime = void 0;
     }
+    async forgetTab(windowId, tabId) {
+      const bundle = await this.runtime?.catch(() => void 0);
+      await bundle?.tabSessions?.forget({ windowId, tabId });
+    }
     async handle(port, request) {
       const requestId = request.requestId ?? (request.type === "command" ? request.command.commandId : `${request.type}_${this.clock.now()}_${Math.random().toString(36).slice(2, 8)}`);
       try {
@@ -2861,7 +2892,14 @@
           this.reply(port, requestId, await bundle.runtime.listSessions());
           return;
         }
+        if (request.type === "clear_history") {
+          await bundle.tabSessions?.clear();
+          const deleted = await bundle.runtime.deleteAllSessions();
+          this.reply(port, requestId, { deleted });
+          return;
+        }
         if (request.type === "delete_session") {
+          await bundle.tabSessions?.releaseSession(request.sessionId);
           await bundle.runtime.deleteSession(request.sessionId);
           this.reply(port, requestId, true);
           return;
@@ -2904,6 +2942,48 @@
           }
           await bundle.browser.setWorkingTab(request.sessionId, request.tabId);
           this.reply(port, requestId, true);
+          return;
+        }
+        if (request.type === "resolve_tab_session") {
+          const tabs = bundle.tabSessions;
+          if (!tabs) throw new AgentError("TAB_SESSIONS_UNAVAILABLE", "Tab sessions are unavailable");
+          const binding = await tabs.resolve({
+            windowId: request.windowId,
+            tabId: request.tabId
+          });
+          const projection = await bundle.runtime.loadProjection(binding.sessionId);
+          this.reply(port, requestId, { ...binding, projection });
+          return;
+        }
+        if (request.type === "create_tab_session") {
+          const tabs = bundle.tabSessions;
+          if (!tabs) throw new AgentError("TAB_SESSIONS_UNAVAILABLE", "Tab sessions are unavailable");
+          const binding = await tabs.create({
+            windowId: request.windowId,
+            tabId: request.tabId
+          });
+          const projection = await bundle.runtime.loadProjection(binding.sessionId);
+          this.reply(port, requestId, { ...binding, projection });
+          return;
+        }
+        if (request.type === "bind_tab_session") {
+          const tabs = bundle.tabSessions;
+          if (!tabs) throw new AgentError("TAB_SESSIONS_UNAVAILABLE", "Tab sessions are unavailable");
+          const binding = await tabs.bind(
+            { windowId: request.windowId, tabId: request.tabId },
+            request.sessionId
+          );
+          const projection = await bundle.runtime.loadProjection(binding.sessionId);
+          this.reply(port, requestId, { ...binding, projection });
+          return;
+        }
+        if (request.type === "forget_tab_session") {
+          await bundle.tabSessions?.forget({
+            windowId: request.windowId,
+            tabId: request.tabId
+          });
+          this.reply(port, requestId, true);
+          return;
         }
       } catch (error) {
         port.postMessage({
@@ -5228,9 +5308,41 @@ ${lines.join("\n")}
       await runtime.stopInstance();
     }
     async deleteSession(sessionId) {
-      await this.stop(sessionId);
+      const runtime = this.sessions.get(sessionId);
+      if (runtime) {
+        await runtime.stopInstance();
+        await runtime.flushPersistence();
+      }
       this.sessions.delete(sessionId);
       await this.options.sessionStore?.remove(sessionId);
+    }
+    async deleteAllSessions() {
+      await Promise.allSettled([...this.loading.values()]);
+      const loaded = [...this.sessions.values()];
+      await Promise.all(
+        loaded.map(async (runtime) => {
+          await runtime.stopInstance();
+          await runtime.flushPersistence();
+        })
+      );
+      const persisted = await this.options.sessionStore?.list?.() ?? [];
+      const count = (/* @__PURE__ */ new Set([
+        ...this.sessions.keys(),
+        ...persisted.map((session) => session.sessionId)
+      ])).size;
+      this.sessions.clear();
+      this.loading.clear();
+      this.commandTails.clear();
+      if (this.options.sessionStore?.clear) {
+        await this.options.sessionStore.clear();
+      } else {
+        await Promise.all(
+          persisted.map(
+            (session) => this.options.sessionStore?.remove(session.sessionId)
+          )
+        );
+      }
+      return count;
     }
     async restart(sessionId) {
       const runtime = this.sessions.get(sessionId);
@@ -5326,6 +5438,12 @@ ${lines.join("\n")}
         "write",
         ["browser:read"],
         async (input, invocation) => {
+          if (dependencies.tabScoped) {
+            throw new AgentError(
+              "TAB_SCOPED_SESSION",
+              "Tabs are isolated conversations and cannot share a working tab."
+            );
+          }
           const tabId = requiredString2(input, "tabId");
           await browser.setWorkingTab(invocation.sessionId, tabId);
           return { tabId };
@@ -5338,6 +5456,12 @@ ${lines.join("\n")}
         "write",
         ["browser:navigate"],
         async (input, invocation) => {
+          if (dependencies.tabScoped) {
+            throw new AgentError(
+              "TAB_SCOPED_SESSION",
+              "Tabs are isolated conversations; use the browser tabs UI to open another tab session."
+            );
+          }
           const tab = await browser.createTab(optionalString2(input, "url") ?? "about:blank");
           await browser.setWorkingTab(invocation.sessionId, tab.id);
           return tab;
@@ -5902,7 +6026,8 @@ ${lines.join("\n")}
     const registry = new ToolRegistry();
     const browserTools = createBrowserTools(options.browser, {
       download: options.download,
-      handoff: options.handoff
+      handoff: options.handoff,
+      tabScoped: options.tabScoped
     });
     registry.registerAll(
       browserTools.map((definition) => ({ definition, source: "builtin" }))
@@ -6383,6 +6508,166 @@ ${lines.join("\n")}
     });
   }
 
+  // src/runtime/tab-session-registry.ts
+  var DEFAULT_STORAGE_KEY = "tinyai:tab-sessions:v1";
+  var TabSessionRegistry = class {
+    constructor(options) {
+      this.options = options;
+      this.storageKey = options.storageKey ?? DEFAULT_STORAGE_KEY;
+      this.now = options.now ?? Date.now;
+      this.createSessionId = options.createSessionId ?? (() => `session_${crypto.randomUUID()}`);
+    }
+    options;
+    bindings = /* @__PURE__ */ new Map();
+    storageKey;
+    now;
+    createSessionId;
+    loaded;
+    tail = Promise.resolve();
+    resolve(context) {
+      return this.serialized(async () => {
+        await this.ensureLoaded();
+        const existing = this.bindings.get(tabKey(context));
+        if (existing) {
+          const session = await this.options.runtime.hydrateSession(existing.sessionId);
+          if (session) {
+            await this.options.runtime.ensureSessionReady(existing.sessionId);
+            await this.options.browser.setWorkingTab(existing.sessionId, context.tabId, {
+              activate: false
+            });
+            return { ...existing };
+          }
+          this.bindings.delete(tabKey(context));
+        }
+        return this.createLocked(context);
+      });
+    }
+    create(context) {
+      return this.serialized(async () => {
+        await this.ensureLoaded();
+        return this.createLocked(context);
+      });
+    }
+    bind(context, sessionId) {
+      return this.serialized(async () => {
+        await this.ensureLoaded();
+        const session = await this.options.runtime.hydrateSession(sessionId);
+        if (!session) {
+          throw new AgentError(
+            "SESSION_NOT_FOUND",
+            `Session not found: ${sessionId}`
+          );
+        }
+        return this.bindLocked(context, sessionId);
+      });
+    }
+    forget(context) {
+      return this.serialized(async () => {
+        await this.ensureLoaded();
+        if (this.bindings.delete(tabKey(context))) await this.persist();
+      });
+    }
+    releaseSession(sessionId) {
+      return this.serialized(async () => {
+        await this.ensureLoaded();
+        let changed = false;
+        for (const [key, binding] of this.bindings) {
+          if (binding.sessionId !== sessionId) continue;
+          this.bindings.delete(key);
+          changed = true;
+        }
+        await this.options.browser.releaseSession?.(sessionId);
+        if (changed) await this.persist();
+      });
+    }
+    clear() {
+      return this.serialized(async () => {
+        await this.ensureLoaded();
+        const sessionIds = new Set(
+          [...this.bindings.values()].map((binding) => binding.sessionId)
+        );
+        await Promise.all(
+          [...sessionIds].map(
+            (sessionId) => this.options.browser.releaseSession?.(sessionId)
+          )
+        );
+        this.bindings.clear();
+        await this.options.storage?.remove?.(this.storageKey);
+      });
+    }
+    async list() {
+      await this.ensureLoaded();
+      return [...this.bindings.values()].map((binding) => ({ ...binding }));
+    }
+    async createLocked(context) {
+      return this.bindLocked(context, this.createSessionId());
+    }
+    async bindLocked(context, sessionId) {
+      const key = tabKey(context);
+      for (const [existingKey, binding2] of this.bindings) {
+        if (existingKey !== key && binding2.sessionId === sessionId) {
+          this.bindings.delete(existingKey);
+        }
+      }
+      await this.options.runtime.ensureSessionReady(sessionId);
+      await this.options.browser.setWorkingTab(sessionId, context.tabId, {
+        activate: false
+      });
+      const binding = {
+        windowId: context.windowId,
+        tabId: context.tabId,
+        sessionId,
+        updatedAt: this.now()
+      };
+      this.bindings.set(key, binding);
+      await this.persist();
+      return { ...binding };
+    }
+    async ensureLoaded() {
+      this.loaded ??= this.load();
+      await this.loaded;
+    }
+    async load() {
+      if (!this.options.storage) return;
+      const stored = await this.options.storage.get(this.storageKey);
+      const raw = stored[this.storageKey];
+      if (!Array.isArray(raw)) return;
+      for (const value of raw) {
+        if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+        const item = value;
+        const windowId = Number(item.windowId);
+        const tabId = typeof item.tabId === "string" ? item.tabId : "";
+        const sessionId = typeof item.sessionId === "string" ? item.sessionId : "";
+        if (!Number.isFinite(windowId) || !tabId || !sessionId) continue;
+        const context = { windowId, tabId };
+        this.bindings.set(tabKey(context), {
+          ...context,
+          sessionId,
+          updatedAt: Number(item.updatedAt ?? this.now())
+        });
+      }
+    }
+    async persist() {
+      if (!this.options.storage) return;
+      await this.options.storage.set({
+        [this.storageKey]: [...this.bindings.values()].map((binding) => ({
+          ...binding
+        }))
+      });
+    }
+    serialized(operation) {
+      const next = this.tail.then(operation, operation);
+      this.tail = next.then(
+        () => void 0,
+        () => void 0
+      );
+      return next;
+    }
+  };
+  function tabKey(context) {
+    return `${context.windowId}:${context.tabId}`;
+  }
+
   // src/adapters/legacy-session-importer.ts
   async function importLegacySessions(raw, store, now = Date.now()) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return 0;
@@ -6773,7 +7058,8 @@ ${skillListing}` : ""}`,
             source: "plugin",
             sourceId: "mcp"
           }))
-        ]
+        ],
+        tabScoped: true
       }).runtime
     });
     let mainWorkspace;
@@ -6835,7 +7121,8 @@ ${skillListing}` : ""}`,
           source: "plugin",
           sourceId: "mcp"
         }))
-      ]
+      ],
+      tabScoped: true
     });
     const unsubscribeChildren = coordinator.subscribe((child) => {
       mainWorkspace.runtime.updateChildTask(child.parentTaskId, {
@@ -6849,8 +7136,14 @@ ${skillListing}` : ""}`,
         ...child.completedAt ? { updatedAt: child.completedAt } : {}
       });
     });
+    const tabSessions = new TabSessionRegistry({
+      runtime: mainWorkspace.runtime,
+      browser,
+      storage: options.tabSessionStorage
+    });
     return {
       runtime: mainWorkspace.runtime,
+      tabSessions,
       approval,
       skills: () => skillStore.list(),
       artifacts: artifactStore,
@@ -6866,12 +7159,18 @@ ${skillListing}` : ""}`,
   }
   function installKernelRuntimeGateway(chromeApi = chrome) {
     const gateway = new RuntimeGateway(
-      async () => createChromeRuntimeBundle({ storage: chromeApi.storage.local })
+      async () => createChromeRuntimeBundle({
+        storage: chromeApi.storage.local,
+        tabSessionStorage: chromeApi.storage.session
+      })
     );
     chromeApi.runtime.onConnect.addListener((port) => {
       if (port.name !== KERNEL_PORT_NAME) return;
       gateway.connect(asRuntimePort(port));
       void ensureRuntimeOffscreen(chromeApi);
+    });
+    chromeApi.tabs.onRemoved.addListener((tabId, info) => {
+      void gateway.forgetTab(info.windowId, String(tabId));
     });
     return gateway;
   }

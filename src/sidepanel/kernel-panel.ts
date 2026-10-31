@@ -36,6 +36,17 @@ interface KernelStoredConfig {
   connections: KernelConnectionConfig[];
 }
 
+interface ComposerDraft {
+  text: string;
+  attachments: Array<{
+    name: string;
+    type: string;
+    text?: string;
+    dataBase64?: string;
+  }>;
+  selectedSkill?: string;
+}
+
 export async function initKernelUi(): Promise<void> {
   const root = document.querySelector<HTMLElement>('#root');
   if (!root) throw new Error('Missing #root');
@@ -50,6 +61,13 @@ export async function initKernelUi(): Promise<void> {
   let sessionId = `session_${crypto.randomUUID()}`;
   let approvals: KernelApprovalEvent[] = [];
   let handoffs: KernelHandoffEvent[] = [];
+  const approvalsBySession = new Map<string, KernelApprovalEvent[]>();
+  const handoffsBySession = new Map<string, KernelHandoffEvent[]>();
+  const drafts = new Map<string, ComposerDraft>();
+  let windowId: number | undefined;
+  let activeTabId: string | undefined;
+  let activationGeneration = 0;
+  let sessionActivated = false;
   let skills: SkillDefinition[] = [];
   let selectedSkill: SkillDefinition | undefined;
   let attachments: Array<{
@@ -96,6 +114,7 @@ export async function initKernelUi(): Promise<void> {
     status.hidden = !busy && !error;
     status.dataset.error = error ? 'true' : 'false';
     send.disabled =
+      !sessionActivated ||
       Boolean(error) ||
       projection?.availability.canSend === false ||
       (!input.value.trim() && !attachments.length && !selectedSkill);
@@ -176,7 +195,92 @@ export async function initKernelUi(): Promise<void> {
     if (scroll && stickToBottom) scroll.scrollTop = scroll.scrollHeight;
   };
 
-  client.onProjection((_sessionId, next) => {
+  const saveCurrentDraft = (): void => {
+    const input = document.querySelector<HTMLTextAreaElement>('#kernel-input');
+    const text = input?.value ?? '';
+    if (text || attachments.length || selectedSkill) {
+      drafts.set(sessionId, {
+        text,
+        attachments: attachments.map((attachment) => ({ ...attachment })),
+        ...(selectedSkill ? { selectedSkill: selectedSkill.name } : {}),
+      });
+    } else {
+      drafts.delete(sessionId);
+    }
+  };
+
+  const restoreCurrentDraft = (): void => {
+    const draft = drafts.get(sessionId);
+    const input = document.querySelector<HTMLTextAreaElement>('#kernel-input');
+    if (input) input.value = draft?.text ?? '';
+    attachments = (draft?.attachments ?? []).map((attachment) => ({ ...attachment }));
+    selectedSkill = draft?.selectedSkill
+      ? skills.find((skill) => skill.name === draft.selectedSkill)
+      : undefined;
+    const skillSelect = document.querySelector<HTMLSelectElement>('#kernel-skill');
+    if (skillSelect) skillSelect.value = selectedSkill?.name ?? '';
+  };
+
+  async function activateSession(
+    load: () => Promise<{
+      sessionId: string;
+      tabId: string;
+      projection: ProductProjection;
+    }>
+  ): Promise<boolean> {
+    const generation = ++activationGeneration;
+    sessionActivated = false;
+    render();
+    saveCurrentDraft();
+    let activation: Awaited<ReturnType<typeof load>>;
+    try {
+      activation = await load();
+    } catch (cause) {
+      if (generation === activationGeneration) throw cause;
+      return false;
+    }
+    if (generation !== activationGeneration) return false;
+    const previousSession = sessionId;
+    if (projection && previousSession !== activation.sessionId) {
+      await client.unsubscribe(previousSession).catch(() => undefined);
+    }
+    sessionId = activation.sessionId;
+    activeTabId = activation.tabId;
+    document.documentElement.dataset.tinyaiTabId = activeTabId;
+    document.documentElement.dataset.tinyaiSessionId = sessionId;
+    projection = activation.projection;
+    approvals = [...(approvalsBySession.get(sessionId) ?? [])];
+    handoffs = [...(handoffsBySession.get(sessionId) ?? [])];
+    busy =
+      projection.taskStatus === 'running' ||
+      projection.taskStatus === 'queued' ||
+      projection.taskStatus === 'waiting';
+    busyStartedAt = busy ? Date.now() : 0;
+    error = '';
+    reconnectAttempts = 0;
+    await client.subscribe(sessionId);
+    restoreCurrentDraft();
+    sessionActivated = true;
+    render();
+    return true;
+  }
+
+  async function switchToTab(tabId: string): Promise<void> {
+    if (windowId === undefined || tabId === activeTabId) return;
+    await activateSession(() => client.resolveTabSession(windowId!, tabId));
+  }
+
+  async function startNewSession(): Promise<void> {
+    if (windowId === undefined || !activeTabId) {
+      throw new Error('No active browser tab is available');
+    }
+    await activateSession(() =>
+      client.createTabSession(windowId!, activeTabId!)
+    );
+  }
+
+  client.onProjection((eventSessionId, next) => {
+    if (eventSessionId !== sessionId) return;
     reconnectAttempts = 0;
     projection = next;
     const nextBusy =
@@ -190,12 +294,26 @@ export async function initKernelUi(): Promise<void> {
     render();
   });
   client.onApproval((approval) => {
-    approvals = [...approvals, approval];
-    render();
+    const pending = [
+      ...(approvalsBySession.get(approval.sessionId) ?? []),
+      approval,
+    ];
+    approvalsBySession.set(approval.sessionId, pending);
+    if (approval.sessionId === sessionId) {
+      approvals = pending;
+      render();
+    }
   });
   client.onHandoff((handoff) => {
-    handoffs = [...handoffs, handoff];
-    render();
+    const pending = [
+      ...(handoffsBySession.get(handoff.sessionId) ?? []),
+      handoff,
+    ];
+    handoffsBySession.set(handoff.sessionId, pending);
+    if (handoff.sessionId === sessionId) {
+      handoffs = pending;
+      render();
+    }
   });
   client.onDisconnect(() => {
     busy = false;
@@ -232,6 +350,25 @@ export async function initKernelUi(): Promise<void> {
           render();
         });
     }, reconnectAttempts * 250);
+  });
+  chrome.tabs.onActivated.addListener((info) => {
+    if (windowId === undefined || info.windowId !== windowId) return;
+    void switchToTab(String(info.tabId)).catch(showError);
+  });
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    if (!activeTabId || String(tabId) !== activeTabId) return;
+    activeTabId = undefined;
+    void chrome.tabs
+      .query({ active: true, windowId })
+      .then(async ([next]) => {
+        if (next?.id !== undefined) await switchToTab(String(next.id));
+      })
+      .catch(showError);
+  });
+  chrome.tabs.onDetached.addListener((tabId, info) => {
+    void client
+      .forgetTabSession(info.oldWindowId, String(tabId))
+      .catch(() => undefined);
   });
 
   document.querySelector('#kernel-form')?.addEventListener('submit', (event) => {
@@ -272,10 +409,15 @@ export async function initKernelUi(): Promise<void> {
   document.querySelector('#kernel-tab-menu')?.addEventListener('click', (event) => {
     const tab = (event.target as Element).closest<HTMLElement>('[data-kernel-tab]');
     if (!tab?.dataset.kernelTab) return;
-    void client.selectTab(sessionId, tab.dataset.kernelTab).then(() => {
-      const menu = document.querySelector<HTMLElement>('#kernel-tab-menu');
-      if (menu) menu.hidden = true;
-    }).catch(showError);
+    const tabId = tab.dataset.kernelTab;
+    void chrome.tabs
+      .update(Number(tabId), { active: true })
+      .then(() => {
+        const menu = document.querySelector<HTMLElement>('#kernel-tab-menu');
+        if (menu) menu.hidden = true;
+        if (windowId !== undefined) return switchToTab(tabId);
+      })
+      .catch(showError);
   });
   document.querySelector('#kernel-model')?.addEventListener('click', (event) => {
     event.stopPropagation();
@@ -345,15 +487,12 @@ export async function initKernelUi(): Promise<void> {
       .catch(showError);
   });
   document.querySelector('#kernel-new')?.addEventListener('click', () => {
-    sessionId = `session_${crypto.randomUUID()}`;
-    projection = undefined;
-    approvals = [];
-    handoffs = [];
-    error = '';
-    busy = false;
-    busyStartedAt = 0;
-    detailState.clear();
-    render();
+    void startNewSession()
+      .then(() => {
+        detailState.clear();
+        render();
+      })
+      .catch(showError);
   });
   document.addEventListener('change', (event) => {
     const target = event.target as HTMLSelectElement;
@@ -422,6 +561,7 @@ export async function initKernelUi(): Promise<void> {
       const decision = handoffTarget.dataset.decision === 'continue' ? 'continue' : 'cancel';
       if (!handoffId) return;
       handoffs = handoffs.filter((item) => item.handoffId !== handoffId);
+      handoffsBySession.set(sessionId, handoffs);
       void client.respondHandoff(handoffId, decision).catch(showError);
       render();
       return;
@@ -432,6 +572,7 @@ export async function initKernelUi(): Promise<void> {
     const approved = target.dataset.decision === 'allow';
     if (!approvalId) return;
     approvals = approvals.filter((item) => item.approvalId !== approvalId);
+    approvalsBySession.set(sessionId, approvals);
     void client.respondApproval(approvalId, approved).catch(showError);
     render();
   });
@@ -478,10 +619,7 @@ export async function initKernelUi(): Promise<void> {
     if (projection?.availability.canSend === false) return;
     if (text === '/new') {
       if (input) input.value = '';
-      sessionId = `session_${crypto.randomUUID()}`;
-      projection = undefined;
-      approvals = [];
-      handoffs = [];
+      await startNewSession();
       detailState.clear();
       render();
       return;
@@ -542,6 +680,7 @@ export async function initKernelUi(): Promise<void> {
       await client.subscribe(sessionId);
       attachments = [];
       selectedSkill = undefined;
+      drafts.delete(sessionId);
       const skillSelect = document.querySelector<HTMLSelectElement>('#kernel-skill');
       if (skillSelect) skillSelect.value = '';
       const fileInput = document.querySelector<HTMLInputElement>('#kernel-file-input');
@@ -557,6 +696,7 @@ export async function initKernelUi(): Promise<void> {
     const input = document.querySelector<HTMLTextAreaElement>('#kernel-input');
     if (!send || !input) return;
     send.disabled =
+      !sessionActivated ||
       Boolean(error) ||
       projection?.availability.canSend === false ||
       (!input.value.trim() && !attachments.length && !selectedSkill);
@@ -718,6 +858,15 @@ export async function initKernelUi(): Promise<void> {
             <div class="wb-set-sepa"></div>
             <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.sparkle}</span>${zh ? '显示推理过程' : 'Reasoning'}</span>
               <button type="button" class="wb-set-select" data-page-action="reasoning"><span class="wb-set-select-value">${pageConfig.showReasoning ? (zh ? '显示' : 'Show') : (zh ? '隐藏' : 'Hidden')}</span>${icons.chevronDown}</button></div>
+          </div>
+        </div>
+        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? '数据' : 'Data'}</div>
+          <div class="wb-set-card">
+            <button type="button" class="wb-set-row wb-set-navrow wb-clickable kernel-danger-row" data-page-action="clear-history">
+              <span class="wb-set-row-label">${icons.info}${zh ? '清除全部聊天历史' : 'Clear all chat history'}</span>
+              <span class="wb-input-grow"></span>
+              ${icons.chevronDown}
+            </button>
           </div>
         </div>
         <div class="wb-set-group"><div class="wb-set-group-label">${zh ? '关于' : 'About'}</div>
@@ -912,6 +1061,24 @@ export async function initKernelUi(): Promise<void> {
       pageConfig.showReasoning = !pageConfig.showReasoning;
       await writePageConfig();
       renderPage();
+      return;
+    }
+    if (action === 'clear-history') {
+      const confirmed = window.confirm(
+        pageConfig.language.startsWith('zh')
+          ? '确定永久清除全部聊天历史？此操作无法撤销。'
+          : 'Permanently clear all chat history? This cannot be undone.'
+      );
+      if (!confirmed) return;
+      await client.clearHistory();
+      approvalsBySession.clear();
+      handoffsBySession.clear();
+      approvals = [];
+      handoffs = [];
+      drafts.clear();
+      detailState.clear();
+      closePage();
+      await startNewSession();
       return;
     }
     if (action === 'zoom') {
@@ -1139,20 +1306,13 @@ export async function initKernelUi(): Promise<void> {
 
   async function switchSession(nextSessionId: string): Promise<void> {
     if (nextSessionId === sessionId && projection) return;
-    if (projection) await client.unsubscribe(sessionId).catch(() => undefined);
     detailState.clear();
-    sessionId = nextSessionId;
-    approvals = [];
-    handoffs = [];
-    error = '';
-    projection = await client.projection(sessionId);
-    await client.subscribe(sessionId);
-    busy =
-      projection.taskStatus === 'running' ||
-      projection.taskStatus === 'queued' ||
-      projection.taskStatus === 'waiting';
-    busyStartedAt = busy ? Date.now() : 0;
-    render();
+    if (windowId === undefined || !activeTabId) {
+      throw new Error('No active browser tab is available');
+    }
+    await activateSession(() =>
+      client.bindTabSession(windowId!, activeTabId!, nextSessionId)
+    );
   }
 
   function showError(cause: unknown): void {
@@ -1163,12 +1323,19 @@ export async function initKernelUi(): Promise<void> {
   }
 
   try {
-    const sessions = await client.listSessions();
-    if (sessions[0]) sessionId = sessions[0].sessionId;
-    projection = await client.projection(sessionId);
-    await client.subscribe(sessionId);
-    busy = projection.taskStatus === 'running' || projection.taskStatus === 'queued';
-    busyStartedAt = busy ? Date.now() : 0;
+    const currentWindow = await chrome.windows.getCurrent();
+    if (currentWindow.id === undefined) throw new Error('No browser window is available');
+    windowId = currentWindow.id;
+    document.documentElement.dataset.tinyaiWindowId = String(windowId);
+    const [activeTab] = await chrome.tabs.query({
+      active: true,
+      windowId,
+    });
+    if (activeTab?.id === undefined) throw new Error('No active browser tab is available');
+    activeTabId = String(activeTab.id);
+    await activateSession(() =>
+      client.resolveTabSession(windowId!, activeTabId!)
+    );
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
     if (!/SESSION_NOT_FOUND|Session not found/i.test(message)) error = message;
@@ -1638,7 +1805,7 @@ function shell(config: KernelStoredConfig): string {
               <div id="kernel-model-menu" class="kernel-command-menu kernel-model-menu" hidden></div>
             </div>
             <button type="button" id="kernel-stop" class="wb-send kernel-stop-button" hidden aria-label="Stop">${icons.stop}</button>
-            <button type="submit" id="kernel-send" class="wb-send" aria-label="Send">${icons.send}</button>
+            <button type="submit" id="kernel-send" class="wb-send" aria-label="Send" disabled>${icons.send}</button>
           </div>
         </div>
       </form>

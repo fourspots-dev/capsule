@@ -25,6 +25,7 @@ export interface ChromeTabsApi {
   update(tabId: number, properties: chrome.tabs.UpdateProperties): Promise<chrome.tabs.Tab | undefined>;
   remove(tabIds: number | number[]): Promise<void>;
   group?(options: chrome.tabs.GroupOptions): Promise<number>;
+  ungroup?(tabIds: number | number[]): Promise<void>;
 }
 
 export interface ChromeDebuggerApi {
@@ -234,7 +235,7 @@ export class ChromeBrowserProvider implements BrowserProvider {
       try {
         binding.groupId = await this.tabs.group({ tabIds: [Number(selected.id)] });
         await this.tabGroups?.update(binding.groupId, {
-          title: `tinyai · ${sessionId.slice(0, 24)}`,
+          title: tabGroupTitle(selected.title),
           color: 'blue',
         });
       } catch {
@@ -245,7 +246,11 @@ export class ChromeBrowserProvider implements BrowserProvider {
     return this.groupRef(sessionId, binding);
   }
 
-  async setWorkingTab(sessionId: string, tabId: BrowserTabId): Promise<void> {
+  async setWorkingTab(
+    sessionId: string,
+    tabId: BrowserTabId,
+    options: { activate?: boolean } = {}
+  ): Promise<void> {
     const tab = await this.getTab(tabId);
     if (!tab) throw new AgentError('BROWSER_TAB_NOT_FOUND', `Tab not found: ${tabId}`);
     const binding = this.sessions.get(sessionId) ?? {
@@ -255,7 +260,12 @@ export class ChromeBrowserProvider implements BrowserProvider {
     };
     binding.tabId = tabId;
     this.sessions.set(sessionId, binding);
-    await this.activateTab(tabId);
+    if (binding.groupId !== undefined) {
+      await this.tabGroups
+        ?.update(binding.groupId, { title: tabGroupTitle(tab.title) })
+        .catch(() => undefined);
+    }
+    if (options.activate !== false) await this.activateTab(tabId);
   }
 
   async getWorkingTab(sessionId: string): Promise<BrowserTabId | null> {
@@ -273,6 +283,7 @@ export class ChromeBrowserProvider implements BrowserProvider {
     const closedTabs: BrowserTabId[] = [];
     const errors: CloseSessionReport['errors'] = [];
     for (const tabId of binding.attached) {
+      if (!this.attachedTabs.has(tabId)) continue;
       try {
         await this.detach(tabId);
         detachedTabs.push(tabId);
@@ -292,6 +303,21 @@ export class ChromeBrowserProvider implements BrowserProvider {
     this.refs.clear();
     this.frameContexts.clear();
     return { sessionId, detachedTabs, closedTabs, errors };
+  }
+
+  async releaseSession(sessionId: string): Promise<void> {
+    const binding = this.sessions.get(sessionId);
+    if (!binding) return;
+    for (const tabId of binding.attached) {
+      await this.detach(tabId).catch(() => undefined);
+    }
+    const groupedTabs = new Set([binding.tabId, ...binding.ownedTabs].filter(Boolean));
+    if (this.tabs.ungroup && groupedTabs.size) {
+      await this.tabs
+        .ungroup([...groupedTabs].map(Number))
+        .catch(() => undefined);
+    }
+    this.sessions.delete(sessionId);
   }
 
   async listFrames(tabId: BrowserTabId): Promise<FrameDescriptor[]> {
@@ -1024,6 +1050,11 @@ function toDescriptor(tab: chrome.tabs.Tab): TabDescriptor {
       ? {}
       : { groupId: tab.groupId }),
   };
+}
+
+function tabGroupTitle(title: string | undefined): string {
+  const compact = (title ?? '').replace(/\s+/g, ' ').trim();
+  return compact ? `tinyai · ${compact.slice(0, 28)}` : 'tinyai';
 }
 
 function isInspectable(url: unknown): boolean {

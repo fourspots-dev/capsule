@@ -7,9 +7,11 @@ import type { BrowserProvider } from '../core/browser-provider';
 import { AgentError, toStructuredError } from '../core/errors';
 import type { PortApprovalBroker } from './approval-broker';
 import type { RuntimePort, RuntimeRequest, RuntimeResponse } from './protocol';
+import type { TabSessionRegistry } from './tab-session-registry';
 
 export interface RuntimeBundle {
   runtime: WorkspaceRuntime;
+  tabSessions?: TabSessionRegistry;
   approval?: PortApprovalBroker;
   skills?: () => Promise<SkillDefinition[]>;
   artifacts?: ArtifactStore;
@@ -69,6 +71,11 @@ export class RuntimeGateway {
     const bundle = await this.runtime;
     await bundle?.dispose();
     this.runtime = undefined;
+  }
+
+  async forgetTab(windowId: number, tabId: string): Promise<void> {
+    const bundle = await this.runtime?.catch(() => undefined);
+    await bundle?.tabSessions?.forget({ windowId, tabId });
   }
 
   private async handle(port: RuntimePort, request: RuntimeRequest): Promise<void> {
@@ -131,7 +138,14 @@ export class RuntimeGateway {
         this.reply(port, requestId, await bundle.runtime.listSessions());
         return;
       }
+      if (request.type === 'clear_history') {
+        await bundle.tabSessions?.clear();
+        const deleted = await bundle.runtime.deleteAllSessions();
+        this.reply(port, requestId, { deleted });
+        return;
+      }
       if (request.type === 'delete_session') {
+        await bundle.tabSessions?.releaseSession(request.sessionId);
         await bundle.runtime.deleteSession(request.sessionId);
         this.reply(port, requestId, true);
         return;
@@ -174,6 +188,48 @@ export class RuntimeGateway {
         }
         await bundle.browser.setWorkingTab(request.sessionId, request.tabId);
         this.reply(port, requestId, true);
+        return;
+      }
+      if (request.type === 'resolve_tab_session') {
+        const tabs = bundle.tabSessions;
+        if (!tabs) throw new AgentError('TAB_SESSIONS_UNAVAILABLE', 'Tab sessions are unavailable');
+        const binding = await tabs.resolve({
+          windowId: request.windowId,
+          tabId: request.tabId,
+        });
+        const projection = await bundle.runtime.loadProjection(binding.sessionId);
+        this.reply(port, requestId, { ...binding, projection });
+        return;
+      }
+      if (request.type === 'create_tab_session') {
+        const tabs = bundle.tabSessions;
+        if (!tabs) throw new AgentError('TAB_SESSIONS_UNAVAILABLE', 'Tab sessions are unavailable');
+        const binding = await tabs.create({
+          windowId: request.windowId,
+          tabId: request.tabId,
+        });
+        const projection = await bundle.runtime.loadProjection(binding.sessionId);
+        this.reply(port, requestId, { ...binding, projection });
+        return;
+      }
+      if (request.type === 'bind_tab_session') {
+        const tabs = bundle.tabSessions;
+        if (!tabs) throw new AgentError('TAB_SESSIONS_UNAVAILABLE', 'Tab sessions are unavailable');
+        const binding = await tabs.bind(
+          { windowId: request.windowId, tabId: request.tabId },
+          request.sessionId
+        );
+        const projection = await bundle.runtime.loadProjection(binding.sessionId);
+        this.reply(port, requestId, { ...binding, projection });
+        return;
+      }
+      if (request.type === 'forget_tab_session') {
+        await bundle.tabSessions?.forget({
+          windowId: request.windowId,
+          tabId: request.tabId,
+        });
+        this.reply(port, requestId, true);
+        return;
       }
     } catch (error) {
       port.postMessage({

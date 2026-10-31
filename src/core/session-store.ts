@@ -32,6 +32,7 @@ export interface SessionStore {
   load(sessionId: string): Promise<SessionSnapshot | undefined>;
   save(snapshot: SessionSnapshot): Promise<void>;
   remove(sessionId: string): Promise<void>;
+  clear?(): Promise<void>;
   list?(): Promise<SessionSummary[]>;
 }
 
@@ -59,6 +60,10 @@ export class InMemorySessionStore implements SessionStore {
 
   async remove(sessionId: string): Promise<void> {
     this.snapshots.delete(sessionId);
+  }
+
+  async clear(): Promise<void> {
+    this.snapshots.clear();
   }
 
   async list(): Promise<SessionSummary[]> {

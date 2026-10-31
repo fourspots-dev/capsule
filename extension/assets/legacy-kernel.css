@@ -273,6 +273,15 @@ body {
   background: var(--muted);
 }
 
+.kernel-danger-row {
+  border-color: color-mix(in srgb, var(--danger) 20%, transparent);
+  color: var(--danger);
+}
+
+.kernel-danger-row .wb-set-row-label {
+  color: var(--danger);
+}
+
 .kernel-message-row--user {
   width: 100%;
 }

@@ -54,6 +54,14 @@ export class ChromeSessionStore implements SessionStore {
     });
   }
 
+  async clear(): Promise<void> {
+    await Promise.all(this.tails.values());
+    const all = await this.storage.get(null);
+    const keys = Object.keys(all).filter((key) => key.startsWith(this.keyPrefix));
+    if (keys.length) await this.storage.remove(keys);
+    this.tails.clear();
+  }
+
   async list(): Promise<SessionSummary[]> {
     const all = await this.storage.get(null);
     const summaries: SessionSummary[] = [];

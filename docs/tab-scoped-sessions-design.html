@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>tinyai 标签级会话设计</title>
+  <style>
+    :root{--bg:#f7f7f8;--card:#fff;--text:#19191c;--muted:#74747d;--line:#e5e5e9;--accent:#5b4bff;--ok:#137a4b;--warn:#9a5b00;--danger:#b42318;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}
+    .wrap{max-width:1120px;margin:auto;padding:48px 28px 90px}.hero{padding:34px;border-radius:24px;background:linear-gradient(135deg,#17172b,#3430a3 58%,#7b6dff);color:#fff}
+    .hero small{opacity:.72;letter-spacing:.08em}.hero h1{font-size:34px;line-height:1.2;margin:12px 0}.hero p{max-width:760px;margin:0;opacity:.82}
+    .status{display:inline-flex;margin-top:18px;padding:5px 10px;border:1px solid #ffffff42;border-radius:999px;background:#ffffff12;font-size:12px}
+    nav{position:sticky;top:0;z-index:2;margin:20px 0;padding:10px 14px;border:1px solid var(--line);border-radius:14px;background:#f7f7f8e8;backdrop-filter:blur(12px);display:flex;gap:14px;overflow:auto}
+    nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}nav a:hover{color:var(--text)}
+    section{margin:18px 0;padding:26px;border:1px solid var(--line);border-radius:18px;background:var(--card)}
+    h2{font-size:22px;margin:0 0 14px}h3{font-size:16px;margin:22px 0 8px}p{color:#44444b}.muted{color:var(--muted)}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.card{padding:16px;border:1px solid var(--line);border-radius:13px;background:#fafafa}
+    .card h3{margin:0 0 7px}.tag{display:inline-block;padding:2px 7px;border-radius:6px;background:#eeeefe;color:#4c3fd6;font-size:11px}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--danger)}
+    table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:10px 9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--muted);font-weight:600;background:#fafafa}
+    code{font-family:var(--mono);font-size:.92em;background:#f0f0f3;padding:1px 5px;border-radius:4px}pre{padding:16px;overflow:auto;border-radius:12px;background:#171721;color:#e9e8ff;font:12px/1.6 var(--mono)}
+    .flow{display:flex;align-items:stretch;gap:9px;flex-wrap:wrap}.flow div{flex:1;min-width:150px;padding:13px;border:1px solid var(--line);border-radius:11px;background:#fafafa}.arrow{align-self:center;color:var(--muted)}
+    .callout{padding:13px 15px;border-left:3px solid var(--accent);background:#f4f2ff;border-radius:0 10px 10px 0}.warning{border-color:var(--warn);background:#fff8ea}
+    @media(max-width:760px){.grid{grid-template-columns:1fr}.hero h1{font-size:27px}.wrap{padding:22px 14px 60px}section{padding:20px}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <small>TINYAI / BROWSER CONTEXT / V1</small>
+    <h1>标签级独立会话<br>方案设计</h1>
+    <p>目标是把“一个 Side Panel 对话可以切换多个标签页”改成“每个浏览器标签拥有独立 Agent Session，激活标签时自动恢复对应对话”。</p>
+    <span class="status">状态：已实现并通过 Chrome E2E</span>
+  </header>
+  <nav>
+    <a href="#model">语义模型</a><a href="#arch">架构</a><a href="#startup">启动与切换</a><a href="#protocol">协议</a><a href="#cleanup">历史清理</a><a href="#edge">边界</a><a href="#code">实现映射</a>
+  </nav>
+
+  <section id="model">
+    <h2>1. 核心语义</h2>
+    <div class="grid">
+      <div class="card"><h3>Tab 是会话边界</h3><p>以 <code>windowId + tabId</code> 作为浏览器会话内的标签身份。首次激活标签时惰性创建 Session，同一标签往返切换时复用。</p></div>
+      <div class="card"><h3>Session 是唯一对话事实</h3><p>消息、任务、队列、审批、子 Agent、草稿和运行状态都属于 Session。UI 不复制第二份会话状态。</p></div>
+      <div class="card"><h3>Browser target 固定</h3><p>工具默认只操作该 Session 绑定的标签。标签级模式下禁止 Agent 用 <code>switch_tab</code> 改变工作目标。</p></div>
+      <div class="card"><h3>历史仍可恢复</h3><p>History 中的旧会话可重新绑定到当前标签；原来绑定该 Session 的标签解除映射。</p></div>
+    </div>
+    <h3>与旧行为对比</h3>
+    <table><thead><tr><th>行为</th><th>旧实现</th><th>新实现</th></tr></thead><tbody>
+      <tr><td>打开 Side Panel</td><td>加载最近一条 Session</td><td>加载当前标签对应 Session</td></tr>
+      <tr><td>切换标签</td><td>对话不变</td><td>自动切换为该标签对话</td></tr>
+      <tr><td>@ 选择标签</td><td>只重绑工具目标</td><td>切换标签并切换对话</td></tr>
+      <tr><td>新标签</td><td>沿用当前对话</td><td>创建独立空白会话</td></tr>
+      <tr><td>点击 +</td><td>当前标签换新 Session</td><td>当前标签换新 Session，旧会话保留在 History</td></tr>
+    </tbody></table>
+  </section>
+
+  <section id="arch">
+    <h2>2. 架构与核心对象</h2>
+    <div class="flow">
+      <div><b>Side Panel</b><br><span class="muted">监听标签激活、切换 Session、恢复草稿</span></div><span class="arrow">→</span>
+      <div><b>Runtime Gateway</b><br><span class="muted">原子解析、创建、绑定 Tab Session</span></div><span class="arrow">→</span>
+      <div><b>TabSessionRegistry</b><br><span class="muted">维护标签映射并序列化并发切换</span></div><span class="arrow">→</span>
+      <div><b>WorkspaceRuntime</b><br><span class="muted">承载独立 SessionRuntime</span></div>
+    </div>
+    <h3>类关系</h3>
+    <pre>RuntimeBundle
+├── WorkspaceRuntime
+│   └── SessionRuntime[ sessionId ]
+├── TabSessionRegistry
+│   ├── Map&lt;windowId:tabId, TabSessionBinding&gt;
+│   ├── Map&lt;sessionId, windowId:tabId&gt;
+│   └── TabSessionStorage (chrome.storage.session)
+├── ChromeBrowserProvider
+│   └── SessionBinding[ sessionId → working tabId ]
+└── RuntimeGateway
+    └── resolve_tab_session / create_tab_session / bind_tab_session</pre>
+    <table><thead><tr><th>对象</th><th>职责</th><th>不负责</th></tr></thead><tbody>
+      <tr><td><code>TabSessionRegistry</code></td><td>标签到 Session 的映射、恢复、解绑、并发串行化</td><td>消息内容、模型调用</td></tr>
+      <tr><td><code>SessionRuntime</code></td><td>单个对话的任务、消息、审批、队列</td><td>标签激活策略</td></tr>
+      <tr><td><code>ChromeBrowserProvider</code></td><td>Session 对应工作标签及浏览器操作</td><td>Session 生命周期</td></tr>
+      <tr><td><code>Side Panel</code></td><td>订阅当前 Session、恢复草稿、处理标签事件</td><td>持久化标签事实</td></tr>
+    </tbody></table>
+  </section>
+
+  <section id="startup">
+    <h2>3. 启动、切换与并发</h2>
+    <h3>打开 Side Panel</h3>
+    <ol><li>查询当前 Window 和 active Tab。</li><li>调用 <code>resolve_tab_session</code>。</li><li>Registry 命中已有映射则恢复；未命中则创建新 Session。</li><li>Session 完成生命周期启动并绑定工作标签。</li><li>Side Panel 订阅 Projection，恢复该 Session 的草稿。</li></ol>
+    <h3>切换标签</h3>
+    <ol><li><code>tabs.onActivated</code> 过滤当前窗口。</li><li>保存旧 Session 的草稿、附件和 Skill 选择。</li><li>用切换代次取消过期异步结果。</li><li>解除旧 Projection 订阅。</li><li>订阅新 Session，恢复缓存草稿并渲染。</li></ol>
+    <div class="callout">关键约束：绑定工作标签时必须传 <code>activate:false</code>。否则 <code>setWorkingTab</code> 内部的再次激活会触发 <code>tabs.onActivated</code>，形成切换递归。</div>
+    <h3>运行中的旧标签</h3>
+    <p>切走不会停止任务。旧 Session 继续在 Runtime 中运行；切回时通过 Projection 恢复最新状态。审批和接管事件按 Session 缓存，不被新标签清空。</p>
+  </section>
+
+  <section id="protocol">
+    <h2>4. Runtime 协议</h2>
+    <table><thead><tr><th>请求</th><th>输入</th><th>输出 / 语义</th></tr></thead><tbody>
+      <tr><td><code>resolve_tab_session</code></td><td>windowId, tabId</td><td>复用或创建标签 Session，返回 Session 与 Projection</td></tr>
+      <tr><td><code>create_tab_session</code></td><td>windowId, tabId</td><td>强制替换当前标签的 Session</td></tr>
+      <tr><td><code>bind_tab_session</code></td><td>windowId, tabId, sessionId</td><td>把历史 Session 绑定到当前标签</td></tr>
+      <tr><td><code>forget_tab_session</code></td><td>windowId, tabId</td><td>标签关闭或移出窗口时删除映射，不删除 Session</td></tr>
+      <tr><td><code>clear_history</code></td><td>无</td><td>停止并删除全部 Session、Snapshot 和标签映射</td></tr>
+    </tbody></table>
+    <h3>持久化</h3>
+    <p>标签映射写入 <code>chrome.storage.session</code>，可以在 MV3 Service Worker 和 Offscreen Runtime 重建时保留。完整浏览器重启后映射清空，恢复的标签从新会话开始；历史快照仍保存在 <code>chrome.storage.local</code>。</p>
+  </section>
+
+  <section id="cleanup">
+    <h2>5. 历史清理</h2>
+    <p>Settings 提供“清除全部聊天历史”。执行顺序：停止运行中 Session → flush 持久化 → 清空 SessionStore 前缀 → 清理所有标签映射 → 释放浏览器 Debugger / 标签分组 → 在当前标签创建新 Session。</p>
+    <div class="callout warning">只删除 <code>tinyai:session:v1:*</code> 与标签映射，不删除模型连接、API Key、Skills 或用户网页标签。</div>
+    <p>Chrome Tab Group 标题不再使用内部 Session ID，而使用网页标题，例如 <code>tinyai · GitHub</code>，不再泄漏 <code>legacy_*</code> 或 <code>session_*</code>。</p>
+  </section>
+
+  <section id="edge">
+    <h2>6. 边界情况</h2>
+    <table><thead><tr><th>场景</th><th>行为</th></tr></thead><tbody>
+      <tr><td>标签关闭</td><td>删除映射；若它是当前标签，自动切到同窗口的下一条 active Tab</td></tr>
+      <tr><td>标签跨窗口移动</td><td>删除旧 windowId 映射；进入新窗口后按新标签身份创建或恢复</td></tr>
+      <tr><td>标签导航/刷新</td><td>tabId 不变，Session 不变</td></tr>
+      <tr><td>标签复制</td><td>新 tabId，新 Session；不复制历史</td></tr>
+      <tr><td>快速连续切换</td><td>Registry 与 UI 都使用串行/代次控制，旧请求不得覆盖新标签</td></tr>
+      <tr><td>History 打开旧会话</td><td>旧会话移动绑定到当前标签，原标签解除映射</td></tr>
+      <tr><td>非网页标签</td><td>Session 可以创建，但浏览器工具会按 Chrome 可访问性规则报错</td></tr>
+    </tbody></table>
+    <h3>非目标</h3>
+    <p>本版不通过 URL 猜测标签身份，不支持一个 Session 同时控制多个标签，也不在完整浏览器重启后尝试复用过期 tabId。</p>
+  </section>
+
+  <section id="code">
+    <h2>7. 实现映射</h2>
+    <table><thead><tr><th>能力</th><th>文件</th></tr></thead><tbody>
+      <tr><td>标签会话注册器</td><td><code>src/runtime/tab-session-registry.ts</code></td></tr>
+      <tr><td>协议与 Gateway</td><td><code>src/runtime/protocol.ts</code>、<code>src/runtime/runtime-gateway.ts</code></td></tr>
+      <tr><td>Chrome Runtime 集成</td><td><code>src/runtime/chrome-runtime.ts</code></td></tr>
+      <tr><td>Side Panel 自动切换</td><td><code>src/sidepanel/kernel-panel.ts</code></td></tr>
+      <tr><td>全量历史清理</td><td><code>src/core/workspace-runtime.ts</code>、<code>src/adapters/chrome-session-store.ts</code></td></tr>
+      <tr><td>标签级工具约束</td><td><code>src/adapters/browser-tools.ts</code></td></tr>
+    </tbody></table>
+    <p><a href="tab-scoped-sessions-testing.html">查看配套测试设计 →</a></p>
+  </section>
+</div>
+</body>
+</html>

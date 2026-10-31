@@ -34,6 +34,13 @@ export interface KernelHandoffEvent {
   reason: string;
 }
 
+export interface TabSessionActivation {
+  windowId: number;
+  tabId: string;
+  sessionId: string;
+  projection: ProductProjection;
+}
+
 export class KernelClient {
   private port?: RuntimePort;
   private sequence = 0;
@@ -87,6 +94,12 @@ export class KernelClient {
     await this.request({ type: 'delete_session', sessionId });
   }
 
+  async clearHistory(): Promise<{ deleted: number }> {
+    return (await this.request({ type: 'clear_history' })) as {
+      deleted: number;
+    };
+  }
+
   async restartSession(sessionId: string): Promise<void> {
     await this.request({ type: 'restart_session', sessionId });
   }
@@ -117,6 +130,45 @@ export class KernelClient {
 
   async selectTab(sessionId: string, tabId: string): Promise<void> {
     await this.request({ type: 'select_tab', sessionId, tabId });
+  }
+
+  async resolveTabSession(
+    windowId: number,
+    tabId: string
+  ): Promise<TabSessionActivation> {
+    return (await this.request({
+      type: 'resolve_tab_session',
+      windowId,
+      tabId,
+    })) as TabSessionActivation;
+  }
+
+  async createTabSession(
+    windowId: number,
+    tabId: string
+  ): Promise<TabSessionActivation> {
+    return (await this.request({
+      type: 'create_tab_session',
+      windowId,
+      tabId,
+    })) as TabSessionActivation;
+  }
+
+  async bindTabSession(
+    windowId: number,
+    tabId: string,
+    sessionId: string
+  ): Promise<TabSessionActivation> {
+    return (await this.request({
+      type: 'bind_tab_session',
+      windowId,
+      tabId,
+      sessionId,
+    })) as TabSessionActivation;
+  }
+
+  async forgetTabSession(windowId: number, tabId: string): Promise<void> {
+    await this.request({ type: 'forget_tab_session', windowId, tabId });
   }
 
   async respondApproval(approvalId: string, approved: boolean): Promise<void> {

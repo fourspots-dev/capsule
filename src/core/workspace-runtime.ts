@@ -147,9 +147,42 @@ export class WorkspaceRuntime {
   }
 
   async deleteSession(sessionId: string): Promise<void> {
-    await this.stop(sessionId);
+    const runtime = this.sessions.get(sessionId);
+    if (runtime) {
+      await runtime.stopInstance();
+      await runtime.flushPersistence();
+    }
     this.sessions.delete(sessionId);
     await this.options.sessionStore?.remove(sessionId);
+  }
+
+  async deleteAllSessions(): Promise<number> {
+    await Promise.allSettled([...this.loading.values()]);
+    const loaded = [...this.sessions.values()];
+    await Promise.all(
+      loaded.map(async (runtime) => {
+        await runtime.stopInstance();
+        await runtime.flushPersistence();
+      })
+    );
+    const persisted = (await this.options.sessionStore?.list?.()) ?? [];
+    const count = new Set([
+      ...this.sessions.keys(),
+      ...persisted.map((session) => session.sessionId),
+    ]).size;
+    this.sessions.clear();
+    this.loading.clear();
+    this.commandTails.clear();
+    if (this.options.sessionStore?.clear) {
+      await this.options.sessionStore.clear();
+    } else {
+      await Promise.all(
+        persisted.map((session) =>
+          this.options.sessionStore?.remove(session.sessionId)
+        )
+      );
+    }
+    return count;
   }
 
   async restart(sessionId: string): Promise<void> {

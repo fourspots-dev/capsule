@@ -24,6 +24,7 @@ import type { RuntimePort, RuntimeRequest } from './protocol';
 import { createBrowserWorkspace } from './workspace-factory';
 import { createDefaultProfileRegistry, loadAgentProfiles } from './profile-loader';
 import { WorkspaceSubagentDriver } from './workspace-subagent-driver';
+import { TabSessionRegistry } from './tab-session-registry';
 import { CONFIG_KEY, migrateLegacyStorage } from './storage-migration';
 
 export const KERNEL_PORT_NAME = 'tinyai-runtime-v1';
@@ -94,6 +95,7 @@ export function parseKernelConfig(raw: unknown): KernelConnectionConfig {
 export async function createChromeRuntimeBundle(
   options: {
     storage?: ChromeKeyValueStorage;
+    tabSessionStorage?: ChromeKeyValueStorage;
     browser?: ChromeBrowserProvider;
     createBrowser?: () => ChromeBrowserProvider;
   } = {}
@@ -223,6 +225,7 @@ export async function createChromeRuntimeBundle(
             sourceId: 'mcp',
           })),
         ],
+        tabScoped: true,
       }).runtime,
   });
   let mainWorkspace: ReturnType<typeof createBrowserWorkspace>;
@@ -283,6 +286,7 @@ export async function createChromeRuntimeBundle(
         sourceId: 'mcp',
       })),
     ],
+    tabScoped: true,
   });
   const unsubscribeChildren = coordinator.subscribe((child) => {
     mainWorkspace.runtime.updateChildTask(child.parentTaskId, {
@@ -296,8 +300,14 @@ export async function createChromeRuntimeBundle(
       ...(child.completedAt ? { updatedAt: child.completedAt } : {}),
     });
   });
+  const tabSessions = new TabSessionRegistry({
+    runtime: mainWorkspace.runtime,
+    browser,
+    storage: options.tabSessionStorage,
+  });
   return {
     runtime: mainWorkspace.runtime,
+    tabSessions,
     approval,
     skills: () => skillStore.list(),
     artifacts: artifactStore,
@@ -316,12 +326,18 @@ export function installKernelRuntimeGateway(
   chromeApi: typeof chrome = chrome
 ): RuntimeGateway {
   const gateway = new RuntimeGateway(async () =>
-    createChromeRuntimeBundle({ storage: chromeApi.storage.local })
+    createChromeRuntimeBundle({
+      storage: chromeApi.storage.local,
+      tabSessionStorage: chromeApi.storage.session as unknown as ChromeKeyValueStorage,
+    })
   );
   chromeApi.runtime.onConnect.addListener((port) => {
     if (port.name !== KERNEL_PORT_NAME) return;
     gateway.connect(asRuntimePort(port));
     void ensureRuntimeOffscreen(chromeApi);
+  });
+  chromeApi.tabs.onRemoved.addListener((tabId, info) => {
+    void gateway.forgetTab(info.windowId, String(tabId));
   });
   return gateway;
 }

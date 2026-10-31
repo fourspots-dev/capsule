@@ -196,4 +196,23 @@ describe('session persistence and cold hydration', () => {
       },
     });
   });
+
+  it('clears every persisted and in-memory session for a clean reset', async () => {
+    const store = new InMemorySessionStore();
+    const h = createTestWorkspace({
+      model: async () => events(...text('answer')),
+      tools: [],
+      sessionStore: store,
+    });
+    await h.runtime.command(command('session_a', 'command_a', 'A'));
+    await h.runtime.waitForSessionIdle('session_a');
+    await h.runtime.command(command('session_b', 'command_b', 'B'));
+    await h.runtime.waitForSessionIdle('session_b');
+    expect(await h.runtime.listSessions()).toHaveLength(2);
+
+    expect(await h.runtime.deleteAllSessions()).toBe(2);
+    expect(await h.runtime.listSessions()).toEqual([]);
+    expect(() => h.runtime.getProjection('session_a')).toThrowError(/not found/i);
+    expect(await store.load('session_b')).toBeUndefined();
+  });
 });

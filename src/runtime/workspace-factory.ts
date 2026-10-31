@@ -41,6 +41,7 @@ export interface BrowserWorkspaceFactoryOptions {
   artifactThresholdBytes?: number;
   trace?: TraceRecorder;
   hooks?: HookRunner;
+  tabScoped?: boolean;
 }
 
 export interface BrowserWorkspaceBundle {
@@ -57,6 +58,7 @@ export function createBrowserWorkspace(
   const browserTools = createBrowserTools(options.browser, {
     download: options.download,
     handoff: options.handoff,
+    tabScoped: options.tabScoped,
   });
   registry.registerAll(
     browserTools.map((definition) => ({ definition, source: 'builtin' as const }))

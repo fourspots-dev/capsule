@@ -294,6 +294,23 @@ describe('kernel extension E2E', () => {
     page.on('pageerror', (error) => pageErrors.push(error.message));
     await page.goto(`chrome-extension://${extensionId}/sidepanel.html`);
     await page.waitForSelector('#kernel-input');
+    const initialTab = await page.evaluate(async () => {
+      const current = await chrome.windows.getCurrent();
+      const tab = await chrome.tabs.create({
+        windowId: current.id,
+        url: 'about:blank',
+        active: true,
+      });
+      await chrome.tabs.update(tab.id!, { active: true });
+      return String(tab.id);
+    });
+    await page.click('#kernel-tabs');
+    await page.waitForSelector('#kernel-tab-menu:not([hidden])');
+    await page.click(`[data-kernel-tab="${initialTab}"]`);
+    await page.waitForFunction(
+      (tabId) => document.documentElement.dataset.tinyaiTabId === tabId,
+      initialTab
+    );
     const layout = await page.evaluate(() => ({
       viewport: document.documentElement.clientWidth,
       scrollWidth: document.documentElement.scrollWidth,
@@ -464,11 +481,7 @@ describe('kernel extension E2E', () => {
     await page.waitForFunction(() =>
       document.querySelector('#kernel-rows')?.textContent?.includes('subagent smoke')
     );
-    expect(
-      await page
-        .locator('.kernel-work:not(.kernel-work--running)')
-        .evaluateAll((details) => details.map((item) => item.hasAttribute('open')))
-    ).not.toContain(true);
+    await page.waitForSelector('.kernel-child--completed', { state: 'attached' });
     expect(pageErrors).toEqual([]);
 
     await page.click('#kernel-slash');
@@ -513,6 +526,17 @@ describe('kernel extension E2E', () => {
     reopened.on('pageerror', (error) => reopenErrors.push(error.message));
     await reopened.goto(`chrome-extension://${extensionId}/sidepanel.html`);
     await reopened.waitForSelector('#kernel-input');
+    await reopened.evaluate(
+      (tabId) => chrome.tabs.update(Number(tabId), { active: true }),
+      initialTab
+    );
+    await reopened.click('#kernel-tabs');
+    await reopened.waitForSelector('#kernel-tab-menu:not([hidden])');
+    await reopened.click(`[data-kernel-tab="${initialTab}"]`);
+    await reopened.waitForFunction(
+      (tabId) => document.documentElement.dataset.tinyaiTabId === tabId,
+      initialTab
+    );
     await new Promise((resolve) => setTimeout(resolve, 1_000));
     const gatewaySessions = await reopened.evaluate(
       () =>
@@ -620,6 +644,178 @@ describe('kernel extension E2E', () => {
     });
   });
 
+  it('keeps one conversation per tab and switches automatically', async () => {
+    const tabDir = await mkdtemp(join(tmpdir(), 'tinyai-tab-sessions-e2e-'));
+    const tabContext = await chromium.launchPersistentContext(tabDir, {
+      headless: true,
+      executablePath: chromeExecutable(),
+      args: [
+        `--disable-extensions-except=${resolve('extension')}`,
+        `--load-extension=${resolve('extension')}`,
+        '--no-first-run',
+      ],
+      ignoreDefaultArgs: ['--disable-extensions'],
+    });
+    try {
+      let worker = tabContext.serviceWorkers()[0];
+      if (!worker) worker = await tabContext.waitForEvent('serviceworker');
+      const extensionId = new URL(worker.url()).host;
+      await worker.evaluate(
+        async ({ modelUrl }) => {
+          await chrome.storage.local.set({
+            'tinyai:v2:config': {
+              approval: 'auto',
+              language: 'en',
+              theme: 'light',
+              zoom: 100,
+              connection: 'e2e',
+              model: 'e2e-model',
+              connections: [
+                {
+                  id: 'e2e',
+                  label: 'E2E',
+                  'base-url': modelUrl,
+                  'api-key': 'e2e-key',
+                  models: ['e2e-model'],
+                },
+              ],
+            },
+          });
+        },
+        { modelUrl: baseUrl }
+      );
+
+      const page = await tabContext.newPage();
+      const pageErrors: string[] = [];
+      page.on('pageerror', (error) => pageErrors.push(error.message));
+      await page.goto(`chrome-extension://${extensionId}/sidepanel.html`);
+      await page.waitForSelector('#kernel-input');
+      const tabA = await page.evaluate(async () => {
+        const current = await chrome.windows.getCurrent();
+        const tab = await chrome.tabs.create({
+          windowId: current.id,
+          url: 'about:blank',
+          active: true,
+        });
+        await chrome.tabs.update(tab.id!, { active: true });
+        return String(tab.id);
+      });
+      await page.click('#kernel-tabs');
+      await page.waitForSelector('#kernel-tab-menu:not([hidden])');
+      await page.click(`[data-kernel-tab="${tabA}"]`);
+      await page.waitForFunction(
+        (tabId) => document.documentElement.dataset.tinyaiTabId === tabId,
+        tabA
+      );
+      const callsBefore = modelCalls;
+      await page.fill('#kernel-input', 'tab A question');
+      await page.click('#kernel-send');
+      await page.waitForFunction(
+        () => document.querySelector('#kernel-rows')?.textContent?.includes('E2E received: tab A question'),
+        undefined,
+        { timeout: 30_000 }
+      );
+
+      const tabB = await page.evaluate(async () => {
+        const current = await chrome.windows.getCurrent();
+        const tab = await chrome.tabs.create({
+          windowId: current.id,
+          url: 'about:blank',
+          active: true,
+        });
+        await chrome.tabs.update(tab.id!, { active: true });
+        return String(tab.id);
+      });
+      await page.click('#kernel-tabs');
+      await page.waitForSelector('#kernel-tab-menu:not([hidden])');
+      await page.click(`[data-kernel-tab="${tabB}"]`);
+      await page.waitForFunction(
+        (tabId) => document.documentElement.dataset.tinyaiTabId === tabId,
+        tabB
+      );
+      await page.waitForTimeout(1_000);
+      const tabBDiagnostics = await page.evaluate(async (tabId) => {
+        const tab = await chrome.tabs.get(Number(tabId));
+        const activeTabs = await chrome.tabs.query({
+          active: true,
+          windowId: tab.windowId,
+        });
+        return {
+          body: document.querySelector('#kernel-rows')?.textContent ?? '',
+          status: document.querySelector('#kernel-status')?.textContent ?? '',
+          activeTab: tab.active,
+          windowId: tab.windowId,
+          uiTabId: document.documentElement.dataset.tinyaiTabId,
+          uiWindowId: document.documentElement.dataset.tinyaiWindowId,
+          uiSessionId: document.documentElement.dataset.tinyaiSessionId,
+          activeTabs: activeTabs.map((item) => ({
+            id: item.id,
+            url: item.url,
+            active: item.active,
+          })),
+        };
+      }, tabB);
+      if (tabBDiagnostics.body.includes('tab A question')) {
+        throw new Error(`Tab switch failed: ${JSON.stringify(tabBDiagnostics)}`);
+      }
+      await page.fill('#kernel-input', 'tab B question');
+      await page.click('#kernel-send');
+      await page.waitForFunction(
+        () => document.querySelector('#kernel-rows')?.textContent?.includes('E2E received: tab B question'),
+        undefined,
+        { timeout: 30_000 }
+      );
+
+      await page.click('#kernel-tabs');
+      await page.waitForSelector('#kernel-tab-menu:not([hidden])');
+      await page.click(`[data-kernel-tab="${tabA}"]`);
+      await page.waitForFunction(
+        (tabId) => document.documentElement.dataset.tinyaiTabId === tabId,
+        tabA
+      );
+      await page.waitForFunction(
+        () => document.querySelector('#kernel-rows')?.textContent?.includes('E2E received: tab A question'),
+        undefined,
+        { timeout: 10_000 }
+      );
+      expect(await page.textContent('#kernel-rows')).not.toContain('tab B question');
+
+      await page.click('#kernel-tabs');
+      await page.waitForSelector('#kernel-tab-menu:not([hidden])');
+      await page.click(`[data-kernel-tab="${tabB}"]`);
+      await page.waitForFunction(
+        (tabId) => document.documentElement.dataset.tinyaiTabId === tabId,
+        tabB
+      );
+      await page.waitForFunction(
+        () => document.querySelector('#kernel-rows')?.textContent?.includes('E2E received: tab B question'),
+        undefined,
+        { timeout: 10_000 }
+      );
+      expect(await page.textContent('#kernel-rows')).not.toContain('tab A question');
+      expect(modelCalls).toBe(callsBefore + 2);
+      expect(pageErrors).toEqual([]);
+      await page.screenshot({ path: resolve('docs/tab-scoped-sessions.png'), fullPage: false });
+
+      await page.click('#kernel-settings');
+      await page.waitForSelector('[data-page-action="clear-history"]');
+      page.once('dialog', (dialog) => dialog.accept());
+      await page.click('[data-page-action="clear-history"]');
+      await page.waitForSelector('#kernel-page-layer', { state: 'detached' });
+      await page.waitForFunction(
+        () => !document.querySelector('#kernel-rows')?.textContent?.includes('tab B question')
+      );
+      await page.click('#kernel-history');
+      await page.waitForSelector('#kernel-page-layer');
+      const historyText = await page.textContent('#kernel-page-layer');
+      expect(historyText).not.toContain('tab A question');
+      expect(historyText).not.toContain('tab B question');
+    } finally {
+      await tabContext.close();
+      await rm(tabDir, { recursive: true, force: true });
+    }
+  });
+
   it('restores an imported legacy session and continues it after migration', async () => {
     const legacyId = '5db19410-a409-4da1-9d21-8ae09c1e10ed';
     const legacyDir = await mkdtemp(join(tmpdir(), 'tinyai-legacy-e2e-'));
@@ -679,6 +875,28 @@ describe('kernel extension E2E', () => {
       page.on('pageerror', (error) => pageErrors.push(error.message));
       await page.goto(`chrome-extension://${extensionId}/sidepanel.html`);
       await page.waitForSelector('#kernel-input');
+      const activeTab = await page.evaluate(async () => {
+        const current = await chrome.windows.getCurrent();
+        const tab = await chrome.tabs.create({
+          windowId: current.id,
+          url: 'about:blank',
+          active: true,
+        });
+        await chrome.tabs.update(tab.id!, { active: true });
+        return String(tab.id);
+      });
+      await page.click('#kernel-tabs');
+      await page.waitForSelector('#kernel-tab-menu:not([hidden])');
+      await page.click(`[data-kernel-tab="${activeTab}"]`);
+      await page.waitForFunction(
+        (tabId) => document.documentElement.dataset.tinyaiTabId === tabId,
+        activeTab
+      );
+      await page.click('#kernel-history');
+      await page.waitForSelector('#kernel-page-layer');
+      await page
+        .locator('.wb-history-main', { hasText: 'legacy restored question' })
+        .click();
       await page.waitForFunction(
         () =>
           document.querySelector('#kernel-rows')?.textContent?.includes(

@@ -111,9 +111,14 @@ export interface BrowserProvider {
   removeTab(tabId: BrowserTabId): Promise<void>;
 
   ensureTaskGroup(sessionId: string): Promise<TabGroupRef>;
-  setWorkingTab(sessionId: string, tabId: BrowserTabId): Promise<void>;
+  setWorkingTab(
+    sessionId: string,
+    tabId: BrowserTabId,
+    options?: { activate?: boolean }
+  ): Promise<void>;
   getWorkingTab(sessionId: string): Promise<BrowserTabId | null>;
   closeSessionTabs(sessionId: string): Promise<CloseSessionReport>;
+  releaseSession?(sessionId: string): Promise<void>;
   listFrames?(tabId: BrowserTabId): Promise<FrameDescriptor[]>;
 
   navigate(tabId: BrowserTabId, url: string, signal?: AbortSignal): Promise<PageInfo>;

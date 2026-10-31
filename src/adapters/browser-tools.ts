@@ -13,6 +13,7 @@ type ObjectInput = Record<string, JsonValue>;
 export interface BrowserToolDependencies {
   download?: (name: string, mime: string, base64: string) => Promise<void>;
   handoff?: HandoffPort;
+  tabScoped?: boolean;
 }
 
 export function createBrowserTools(
@@ -55,6 +56,12 @@ export function createBrowserTools(
       'write',
       ['browser:read'],
       async (input, invocation) => {
+        if (dependencies.tabScoped) {
+          throw new AgentError(
+            'TAB_SCOPED_SESSION',
+            'Tabs are isolated conversations and cannot share a working tab.'
+          );
+        }
         const tabId = requiredString(input, 'tabId');
         await browser.setWorkingTab(invocation.sessionId, tabId);
         return { tabId };
@@ -67,6 +74,12 @@ export function createBrowserTools(
       'write',
       ['browser:navigate'],
       async (input, invocation) => {
+        if (dependencies.tabScoped) {
+          throw new AgentError(
+            'TAB_SCOPED_SESSION',
+            'Tabs are isolated conversations; use the browser tabs UI to open another tab session.'
+          );
+        }
         const tab = await browser.createTab(optionalString(input, 'url') ?? 'about:blank');
         await browser.setWorkingTab(invocation.sessionId, tab.id);
         return tab as unknown as JsonValue;

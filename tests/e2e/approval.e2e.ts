@@ -125,6 +125,23 @@ describe('approval E2E', () => {
     const page = await context.newPage();
     await page.goto(`chrome-extension://${extensionId}/sidepanel.html`);
     await page.waitForSelector('#kernel-input');
+    const activeTab = await page.evaluate(async () => {
+      const current = await chrome.windows.getCurrent();
+      const tab = await chrome.tabs.create({
+        windowId: current.id,
+        url: 'about:blank',
+        active: true,
+      });
+      await chrome.tabs.update(tab.id!, { active: true });
+      return String(tab.id);
+    });
+    await page.click('#kernel-tabs');
+    await page.waitForSelector('#kernel-tab-menu:not([hidden])');
+    await page.click(`[data-kernel-tab="${activeTab}"]`);
+    await page.waitForFunction(
+      (tabId) => document.documentElement.dataset.tinyaiTabId === tabId,
+      activeTab
+    );
     await page.fill('#kernel-input', 'run approved action');
     await page.click('#kernel-send');
     await page.waitForSelector('.kernel-approval');

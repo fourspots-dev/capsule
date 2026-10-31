@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>tinyai 标签级会话测试设计</title>
+  <style>
+    :root{--bg:#f4f5f7;--paper:#fff;--text:#191a1e;--muted:#6f717a;--line:#e2e3e8;--accent:#4c46d9;--ok:#137a4b;--warn:#986100;--bad:#b42318;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1120px;margin:auto;padding:36px 24px 90px}
+    header{padding:30px;border:1px solid var(--line);border-radius:20px;background:var(--paper)}header small{color:var(--accent);font-weight:650;letter-spacing:.08em}h1{font-size:32px;line-height:1.25;margin:9px 0 12px}header p{max-width:780px;color:var(--muted);margin:0}
+    .summary{display:flex;gap:12px;flex-wrap:wrap;margin-top:20px}.metric{padding:10px 14px;border-radius:12px;background:#f2f1ff}.metric b{display:block;font-size:20px}
+    section{margin:18px 0;padding:24px;border:1px solid var(--line);border-radius:17px;background:var(--paper)}h2{margin:0 0 14px;font-size:21px}h3{font-size:15px;margin:20px 0 8px}
+    table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}th{background:#fafafa;color:var(--muted)}
+    code{font-family:var(--mono);font-size:.92em;background:#f0f1f4;padding:1px 5px;border-radius:4px}.pill{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;background:#eef8f2;color:var(--ok)}.risk{background:#fff7e6;color:var(--warn)}.bad{background:#fff0ef;color:var(--bad)}
+    .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px}.card h3{margin:0 0 7px}.card p{margin:0;color:var(--muted);font-size:13px}
+    pre{padding:14px;border-radius:10px;background:#171820;color:#eeedf8;overflow:auto;font:12px/1.55 var(--mono)}.note{padding:12px 14px;border-left:3px solid var(--accent);background:#f6f5ff;border-radius:0 10px 10px 0}
+    @media(max-width:780px){.grid{grid-template-columns:1fr}.wrap{padding:20px 12px}header h1{font-size:26px}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <small>TINYAI / TEST STRATEGY / V1</small>
+    <h1>标签级会话测试设计</h1>
+    <p>覆盖标签身份、自动切换、并发竞态、历史恢复、运行中任务隔离、工具边界和全量历史清理。测试同时约束 Runtime 事实与真实 Chrome 行为。</p>
+    <div class="summary"><div class="metric"><b>175</b>确定性测试通过</div><div class="metric"><b>1</b>Live 测试跳过</div><div class="metric"><b>5</b>Chrome E2E 通过</div></div>
+  </header>
+
+  <section>
+    <h2>1. 测试分层</h2>
+    <div class="grid">
+      <div class="card"><h3>Domain / Unit</h3><p>TabSessionRegistry 映射、替换、持久化、清理；ID 恢复；SessionStore 前缀清理。</p></div>
+      <div class="card"><h3>Integration</h3><p>Gateway 原子解析、Runtime Session 冷加载、Projection、Browser working tab、全量删除。</p></div>
+      <div class="card"><h3>Chrome E2E</h3><p>真实 tabs API、Service Worker、Offscreen Runtime、Side Panel DOM、标签菜单和历史页。</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 核心用例矩阵</h2>
+    <table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>层级</th></tr></thead><tbody>
+      <tr><td>TAB-01</td><td>同一 window/tab 连续 resolve</td><td>始终返回同一 sessionId，不重复创建</td><td><span class="pill">Unit</span></td></tr>
+      <tr><td>TAB-02</td><td>两个 tab 分别 resolve</td><td>生成两个不同 Session，各自绑定正确 tabId</td><td><span class="pill">Unit</span></td></tr>
+      <tr><td>TAB-03</td><td>在标签 A 点击新任务</td><td>A 获取新 Session，旧 Session 仍在 History，标签 B 不受影响</td><td><span class="pill">Unit + E2E</span></td></tr>
+      <tr><td>TAB-04</td><td>History 会话绑定到当前标签</td><td>当前标签切到历史会话，Session 不再绑定旧标签</td><td><span class="pill">Integration</span></td></tr>
+      <tr><td>TAB-05</td><td>修改模型或 Runtime 重启</td><td>存储中的标签映射恢复，Session ID 不变</td><td><span class="pill">Integration + E2E</span></td></tr>
+      <tr><td>TAB-06</td><td>快速连续切换 A→B→C</td><td>旧请求不得覆盖最终 C；UI 只订阅 C</td><td><span class="risk">E2E 风险项</span></td></tr>
+      <tr><td>TAB-07</td><td>A 任务运行中切到 B</td><td>A 继续运行；B 可独立发送；切回 A 看到最新 Projection</td><td><span class="pill">E2E</span></td></tr>
+      <tr><td>TAB-08</td><td>关闭当前标签</td><td>映射删除，自动选择同窗口 active tab</td><td><span class="risk">Manual + E2E</span></td></tr>
+      <tr><td>TAB-09</td><td>标签跨窗口移动</td><td>旧映射删除，新窗口重新解析</td><td><span class="risk">Manual</span></td></tr>
+      <tr><td>TAB-10</td><td>Agent 调用 switch_tab/new_tab</td><td>返回 <code>TAB_SCOPED_SESSION</code>，不能越过标签边界</td><td><span class="pill">Unit</span></td></tr>
+    </tbody></table>
+  </section>
+
+  <section>
+    <h2>3. UI 与切换测试</h2>
+    <table><thead><tr><th>检查项</th><th>断言</th></tr></thead><tbody>
+      <tr><td>启动门禁</td><td>标签 Session 未完成激活时发送按钮禁用，不能产生临时 Session</td></tr>
+      <tr><td>自动切换</td><td><code>tabs.onActivated</code> 仅处理当前 window；切到另一窗口不干扰当前 Panel</td></tr>
+      <tr><td>@ 标签菜单</td><td>选择标签后 active tab、sessionId、Projection 三者一致</td></tr>
+      <tr><td>草稿隔离</td><td>A 中未发送文本、附件、Skill 在切到 B 后不可见，切回 A 恢复</td></tr>
+      <tr><td>运行状态隔离</td><td>A 的计时器、工具进度、Reasoning 不显示在 B</td></tr>
+      <tr><td>审批隔离</td><td>后台 Session 的 Approval/Handoff 不被当前 Session 清空，切回后重新出现</td></tr>
+      <tr><td>子 Agent</td><td>子 Session 查看后返回父 Session，不串到其它标签</td></tr>
+      <tr><td>Tab Group 标题</td><td>使用网页标题或 tinyai，不出现 <code>legacy_*</code> / <code>session_*</code></td></tr>
+    </tbody></table>
+  </section>
+
+  <section>
+    <h2>4. 历史清理测试</h2>
+    <pre>given: A/B 两个 Session + A/B 两个标签映射 + 运行中持久化队列
+when:  clear_history
+then:
+  1. 所有运行中 Session 停止
+  2. pending persistence 先 flush，再删除
+  3. SessionStore 仅删除 tinyai:session:v1:* 前缀
+  4. 标签映射全部删除
+  5. BrowserProvider 释放 Debugger 与标签分组
+  6. 当前标签创建新的空 Session
+  7. 模型配置、API Key、Skills、用户网页标签保持不变</pre>
+    <table><thead><tr><th>ID</th><th>检查</th><th>预期</th></tr></thead><tbody>
+      <tr><td>CLR-01</td><td>删除两个已持久化 Session</td><td>list_sessions 为空，旧 Projection 不存在</td></tr>
+      <tr><td>CLR-02</td><td>pending save 在 clear 后到达</td><td>不得把旧 Session 写回</td></tr>
+      <tr><td>CLR-03</td><td>清除全部历史</td><td>不影响 <code>tinyai:v2:config</code></td></tr>
+      <tr><td>CLR-04</td><td>存在运行中任务</td><td>任务停止，不重放输入</td></tr>
+      <tr><td>CLR-05</td><td>UI 清理后继续提问</td><td>当前标签获得新 Session 并可正常发送</td></tr>
+    </tbody></table>
+  </section>
+
+  <section>
+    <h2>5. 自动化实现</h2>
+    <table><thead><tr><th>文件</th><th>覆盖</th></tr></thead><tbody>
+      <tr><td><code>tests/integration/tab-session-registry.test.ts</code></td><td>映射复用、标签替换、历史重绑、storage.session 恢复、清理</td></tr>
+      <tr><td><code>tests/integration/persistence.test.ts</code></td><td>冷恢复 ID、全量删除、持久化竞态</td></tr>
+      <tr><td><code>tests/adapters/chrome-session-store.test.ts</code></td><td>仅清 Session 前缀，保留其它配置</td></tr>
+      <tr><td><code>tests/integration/runtime-gateway.test.ts</code></td><td>Persisted Session 的 Projection 冷加载</td></tr>
+      <tr><td><code>tests/e2e/kernel-extension.e2e.ts</code></td><td>A/B 标签独立对话、切换、Runtime 重建、Legacy 历史、全量清理</td></tr>
+      <tr><td><code>tests/e2e/approval.e2e.ts</code></td><td>标签 Session 中的审批流程</td></tr>
+    </tbody></table>
+  </section>
+
+  <section>
+    <h2>6. 验收标准</h2>
+    <ul>
+      <li>打开任意标签，只能看到该标签自己的当前对话。</li>
+      <li>切换标签后，对话、草稿、附件、审批和运行状态同步切换。</li>
+      <li>旧标签任务在后台运行，不被新标签停止或污染。</li>
+      <li>Runtime/Gateway 重建后，仍在同一浏览器会话中的标签保持原 Session。</li>
+      <li>完整浏览器重启后不误用旧 tabId；历史仍可从 History 打开。</li>
+      <li>Agent 工具无法绕过标签隔离控制另一标签。</li>
+      <li>全量清理后没有旧 Snapshot、标签映射、Legacy 分组标题或残留 Projection。</li>
+    </ul>
+    <div class="note">当前自动化已验证 A/B 标签独立对话、从 History 恢复 Legacy 会话、Runtime 重建、审批和全量清理。关标签自动选下一标签与跨窗口移动仍建议加入发布前手工回归。</div>
+    <p><a href="tab-scoped-sessions-design.html">← 返回方案设计</a></p>
+  </section>
+</div>
+</body>
+</html>
