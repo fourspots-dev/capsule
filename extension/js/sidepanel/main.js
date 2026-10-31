@@ -269,13 +269,24 @@
     handoffListeners = /* @__PURE__ */ new Set();
     disconnectListeners = /* @__PURE__ */ new Set();
     resyncing = /* @__PURE__ */ new Set();
+    expectedSubscriptions = /* @__PURE__ */ new Map();
     async command(command) {
       return await this.request({ type: "command", command });
     }
     async subscribe(sessionId) {
-      await this.request({ type: "subscribe", sessionId });
+      const subscriptionId = `subscription_${++this.sequence}`;
+      this.expectedSubscriptions.set(sessionId, subscriptionId);
+      try {
+        await this.request({ type: "subscribe", sessionId, subscriptionId });
+      } catch (error) {
+        if (this.expectedSubscriptions.get(sessionId) === subscriptionId) {
+          this.expectedSubscriptions.delete(sessionId);
+        }
+        throw error;
+      }
     }
     async unsubscribe(sessionId) {
+      this.expectedSubscriptions.delete(sessionId);
       await this.request({ type: "unsubscribe", sessionId });
     }
     async projection(sessionId) {
@@ -289,6 +300,9 @@
     }
     async deleteSession(sessionId) {
       await this.request({ type: "delete_session", sessionId });
+    }
+    async renameSession(sessionId, title) {
+      await this.request({ type: "rename_session", sessionId, title });
     }
     async clearHistory() {
       return await this.request({ type: "clear_history" });
@@ -411,6 +425,15 @@
         return;
       }
       if (message.type === "projection") {
+        const expected = this.expectedSubscriptions.get(message.sessionId);
+        if (expected && message.subscriptionId && message.subscriptionId !== expected) {
+          return;
+        }
+        const frameSessionId = message.frame.type === "snapshot" ? message.frame.projection.sessionId : message.frame.sessionId;
+        const frameEpoch = message.frame.type === "snapshot" ? message.frame.projection.logEpoch : message.frame.logEpoch;
+        if (frameSessionId !== message.sessionId || frameEpoch !== message.logEpoch) {
+          return;
+        }
         const projection = this.applyFrame(message.frame);
         if (projection) {
           for (const listener of this.projectionListeners) {
@@ -468,6 +491,7 @@
       this.port = void 0;
       this.stores.clear();
       this.resyncing.clear();
+      this.expectedSubscriptions.clear();
       for (const pending of this.pending.values()) {
         if (pending.timer) clearTimeout(pending.timer);
         pending.reject(error);

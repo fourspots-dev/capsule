@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tinyai V2 七阶段实现验收</title>
+<style>
+:root{--bg:#f4f5f7;--paper:#fff;--text:#191a1e;--muted:#6f7179;--line:#e2e3e8;--accent:#5145d8;--ok:#137a4b;--warn:#986100;--danger:#b42318;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.72 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1180px;margin:auto;padding:36px 24px 100px}
+.hero{padding:38px;border-radius:26px;background:radial-gradient(circle at 90% 10%,#ada5ff 0,transparent 27%),linear-gradient(135deg,#151520,#30299a 61%,#6859ea);color:#fff}.hero small{letter-spacing:.11em;opacity:.72}.hero h1{font-size:37px;line-height:1.2;margin:12px 0}.hero p{max-width:930px;margin:0;color:#e8e5ff}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}
+nav{position:sticky;top:0;z-index:5;display:flex;gap:14px;overflow:auto;margin:18px 0;padding:10px 14px;border:1px solid var(--line);border-radius:13px;background:#f4f5f7ed;backdrop-filter:blur(12px)}nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}
+section{margin:18px 0;padding:25px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:22px;margin:0 0 14px}h3{font-size:16px;margin:20px 0 8px}p{color:#45464c}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafafa}.card h3{margin:0 0 8px}.card p{margin:0}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafafa;color:var(--muted)}
+code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{padding:16px;overflow:auto;border-radius:11px;background:#181820;color:#edecff;font:12px/1.6 var(--mono)}
+.pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;background:#eef8f2;color:var(--ok);white-space:nowrap}.pill.pending{background:#fff6e5;color:var(--warn)}.pill.blocked{background:#fff0ef;color:var(--danger)}
+.rule{padding:13px 15px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#f5f3ff}.warn{border-color:var(--warn);background:#fff8e8}
+@media(max-width:760px){.grid,.grid3{grid-template-columns:1fr}.wrap{padding:20px 12px 70px}.hero h1{font-size:28px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+<small>TINYAI / VIRTUAL WORKSPACE CODING AGENT / ACCEPTANCE V2</small>
+<h1>V2 七阶段<br>实现与验收报告</h1>
+<p>本报告以当前 worktree、自动化测试、真实 PTY 和 Chrome E2E 为证据。实现代码已覆盖 P1–P7；生产发布门禁中的 live LLM 与长时 Soak 被单独标记，不能由确定性测试代替。</p>
+<div class="chips"><span class="chip">274 tests passed</span><span class="chip">5 Chrome E2E passed</span><span class="chip">Core boundary clean</span><span class="chip">TUI PTY verified</span><span class="chip">Build passed</span></div>
+</header>
+<nav><a href="#summary">结论</a><a href="#matrix">阶段矩阵</a><a href="#p1">P1</a><a href="#p2">P2</a><a href="#p3">P3</a><a href="#p4">P4</a><a href="#p5">P5</a><a href="#p6">P6</a><a href="#p7">P7</a><a href="#commands">命令</a><a href="#open">未关闭项</a></nav>
+
+<section id="summary">
+<h2>1. 验收结论</h2>
+<div class="grid">
+<div class="card"><h3 class="ok">实现验收：通过</h3><p>P1–P7 都已有可执行实现、自动化测试和端到端证据；没有只存在于接口或文档中的阶段交付。</p></div>
+<div class="card"><h3>生产发布：有条件</h3><p>当前环境没有 <code>DEEPSEEK_API_KEY</code>，live smoke 被跳过；未执行真实 8 小时 Soak 和 1GB 级仓库压力测试。</p></div>
+</div>
+<div class="rule">最新确定性结果：76 个测试文件通过、1 个 live 文件跳过；274 个测试通过、1 个 live 测试跳过。Chrome E2E：2 个文件、5 个测试通过。完整构建产出 Chrome 扩展、TUI、CLI、Remote Runner 和 allowlist proxy。</div>
+</section>
+
+<section id="matrix">
+<h2>2. 阶段追踪矩阵</h2>
+<table><thead><tr><th>阶段</th><th>交付</th><th>关键证据</th><th>状态</th></tr></thead><tbody>
+<tr><td>P1</td><td>虚拟文件系统、Shell、Patch/Search、Snapshot VCS、Host Bridge</td><td>VFS Contract、Shell、Patch、Search、Host、Archive、Workspace 测试</td><td><span class="pill">DONE</span></td></tr>
+<tr><td>P2</td><td>macOS TUI、多 Session、状态栏、Review、Agent 看板</td><td>Presenter/App/Runtime 测试、真实 PTY 操作、TUI 构建</td><td><span class="pill">DONE</span></td></tr>
+<tr><td>P3</td><td>持久化 VCS、后台 Job、串行写、同步冲突</td><td>重启恢复、Job 取消/中断、并发写、外部同步冲突测试</td><td><span class="pill">DONE</span></td></tr>
+<tr><td>P4</td><td>Chrome Workspace、Remote Runner、页面闭环</td><td>Chrome E2E、Remote Client/Server、HTTP/白名单/Workspace 限额测试</td><td><span class="pill">DONE</span></td></tr>
+<tr><td>P5</td><td>端无关 Projection、Headless Client、Core 边界</td><td>双 RuntimePort 集成测试、Projection session envelope、boundary check</td><td><span class="pill">DONE</span></td></tr>
+<tr><td>P6</td><td>通用子 Agent、Workspace Fork、Merge Preview/Apply</td><td>任意 Profile 树、父子 Session、冲突阻断、显式 Merge 测试</td><td><span class="pill">DONE</span></td></tr>
+<tr><td>P7</td><td>Verification Guard、Coding Benchmark、性能/Soak、构建</td><td>Virtual Coding Loop、10k 文件搜索、10k Projection、100 checkpoint/50 job soak、全量构建</td><td><span class="pill pending">CONDITIONAL</span></td></tr>
+</tbody></table>
+</section>
+
+<section id="p1">
+<h2>3. P1 — Virtual Environment Foundation</h2>
+<div class="grid">
+<div class="card"><h3>实现</h3><p>MemoryFS、OverlayFS、PersistentFS、ArchiveFS、VirtualWorkspace、Virtual Shell、Unified Patch、Glob/Search、Snapshot VCS、Host Capability/Storage/Workspace Bridge。</p></div>
+<div class="card"><h3>边界</h3><p>Agent 工具只访问 VirtualFileSystem；Patch 和 Search 不调用宿主 Bash/Git；Host 只处理存储、Bundle、Terminal、可选 Process/Network。</p></div>
+</div>
+<h3>可复现证据</h3>
+<ul>
+<li><code>tests/virtual/vfs-contract.test.ts</code>：Memory/Overlay/Persistent 同一契约。</li>
+<li><code>tests/virtual/shell.test.ts</code>：变量、引号、管道、重定向、逻辑组、VFS 内建命令、取消和不支持语法。</li>
+<li><code>tests/virtual/patch.test.ts</code>：修改/新增/删除、Expected Version/Hash、上下文冲突、多文件回滚。</li>
+<li><code>tests/virtual/search.test.ts</code>：Glob、include/exclude、regex/whole-word/context。</li>
+<li><code>tests/host/host-bridge.test.ts</code>：声明/实现一致性、缺失能力、未知/重复声明。</li>
+</ul>
+</section>
+
+<section id="p2">
+<h2>4. P2 — macOS TUI 与 Coding Loop</h2>
+<div class="grid">
+<div class="card"><h3>默认体验</h3><p>1 行状态栏、1–6 行 Composer、主对话占满剩余空间；无永久侧栏。80×24、60×20、120×40 由 Presenter/Golden 级断言覆盖。</p></div>
+<div class="card"><h3>多 Session</h3><p>Ctrl+K 列表、新建 Draft、搜索、切换、重命名、删除；每 Session 独立草稿、附件、滚动、选择、过滤和未读位置。</p></div>
+<div class="card"><h3>Agent 看板</h3><p>任意 Profile 父子树、ACTIVE/ATTENTION/DONE 过滤、进入子 Session、返回看板、停止、Merge Preview/Apply。</p></div>
+<div class="card"><h3>Review</h3><p>Ctrl+O 读取 Snapshot VCS Diff；有验证状态和风险时在同一临时 Review 视图展示。</p></div>
+</div>
+<h3>运行证据</h3>
+<ul><li>真实 PTY 启动 <code>dist/tinyai-tui.cjs</code>，验证状态栏、Composer、Ctrl+K、N 新建、Ctrl+G、Esc 返回和双击 Ctrl+C 退出。</li><li><code>tests/tui/app.test.ts</code> 覆盖发送、Session Draft、Agent 子 Session、Review 和退出语义。</li><li><code>tests/tui/session-controller.test.ts</code> 覆盖 A→B→C 迟到帧和后台 Session 不被停止。</li></ul>
+</section>
+
+<section id="p3">
+<h2>5. P3 — 可靠性与持久化</h2>
+<table><thead><tr><th>能力</th><th>实现</th><th>证据</th></tr></thead><tbody>
+<tr><td>后台命令</td><td>queued/running/terminal 状态、并发上限、取消、等待、输出上限</td><td><code>tests/virtual/jobs.test.ts</code></td></tr>
+<tr><td>崩溃恢复</td><td>重启后运行中 Job 标记 interrupted，不自动重放</td><td>Job persistence test</td></tr>
+<tr><td>VCS 持久化</td><td>Snapshot、对象、Head、Sequence 跨重启恢复</td><td><code>tests/virtual/archive-workspace.test.ts</code></td></tr>
+<tr><td>并发写</td><td>PersistentFS mutation queue；VFS 文件版本冲突</td><td><code>tests/virtual/vfs-contract.test.ts</code></td></tr>
+<tr><td>外部同步</td><td>Baseline/Local/External 三方比较，ours/theirs/reject</td><td><code>tests/virtual/sync.test.ts</code></td></tr>
+</tbody></table>
+</section>
+
+<section id="p4">
+<h2>6. P4 — Chrome 与 Remote Provider</h2>
+<div class="grid">
+<div class="card"><h3>Chrome</h3><p>保留标签/标签组 Session、页面上下文、真实页面交互和跨端 Runtime Projection。Chrome E2E 5/5 通过。</p></div>
+<div class="card"><h3>Remote Runner</h3><p>Bundle 上传、命令白名单、Bearer Token、Timeout、输出/文件/Workspace 限额、变更 Bundle 回传及原子导入。</p></div>
+</div>
+<p>产物：<code>dist/tinyai-remote-runner.cjs</code>。TUI 通过 <code>TINYAI_REMOTE_RUNNER_URL</code>、Token 和 Commands 环境变量可选接入。</p>
+</section>
+
+<section id="p5">
+<h2>7. P5 — 扩展基线</h2>
+<ul>
+<li>Projection 事件增加 <code>sessionId</code>、<code>logEpoch</code>、可选 <code>subscriptionId</code>，快速切换时可靠丢弃旧帧。</li>
+<li>HeadlessRuntimeClient 只依赖通用 RuntimePort，不导入 Chrome、TUI 或 Node API。</li>
+<li>Headless 集成测试覆盖 connect、list、command、rename、subscribe、projection update、stop、delete。</li>
+<li><code>typecheck:core</code> 与 <code>check:boundaries</code> 证明 Core/Platform 不反向依赖 UI/Chrome。</li>
+<li>iOS 未实现，只保留端无关协议和 Workspace Bundle 扩展边界。</li>
+</ul>
+</section>
+
+<section id="p6">
+<h2>8. P6 — 通用子 Agent 与 Workspace Fork</h2>
+<ul>
+<li>Profile 是配置数据，不存在固定 Researcher/Reviewer 枚举。</li>
+<li><code>ChildTaskSpec</code> 和 <code>ChildTaskProjection</code> 持久化父 Session、父 Task、Profile、执行模式和 Workspace 状态。</li>
+<li>子 Agent 在 Overlay Fork 编辑，父 Workspace 保持只读；Preview 输出文件、Patch、冲突和父/子 Hash。</li>
+<li>父 Workspace 在 Fork 后被修改时，Merge 明确阻断；只有显式 Apply 才写入父 Workspace并建立 checkpoint。</li>
+<li>TUI 子 Session 使用同一主 Runtime，因此父/子都接收实时 Projection，切换不会断开执行。</li>
+</ul>
+</section>
+
+<section id="p7">
+<h2>9. P7 — 生产加固</h2>
+<div class="grid3">
+<div class="card"><h3>Verification Gate</h3><p>Runtime 可注入 CompletionGuard。TUI 在有文件写入但没有成功 exec/job verification 时返回 VERIFICATION_REQUIRED。</p></div>
+<div class="card"><h3>Coding Benchmark</h3><p>无宿主 Bash/FS 的 fixture 完成 Search → Patch → Verify → Final，且最终文件与工具证据都正确。</p></div>
+<div class="card"><h3>Bounded Soak</h3><p>100 checkpoints、50 并发 Job、10k 文件 Search、10k Projection update 在预算内完成。</p></div>
+</div>
+<div class="warn rule">P7 标记为 CONDITIONAL：真实模型 smoke 需要环境凭据；8 小时 Soak 与 1GB Workspace 属于发布前长测，本轮只执行了加速、有界版本。</div>
+</section>
+
+<section id="commands">
+<h2>10. 验收命令与结果</h2>
+<pre>npm test
+  76 passed, 1 skipped
+  274 tests passed, 1 live test skipped
+
+npm run typecheck
+npm run typecheck:tests
+npm run typecheck:core
+npm run check:boundaries
+  all passed
+
+npm run test:e2e
+  Chrome extension E2E: 2 files, 5 tests passed
+
+npm run build
+  extension side panel / background
+  tinyai-coding-agent.cjs
+  tinyai-tui.cjs
+  tinyai-remote-runner.cjs
+  allowlist-proxy.cjs
+  tinyai-extension.zip
+
+npm run test:live
+  requires DEEPSEEK_API_KEY; current process environment is unset, therefore skipped</pre>
+</section>
+
+<section id="open">
+<h2>11. 未关闭的发布项</h2>
+<table><thead><tr><th>项目</th><th>当前状态</th><th>关闭条件</th></tr></thead><tbody>
+<tr><td>DeepSeek live smoke</td><td><span class="pill pending">PENDING</span> 当前环境无凭据</td><td>在 shell 中安全设置 <code>DEEPSEEK_API_KEY</code>，运行 <code>npm run test:live</code></td></tr>
+<tr><td>8 小时 Soak</td><td><span class="pill pending">NOT RUN</span> 已有 100 checkpoint / 50 job 有界测试</td><td>发布流水线执行 8h 多 Session、重启、Provider 故障与资源泄漏监测</td></tr>
+<tr><td>1GB Workspace</td><td><span class="pill pending">NOT RUN</span> 已有 10k 文件搜索测试</td><td>大仓库数据集运行内存、句柄、启动与搜索性能</td></tr>
+</tbody></table>
+<div class="rule">在这些外部/长时项关闭前，可以宣称“V2 七阶段实现验收完成”，但不能宣称“生产发布门禁全部通过”。</div>
+</section>
+</div>
+</body>
+</html>

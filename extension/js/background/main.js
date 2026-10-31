@@ -1117,14 +1117,19 @@
   // src/core/session-store.ts
   function summarizeSnapshot(snapshot) {
     const firstUser = snapshot.rows.find((row) => row.kind === "user" && row.text.trim());
+    const children = snapshot.children ?? [];
     return {
       sessionId: snapshot.sessionId,
       revision: snapshot.revision,
       eventSeq: snapshot.eventSeq,
       taskStatus: snapshot.taskStatus,
       updatedAt: snapshot.events.at(-1)?.occurredAt ?? 0,
-      title: firstUser?.text.slice(0, 80) || "New chat",
-      rowCount: snapshot.rows.length
+      title: snapshot.title?.trim() || firstUser?.text.slice(0, 80) || "New chat",
+      rowCount: snapshot.rows.length,
+      childCount: children.length,
+      attentionCount: children.filter(
+        (child) => child.status === "failed" || child.status === "cancelled"
+      ).length
     };
   }
   function cloneSnapshot(snapshot) {
@@ -1145,6 +1150,8 @@
         payload: structuredClone(entry.payload)
       })),
       tasks: (snapshot.tasks ?? []).map((task) => structuredClone(task)),
+      children: (snapshot.children ?? []).map((child) => ({ ...child })),
+      ...snapshot.title ? { title: snapshot.title } : {},
       ...snapshot.permission ? { permission: { ...snapshot.permission } } : {}
     };
   }
@@ -1577,6 +1584,7 @@
           const parent = options.parent(invocation);
           const spec = {
             parentTaskId: parent.taskId,
+            parentSessionId: invocation.sessionId,
             profile: requiredString(input, "profile"),
             brief: requiredString(input, "brief"),
             ...Array.isArray(input.acceptance) ? { acceptance: input.acceptance.map(String) } : {},
@@ -1633,6 +1641,22 @@
         "List child agents, optionally scoped to a parent task.",
         schema({ parentTaskId: { type: "string" } }),
         async (input) => options.coordinator.list(optionalString(input, "parentTaskId"))
+      ),
+      tool(
+        "preview_merge",
+        "Preview a child workspace patch and any conflicts without changing the parent.",
+        schema({ childTaskId: { type: "string" } }, ["childTaskId"]),
+        async (input) => options.coordinator.previewMerge(
+          requiredString(input, "childTaskId")
+        )
+      ),
+      tool(
+        "apply_merge",
+        "Apply a reviewed, conflict-free child workspace patch to the parent.",
+        schema({ childTaskId: { type: "string" } }, ["childTaskId"]),
+        async (input) => options.coordinator.applyMerge(
+          requiredString(input, "childTaskId")
+        )
       )
     ];
   }
@@ -2152,13 +2176,15 @@
         profile,
         prompt: childPrompt(
           normalized,
-          normalized.contextMode === "fork" ? await this.forkContext(normalized.parentTaskId) : void 0
+          normalized.contextMode === "fork" ? await this.forkContext(normalized.parentTaskId) : void 0,
+          profile.instructions
         )
       });
       const record = {
         taskId,
         sessionId: created.sessionId,
         parentTaskId: normalized.parentTaskId,
+        ...normalized.parentSessionId ? { parentSessionId: normalized.parentSessionId } : {},
         profileName: profile.name,
         brief: normalized.brief,
         contextMode: normalized.contextMode,
@@ -2231,6 +2257,26 @@
     }
     get(taskId) {
       return this.read(taskId);
+    }
+    async previewMerge(taskId) {
+      this.required(taskId);
+      if (!this.options.driver.previewMerge) {
+        throw new AgentError(
+          "CHILD_MERGE_UNSUPPORTED",
+          "The child driver does not support workspace merge preview"
+        );
+      }
+      return this.options.driver.previewMerge(taskId);
+    }
+    async applyMerge(taskId) {
+      this.required(taskId);
+      if (!this.options.driver.applyMerge) {
+        throw new AgentError(
+          "CHILD_MERGE_UNSUPPORTED",
+          "The child driver does not support workspace merge"
+        );
+      }
+      return this.options.driver.applyMerge(taskId);
     }
     subscribe(listener) {
       this.listeners.add(listener);
@@ -2305,6 +2351,13 @@
       const task = this.tasks.get(taskId);
       return task ? structuredClone(task) : void 0;
     }
+    required(taskId) {
+      const task = this.tasks.get(taskId);
+      if (!task) {
+        throw new AgentError("CHILD_NOT_FOUND", `Child task not found: ${taskId}`);
+      }
+      return task;
+    }
     runningChildren(parentTaskId) {
       return [...this.tasks.values()].filter(
         (task) => task.parentTaskId === parentTaskId && (task.status === "queued" || task.status === "running")
@@ -2323,14 +2376,19 @@
       return this.options.contextProvider(parentTaskId);
     }
   };
-  function childPrompt(spec, inherited = []) {
+  function childPrompt(spec, inherited = [], profileInstructions = "") {
     const lines = [
       "Complete this delegated task independently.",
       "",
-      spec.brief,
+      spec.brief
+    ];
+    if (profileInstructions.trim()) {
+      lines.push("", "Profile instructions:", profileInstructions.trim());
+    }
+    lines.push(
       "",
       "Return a structured result with a concise summary, evidence, artifacts, unresolved items, and changed files when applicable."
-    ];
+    );
     if (spec.acceptance?.length) {
       lines.push("", "Acceptance criteria:", ...spec.acceptance.map((item) => `- ${item}`));
     }
@@ -2931,6 +2989,7 @@ ${skillListing}` : ""
         const core = coreRequest;
         if (core.type === "hello") {
           port.postMessage({ type: "ready", revision: this.clock.now() });
+          this.reply(port, requestId, true);
           return;
         }
         if (core.type === "approval_response") {
@@ -2944,7 +3003,13 @@ ${skillListing}` : ""
           return;
         }
         if (core.type === "subscribe") {
-          await this.subscribe(port, bundle.runtime, core.sessionId, requestId);
+          await this.subscribe(
+            port,
+            bundle.runtime,
+            core.sessionId,
+            core.subscriptionId,
+            requestId
+          );
           return;
         }
         if (core.type === "unsubscribe") {
@@ -2992,6 +3057,11 @@ ${skillListing}` : ""
           this.reply(port, requestId, true);
           return;
         }
+        if (core.type === "rename_session") {
+          await bundle.runtime.renameSession(core.sessionId, core.title);
+          this.reply(port, requestId, true);
+          return;
+        }
         if (core.type === "restart_session") {
           await bundle.runtime.restart(core.sessionId);
           this.reply(port, requestId, true);
@@ -3033,7 +3103,7 @@ ${skillListing}` : ""
         });
       }
     }
-    async subscribe(port, runtime, sessionId, requestId) {
+    async subscribe(port, runtime, sessionId, subscriptionId, requestId) {
       const current = runtime.getProjection(sessionId);
       const listeners = this.subscriptions.get(port) ?? /* @__PURE__ */ new Map();
       this.subscriptions.set(port, listeners);
@@ -3046,11 +3116,20 @@ ${skillListing}` : ""
       subscription.unsubscribe = await runtime.subscribe(sessionId, (next) => {
         const frame = createProjectionFrame(subscription.previous, next);
         subscription.previous = next;
-        port.postMessage({ type: "projection", frame });
+        port.postMessage({
+          type: "projection",
+          sessionId,
+          logEpoch: next.logEpoch,
+          ...subscriptionId ? { subscriptionId } : {},
+          frame
+        });
       });
       listeners.set(sessionId, subscription);
       port.postMessage({
         type: "projection",
+        sessionId,
+        logEpoch: current.logEpoch,
+        ...subscriptionId ? { subscriptionId } : {},
         frame: this.snapshotFrame(current)
       });
       this.reply(port, requestId, true);
@@ -3094,6 +3173,7 @@ ${skillListing}` : ""
     "list_sessions",
     "clear_history",
     "delete_session",
+    "rename_session",
     "restart_session",
     "list_skills",
     "reload_runtime",
@@ -4409,6 +4489,7 @@ ${stringContent(item.content)}`
         options.initialSnapshot?.tasks ?? []
       );
       this.systemPrompt = options.systemPrompt ?? options.initialSnapshot?.messages.find((message) => message.role === "system")?.content ?? "";
+      this.title = options.initialSnapshot?.title?.trim() || void 0;
       this.lifecycle = new SessionLifecycleController(
         options.sessionId,
         options.clock,
@@ -4449,6 +4530,7 @@ ${stringContent(item.content)}`
     eventSeq = 0;
     activeTaskId;
     lastError;
+    title;
     running = false;
     abort;
     persistTail = Promise.resolve();
@@ -4507,6 +4589,14 @@ ${stringContent(item.content)}`
       this.touch("child_task.updated");
       return true;
     }
+    rename(title) {
+      const normalized = title.trim().slice(0, 120);
+      if (!normalized) {
+        throw new AgentError("SESSION_TITLE_INVALID", "Session title cannot be empty");
+      }
+      this.title = normalized;
+      this.touch("session.renamed");
+    }
     view() {
       const mode = this.permissionModes.get(this.sessionId).getState();
       return {
@@ -4535,6 +4625,9 @@ ${stringContent(item.content)}`
     }
     projection() {
       return buildProjection(this.view());
+    }
+    summary() {
+      return summarizeSnapshot(this.snapshot());
     }
     eventLog() {
       return this.events.list();
@@ -4881,6 +4974,32 @@ ${stringContent(item.content)}`
             } catch {
             }
           }
+          if (result.status === "completed" && this.options.completionGuard) {
+            let decision;
+            try {
+              decision = await this.options.completionGuard({
+                sessionId: this.sessionId,
+                taskId: item.taskId,
+                view: this.view()
+              });
+            } catch (error) {
+              decision = {
+                ok: false,
+                reason: error instanceof Error ? error.message : "Completion guard failed"
+              };
+            }
+            if (!decision.ok) {
+              result = {
+                ...result,
+                status: "failed",
+                error: {
+                  code: "VERIFICATION_REQUIRED",
+                  message: decision.reason ?? "Completion requires successful verification evidence",
+                  retryable: true
+                }
+              };
+            }
+          }
           this.messages.splice(0, this.messages.length, ...result.messages);
           if (result.status === "completed") {
             this.status = "completed";
@@ -5135,7 +5254,9 @@ ${stringContent(item.content)}`
         sessionEntries: this.sessionTree.rawEntries(),
         activeLeafId: this.sessionTree.activeLeaf,
         tasks: this.taskGraph.list(),
-        permission: this.permissionModes.get(this.sessionId).getState()
+        permission: this.permissionModes.get(this.sessionId).getState(),
+        ...this.title ? { title: this.title } : {},
+        ...this.children.size ? { children: [...this.children.values()].map((child) => ({ ...child })) } : {}
       });
     }
     restore(snapshot) {
@@ -5151,6 +5272,11 @@ ${stringContent(item.content)}`
       this.revision = snapshot.revision;
       this.eventSeq = snapshot.eventSeq;
       this.status = snapshot.taskStatus;
+      this.title = snapshot.title?.trim() || void 0;
+      this.children.clear();
+      for (const child of snapshot.children ?? []) {
+        this.children.set(child.taskId, { ...child });
+      }
       if (!snapshot.sessionEntries?.length && this.messages.length) {
         for (const message of this.messages) {
           if (message.role === "system") continue;
@@ -5409,12 +5535,28 @@ ${lines.join("\n")}
       if (!runtime) throw new AgentError("SESSION_NOT_FOUND", `Session not found: ${sessionId}`);
       await runtime.restartInstance();
     }
+    async renameSession(sessionId, title) {
+      const runtime = await this.ensureSession(sessionId, false);
+      if (!runtime) {
+        throw new AgentError("SESSION_NOT_FOUND", `Session not found: ${sessionId}`);
+      }
+      runtime.rename(title);
+      await runtime.flushPersistence();
+    }
     async flush(sessionId) {
       await this.sessions.get(sessionId)?.flushPersistence();
     }
     async listSessions() {
-      const sessions = await this.options.sessionStore?.list?.() ?? [];
-      return sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+      const sessions = new Map(
+        (await this.options.sessionStore?.list?.() ?? []).map((session) => [
+          session.sessionId,
+          session
+        ])
+      );
+      for (const [sessionId, runtime] of this.sessions) {
+        sessions.set(sessionId, runtime.summary());
+      }
+      return [...sessions.values()].sort((a, b) => b.updatedAt - a.updatedAt);
     }
     async dispose() {
       await Promise.all(
@@ -6459,18 +6601,27 @@ ${lines.join("\n")}
     children = /* @__PURE__ */ new Map();
     async create(request) {
       const sessionId = this.options.ids.next("child_session");
+      const workspace = await this.options.forkWorkspace?.({
+        taskId: request.taskId,
+        parentTaskId: request.spec.parentTaskId,
+        ...request.spec.parentSessionId ? { parentSessionId: request.spec.parentSessionId } : {},
+        spec: request.spec,
+        profile: request.profile
+      });
       const runtime = await this.options.createRuntime({
         taskId: request.taskId,
         sessionId,
         spec: request.spec,
-        profile: request.profile
+        profile: request.profile,
+        ...workspace ? { workspace } : {}
       });
       this.children.set(request.taskId, {
         taskId: request.taskId,
         sessionId,
         spec: request.spec,
         profile: request.profile,
-        runtime
+        runtime,
+        ...workspace ? { workspace } : {}
       });
       this.prompts.set(request.taskId, request.prompt);
       return { sessionId };
@@ -6518,6 +6669,38 @@ ${lines.join("\n")}
         return void 0;
       }
     }
+    async previewMerge(taskId) {
+      const child = this.child(taskId);
+      if (!child.workspace?.parent) {
+        throw new Error(`Child workspace fork not found: ${taskId}`);
+      }
+      const preview = await child.workspace.parent.previewMerge(child.workspace);
+      return {
+        taskId,
+        workspaceId: child.workspace.workspaceId,
+        changes: preview.changes,
+        conflicts: preview.conflicts
+      };
+    }
+    async applyMerge(taskId) {
+      const child = this.child(taskId);
+      if (!child.workspace?.parent) {
+        throw new Error(`Child workspace fork not found: ${taskId}`);
+      }
+      const preview = await child.workspace.parent.applyMerge(child.workspace);
+      return {
+        taskId,
+        workspaceId: child.workspace.workspaceId,
+        changes: preview.changes,
+        conflicts: preview.conflicts
+      };
+    }
+    async discardWorkspace(taskId) {
+      const child = this.child(taskId);
+      if (child.workspace?.parent) {
+        await child.workspace.parent.discardFork(child.workspace);
+      }
+    }
     async resume(taskId, message) {
       const child = this.child(taskId);
       const ack = await child.runtime.command(
@@ -6528,7 +6711,9 @@ ${lines.join("\n")}
       return resultFromProjection(child.runtime.getProjection(child.sessionId), false);
     }
     async dispose() {
-      await Promise.all([...this.children.values()].map((child) => child.runtime.dispose()));
+      if (this.options.disposeRuntime !== false) {
+        await Promise.all([...this.children.values()].map((child) => child.runtime.dispose()));
+      }
       this.children.clear();
       this.prompts.clear();
     }
@@ -7534,6 +7719,7 @@ ${lines.join("\n")}
         taskId: child.taskId,
         sessionId: child.sessionId,
         parentTaskId: child.parentTaskId,
+        ...child.parentSessionId ? { parentSessionId: child.parentSessionId } : {},
         profileName: child.profileName,
         status: child.status,
         executionMode: child.executionMode,

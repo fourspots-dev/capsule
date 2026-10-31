@@ -151,6 +151,54 @@ The local sandbox:
 - Supports command timeout, PTY, checkpoint, and restore.
 - Runs project `typecheck` and `test` scripts as a completion gate.
 
+## Portable TUI
+
+`tinyai-tui` runs the V2 virtual Workspace architecture. The project is imported
+as an opaque bundle, edits and commands go through the built-in VFS and Virtual
+Shell, and only the host Terminal/Storage bridges are required.
+
+```bash
+export DEEPSEEK_API_KEY='...'
+node dist/tinyai-tui.cjs --workspace /path/to/project
+```
+
+The default screen contains one status line, the conversation and the composer.
+Useful keys:
+
+```text
+Enter          send
+Shift+Enter    newline (Ctrl+J fallback)
+Ctrl+K         sessions
+Ctrl+G         agent board
+Ctrl+I         full runtime status
+Ctrl+O         workspace diff review
+Ctrl+C         stop, or press twice while idle to exit
+Esc            return
+```
+
+Build only the TUI with `npm run build:tui`. The output is
+`dist/tinyai-tui.cjs`.
+
+## Optional Remote Runner
+
+When a host has no local toolchain, `RemoteToolchainProvider` can send the
+virtual project bundle to a runner, execute an allowlisted command, and apply
+the returned Workspace bundle.
+
+```bash
+TINYAI_RUNNER_TOKEN='...' \
+TINYAI_RUNNER_COMMANDS='node,npm,python3,git' \
+node dist/tinyai-remote-runner.cjs
+```
+
+Point the TUI at it with:
+
+```bash
+export TINYAI_REMOTE_RUNNER_URL='http://127.0.0.1:8787'
+export TINYAI_REMOTE_RUNNER_TOKEN='...'
+export TINYAI_REMOTE_RUNNER_COMMANDS='node,npm,python3,git'
+```
+
 ## Tests
 
 ```bash
@@ -168,6 +216,9 @@ export DEEPSEEK_API_KEY='...'
 npm test -- --run tests/live/deepseek-smoke.test.ts
 unset DEEPSEEK_API_KEY
 ```
+
+The V2 phase-by-phase acceptance matrix is documented in
+[V2 implementation acceptance](docs/virtual-workspace-agent-acceptance-v2.html).
 
 ## Compatibility migration
 

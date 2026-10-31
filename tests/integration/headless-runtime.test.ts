@@ -13,6 +13,26 @@ import {
 import { command, createTestWorkspace, stopCommand } from '../harness/workspace';
 
 describe('headless WorkspaceRuntime', () => {
+  it('blocks completion when the verification guard rejects the result', async () => {
+    const h = createTestWorkspace({
+      model: async () => events(...text('implemented')),
+      tools: [],
+      completionGuard: async ({ taskId }) => ({
+        ok: false,
+        reason: `verification missing for ${taskId}`,
+      }),
+    });
+    await h.runtime.command(command('session_guard', 'guard_command', 'change code'));
+    await h.runtime.waitForSessionIdle('session_guard');
+    expect(h.runtime.getProjection('session_guard')).toMatchObject({
+      taskStatus: 'failed',
+      lastError: {
+        code: 'VERIFICATION_REQUIRED',
+        message: expect.stringContaining('verification missing'),
+      },
+    });
+  });
+
   it('projects provider reasoning separately from the visible answer', async () => {
     const h = createTestWorkspace({
       model: async () =>

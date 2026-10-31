@@ -206,6 +206,29 @@ async function main(): Promise<void> {
     ids,
     sessionStore,
     permissionModes: modes,
+    completionGuard: ({ view }) => {
+      const wrote = view.rows.some(
+        (row) =>
+          row.kind === 'tool' &&
+          ['write_file', 'apply_patch', 'delete_file'].includes(
+            row.toolName ?? ''
+          ) &&
+          row.status === 'completed'
+      );
+      const verified = view.rows.some(
+        (row) =>
+          row.kind === 'tool' &&
+          ['exec', 'job_read'].includes(row.toolName ?? '') &&
+          row.status === 'completed'
+      );
+      return wrote && !verified
+        ? {
+            ok: false,
+            reason:
+              'Files changed but no successful exec/job_read verification was observed',
+          }
+        : { ok: true };
+    },
     systemPrompt: [
       'You are tinyai, a coding agent operating in a portable virtual workspace.',
       'All files and commands are virtual. Use search, patch, exec and job tools.',

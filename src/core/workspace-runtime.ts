@@ -3,6 +3,7 @@ import type { RuntimeEvent } from './event-log';
 import type { Clock, IdGenerator, ModelTransport } from './ports';
 import type { PermissionModeRegistry } from './policy';
 import { SessionRuntime } from './session-runtime';
+import type { CompletionGuard } from './session-runtime';
 import type { SessionStore, SessionSummary } from './session-store';
 import type { ToolExecutor } from './tool-executor';
 import type { TraceRecorder } from './trace-recorder';
@@ -27,6 +28,7 @@ export interface WorkspaceRuntimeOptions {
   onClose?: (sessionId: string) => Promise<void>;
   permissionModes?: PermissionModeRegistry;
   trace?: TraceRecorder;
+  completionGuard?: CompletionGuard;
 }
 
 export class WorkspaceRuntime {

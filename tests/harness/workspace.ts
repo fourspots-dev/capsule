@@ -4,6 +4,7 @@ import {
   WorkspaceRuntime,
   type ApprovalPort,
   type CommandEnvelope,
+  type CompletionGuard,
   type SessionStore,
   type ToolDefinition,
 } from '../../src/core';
@@ -16,6 +17,7 @@ export interface TestWorkspaceOptions {
   systemPrompt?: string;
   maxSteps?: number;
   sessionStore?: SessionStore;
+  completionGuard?: CompletionGuard;
 }
 
 export function createTestWorkspace(options: TestWorkspaceOptions) {
@@ -32,6 +34,7 @@ export function createTestWorkspace(options: TestWorkspaceOptions) {
     systemPrompt: options.systemPrompt,
     maxSteps: options.maxSteps,
     sessionStore: options.sessionStore,
+    completionGuard: options.completionGuard,
   });
 
   return { clock, ids, model, approval, tools, runtime };

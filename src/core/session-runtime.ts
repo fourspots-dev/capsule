@@ -60,7 +60,23 @@ export interface SessionRuntimeOptions {
   onClose?: (sessionId: string) => Promise<void>;
   permissionModes?: PermissionModeRegistry;
   trace?: TraceRecorder;
+  completionGuard?: CompletionGuard;
 }
+
+export interface CompletionGuardContext {
+  sessionId: string;
+  taskId: string;
+  view: SessionView;
+}
+
+export interface CompletionGuardDecision {
+  ok: boolean;
+  reason?: string;
+}
+
+export type CompletionGuard = (
+  context: CompletionGuardContext
+) => Promise<CompletionGuardDecision> | CompletionGuardDecision;
 
 export class SessionRuntime {
   readonly sessionId: string;
@@ -622,6 +638,37 @@ export class SessionRuntime {
             });
           } catch {
             // Keep the original overflow error if recovery cannot produce a summary.
+          }
+        }
+        if (result.status === 'completed' && this.options.completionGuard) {
+          let decision: CompletionGuardDecision;
+          try {
+            decision = await this.options.completionGuard({
+              sessionId: this.sessionId,
+              taskId: item.taskId,
+              view: this.view(),
+            });
+          } catch (error) {
+            decision = {
+              ok: false,
+              reason:
+                error instanceof Error
+                  ? error.message
+                  : 'Completion guard failed',
+            };
+          }
+          if (!decision.ok) {
+            result = {
+              ...result,
+              status: 'failed',
+              error: {
+                code: 'VERIFICATION_REQUIRED',
+                message:
+                  decision.reason ??
+                  'Completion requires successful verification evidence',
+                retryable: true,
+              },
+            };
           }
         }
         this.messages.splice(0, this.messages.length, ...result.messages);
