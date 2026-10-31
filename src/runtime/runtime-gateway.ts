@@ -118,7 +118,13 @@ export class RuntimeGateway {
         return;
       }
       if (core.type === 'subscribe') {
-        await this.subscribe(port, bundle.runtime, core.sessionId, requestId);
+        await this.subscribe(
+          port,
+          bundle.runtime,
+          core.sessionId,
+          core.subscriptionId,
+          requestId
+        );
         return;
       }
       if (core.type === 'unsubscribe') {
@@ -163,6 +169,11 @@ export class RuntimeGateway {
       if (core.type === 'delete_session') {
         await bundle.extension?.beforeDeleteSession?.(core.sessionId);
         await bundle.runtime.deleteSession(core.sessionId);
+        this.reply(port, requestId, true);
+        return;
+      }
+      if (core.type === 'rename_session') {
+        await bundle.runtime.renameSession(core.sessionId, core.title);
         this.reply(port, requestId, true);
         return;
       }
@@ -212,6 +223,7 @@ export class RuntimeGateway {
     port: RuntimePort,
     runtime: WorkspaceRuntime,
     sessionId: string,
+    subscriptionId: string | undefined,
     requestId: string
   ): Promise<void> {
     const current = runtime.getProjection(sessionId);
@@ -226,11 +238,20 @@ export class RuntimeGateway {
     subscription.unsubscribe = await runtime.subscribe(sessionId, (next) => {
       const frame = createProjectionFrame(subscription.previous, next);
       subscription.previous = next;
-      port.postMessage({ type: 'projection', frame });
+      port.postMessage({
+        type: 'projection',
+        sessionId,
+        logEpoch: next.logEpoch,
+        ...(subscriptionId ? { subscriptionId } : {}),
+        frame,
+      });
     });
     listeners.set(sessionId, subscription);
     port.postMessage({
       type: 'projection',
+      sessionId,
+      logEpoch: current.logEpoch,
+      ...(subscriptionId ? { subscriptionId } : {}),
       frame: this.snapshotFrame(current),
     });
     this.reply(port, requestId, true);
@@ -282,6 +303,7 @@ const CORE_REQUEST_TYPES = new Set<string>([
   'list_sessions',
   'clear_history',
   'delete_session',
+  'rename_session',
   'restart_session',
   'list_skills',
   'reload_runtime',

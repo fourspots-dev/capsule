@@ -3,6 +3,7 @@ import type { SessionEntry } from './session-tree';
 import type { TaskNode } from './task-graph';
 import type { PlanSnapshot } from './policy';
 import type {
+  ChildTaskProjection,
   CommandAck,
   ConversationRow,
   InputLedgerEntry,
@@ -26,6 +27,8 @@ export interface SessionSnapshot {
   activeLeafId?: string | null;
   tasks?: TaskNode[];
   permission?: PlanSnapshot;
+  title?: string;
+  children?: ChildTaskProjection[];
 }
 
 export interface SessionStore {
@@ -44,6 +47,8 @@ export interface SessionSummary {
   updatedAt: number;
   title: string;
   rowCount: number;
+  childCount: number;
+  attentionCount: number;
 }
 
 export class InMemorySessionStore implements SessionStore {
@@ -73,14 +78,19 @@ export class InMemorySessionStore implements SessionStore {
 
 export function summarizeSnapshot(snapshot: SessionSnapshot): SessionSummary {
   const firstUser = snapshot.rows.find((row) => row.kind === 'user' && row.text.trim());
+  const children = snapshot.children ?? [];
   return {
     sessionId: snapshot.sessionId,
     revision: snapshot.revision,
     eventSeq: snapshot.eventSeq,
     taskStatus: snapshot.taskStatus,
     updatedAt: snapshot.events.at(-1)?.occurredAt ?? 0,
-    title: firstUser?.text.slice(0, 80) || 'New chat',
+    title: snapshot.title?.trim() || firstUser?.text.slice(0, 80) || 'New chat',
     rowCount: snapshot.rows.length,
+    childCount: children.length,
+    attentionCount: children.filter(
+      (child) => child.status === 'failed' || child.status === 'cancelled'
+    ).length,
   };
 }
 
@@ -104,6 +114,8 @@ export function cloneSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
       payload: structuredClone(entry.payload),
     })),
     tasks: (snapshot.tasks ?? []).map((task) => structuredClone(task)),
+    children: (snapshot.children ?? []).map((child) => ({ ...child })),
+    ...(snapshot.title ? { title: snapshot.title } : {}),
     ...(snapshot.permission ? { permission: { ...snapshot.permission } } : {}),
   };
 }

@@ -56,6 +56,7 @@ export class KernelClient {
   private readonly handoffListeners = new Set<(event: KernelHandoffEvent) => void>();
   private readonly disconnectListeners = new Set<() => void>();
   private readonly resyncing = new Set<string>();
+  private readonly expectedSubscriptions = new Map<string, string>();
 
   constructor(
     private readonly connectPort: () => RuntimePort,
@@ -67,10 +68,20 @@ export class KernelClient {
   }
 
   async subscribe(sessionId: string): Promise<void> {
-    await this.request({ type: 'subscribe', sessionId });
+    const subscriptionId = `subscription_${++this.sequence}`;
+    this.expectedSubscriptions.set(sessionId, subscriptionId);
+    try {
+      await this.request({ type: 'subscribe', sessionId, subscriptionId });
+    } catch (error) {
+      if (this.expectedSubscriptions.get(sessionId) === subscriptionId) {
+        this.expectedSubscriptions.delete(sessionId);
+      }
+      throw error;
+    }
   }
 
   async unsubscribe(sessionId: string): Promise<void> {
+    this.expectedSubscriptions.delete(sessionId);
     await this.request({ type: 'unsubscribe', sessionId });
   }
 
@@ -96,6 +107,10 @@ export class KernelClient {
 
   async deleteSession(sessionId: string): Promise<void> {
     await this.request({ type: 'delete_session', sessionId });
+  }
+
+  async renameSession(sessionId: string, title: string): Promise<void> {
+    await this.request({ type: 'rename_session', sessionId, title });
   }
 
   async clearHistory(): Promise<{ deleted: number }> {
@@ -267,6 +282,21 @@ export class KernelClient {
       return;
     }
     if (message.type === 'projection') {
+      const expected = this.expectedSubscriptions.get(message.sessionId);
+      if (expected && message.subscriptionId && message.subscriptionId !== expected) {
+        return;
+      }
+      const frameSessionId =
+        message.frame.type === 'snapshot'
+          ? message.frame.projection.sessionId
+          : message.frame.sessionId;
+      const frameEpoch =
+        message.frame.type === 'snapshot'
+          ? message.frame.projection.logEpoch
+          : message.frame.logEpoch;
+      if (frameSessionId !== message.sessionId || frameEpoch !== message.logEpoch) {
+        return;
+      }
       const projection = this.applyFrame(message.frame);
       if (projection) {
         for (const listener of this.projectionListeners) {
@@ -328,6 +358,7 @@ export class KernelClient {
     this.port = undefined;
     this.stores.clear();
     this.resyncing.clear();
+    this.expectedSubscriptions.clear();
     for (const pending of this.pending.values()) {
       if (pending.timer) clearTimeout(pending.timer);
       pending.reject(error);

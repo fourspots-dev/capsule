@@ -87,15 +87,11 @@ describe.skipIf(!onMac)('MacOSSeatbeltSandbox', () => {
       expect((await sandbox.listFiles(lease)).map((file) => file.path)).toEqual(['a.txt']);
 
       const pty = await sandbox.openPty!(lease, { command: '/bin/sh' });
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      let output = await readPtyUntil(pty, /spawn /, 2_000);
       await pty.write('printf pty-ok\\n\n');
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      const output = await pty.read();
+      output += await readPtyUntil(pty, /pty-ok/, 2_000);
       expect(
         output
-          .filter((event) => event.type === 'data')
-          .map((event) => event.data)
-          .join('')
       ).toContain('pty-ok');
       await pty.close();
     } finally {
@@ -103,3 +99,22 @@ describe.skipIf(!onMac)('MacOSSeatbeltSandbox', () => {
     }
   });
 });
+
+async function readPtyUntil(
+  pty: NonNullable<Awaited<ReturnType<MacOSSeatbeltSandbox['openPty']>>>,
+  pattern: RegExp,
+  timeoutMs: number
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  let output = '';
+  while (!pattern.test(output)) {
+    if (Date.now() >= deadline) {
+      throw new Error(`PTY output did not match ${pattern}: ${output}`);
+    }
+    output += (await pty.read(Math.min(250, deadline - Date.now())))
+      .filter((event) => event.type === 'data')
+      .map((event) => event.data)
+      .join('');
+  }
+  return output;
+}

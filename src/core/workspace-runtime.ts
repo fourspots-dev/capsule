@@ -191,13 +191,30 @@ export class WorkspaceRuntime {
     await runtime.restartInstance();
   }
 
+  async renameSession(sessionId: string, title: string): Promise<void> {
+    const runtime = await this.ensureSession(sessionId, false);
+    if (!runtime) {
+      throw new AgentError('SESSION_NOT_FOUND', `Session not found: ${sessionId}`);
+    }
+    runtime.rename(title);
+    await runtime.flushPersistence();
+  }
+
   async flush(sessionId: string): Promise<void> {
     await this.sessions.get(sessionId)?.flushPersistence();
   }
 
   async listSessions(): Promise<SessionSummary[]> {
-    const sessions = (await this.options.sessionStore?.list?.()) ?? [];
-    return sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+    const sessions = new Map(
+      ((await this.options.sessionStore?.list?.()) ?? []).map((session) => [
+        session.sessionId,
+        session,
+      ])
+    );
+    for (const [sessionId, runtime] of this.sessions) {
+      sessions.set(sessionId, runtime.summary());
+    }
+    return [...sessions.values()].sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
   async dispose(): Promise<void> {

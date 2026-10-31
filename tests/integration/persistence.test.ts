@@ -7,6 +7,76 @@ import { events, text } from '../harness/fakes';
 import { command, createTestWorkspace } from '../harness/workspace';
 
 describe('session persistence and cold hydration', () => {
+  it('lists active in-memory sessions even without a persistent store', async () => {
+    const workspace = createTestWorkspace({
+      model: async () => events(...text('active')),
+      tools: [],
+    });
+    await workspace.runtime.command(
+      command('session_memory', 'command_memory', 'in-memory task')
+    );
+    await workspace.runtime.waitForSessionIdle('session_memory');
+    await workspace.runtime.renameSession('session_memory', 'Memory task');
+    expect(await workspace.runtime.listSessions()).toEqual([
+      expect.objectContaining({
+        sessionId: 'session_memory',
+        title: 'Memory task',
+        childCount: 0,
+        attentionCount: 0,
+      }),
+    ]);
+  });
+
+  it('persists user titles and child-agent summaries across cold hydration', async () => {
+    const store = new InMemorySessionStore();
+    const first = createTestWorkspace({
+      model: async () => events(...text('done')),
+      tools: [],
+      sessionStore: store,
+    });
+    const ack = await first.runtime.command(
+      command('session_children', 'command_1', 'investigate failing build')
+    );
+    await first.runtime.waitForSessionIdle('session_children');
+    expect(ack.taskId).toBeDefined();
+    expect(
+      first.runtime.updateChildTask(ack.taskId!, {
+        taskId: 'child_task_1',
+        sessionId: 'child_session_1',
+        parentTaskId: ack.taskId!,
+        profileName: 'build-investigator',
+        status: 'failed',
+        executionMode: 'background',
+        summary: 'dependency mismatch',
+        updatedAt: 10,
+      })
+    ).toBe(true);
+    await first.runtime.renameSession('session_children', 'Build investigation');
+
+    const second = createTestWorkspace({
+      model: async () => events(...text('unused')),
+      tools: [],
+      sessionStore: store,
+    });
+    expect(await second.runtime.loadProjection('session_children')).toMatchObject({
+      children: [
+        expect.objectContaining({
+          taskId: 'child_task_1',
+          profileName: 'build-investigator',
+          status: 'failed',
+        }),
+      ],
+    });
+    expect(await second.runtime.listSessions()).toEqual([
+      expect.objectContaining({
+        sessionId: 'session_children',
+        title: 'Build investigation',
+        childCount: 1,
+        attentionCount: 1,
+      }),
+    ]);
+  });
+
   it('persists the command input before ACK and reconstructs the same conversation', async () => {
     const store = new InMemorySessionStore();
     const first = createTestWorkspace({

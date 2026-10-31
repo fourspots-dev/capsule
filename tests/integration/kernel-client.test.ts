@@ -106,8 +106,12 @@ describe('KernelClient', () => {
     const subscribe = client.subscribe('session_1');
     await until(() => port.outbound.length === 2);
     const subscribeRequest = port.outbound[1];
+    if (subscribeRequest.type !== 'subscribe') throw new Error('subscribe request missing');
     port.receive({
       type: 'projection',
+      sessionId: 'session_1',
+      logEpoch: 'epoch_1',
+      subscriptionId: subscribeRequest.subscriptionId,
       frame: { type: 'snapshot', projection: projection(1) },
     });
     port.receive({
@@ -119,6 +123,9 @@ describe('KernelClient', () => {
     await subscribe;
     port.receive({
       type: 'projection',
+      sessionId: 'session_1',
+      logEpoch: 'epoch_1',
+      subscriptionId: subscribeRequest.subscriptionId,
       frame: {
         type: 'delta',
         sessionId: 'session_1',
@@ -154,6 +161,15 @@ describe('KernelClient', () => {
           },
         ],
       },
+    });
+    expect(projections.at(-1)).toEqual(projection(2));
+
+    port.receive({
+      type: 'projection',
+      sessionId: 'session_1',
+      logEpoch: 'epoch_1',
+      subscriptionId: 'stale_subscription',
+      frame: { type: 'snapshot', projection: projection(99) },
     });
     expect(projections.at(-1)).toEqual(projection(2));
 

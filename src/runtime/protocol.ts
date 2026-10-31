@@ -8,7 +8,12 @@ import type { RuntimeExtensionRequest } from '../platform/runtime-extension';
 
 export type RuntimeRequest =
   | { type: 'hello'; clientId: string; requestId?: string }
-  | { type: 'subscribe'; sessionId: string; requestId?: string }
+  | {
+      type: 'subscribe';
+      sessionId: string;
+      subscriptionId?: string;
+      requestId?: string;
+    }
   | { type: 'unsubscribe'; sessionId: string; requestId?: string }
   | { type: 'command'; command: CommandEnvelope; requestId?: string }
   | { type: 'get_projection'; sessionId: string; requestId?: string }
@@ -17,6 +22,12 @@ export type RuntimeRequest =
   | { type: 'list_sessions'; requestId?: string }
   | { type: 'clear_history'; requestId?: string }
   | { type: 'delete_session'; sessionId: string; requestId?: string }
+  | {
+      type: 'rename_session';
+      sessionId: string;
+      title: string;
+      requestId?: string;
+    }
   | { type: 'restart_session'; sessionId: string; requestId?: string }
   | { type: 'list_skills'; requestId?: string }
   | { type: 'reload_runtime'; requestId?: string }
@@ -33,7 +44,13 @@ export type RuntimeResponse =
   | { type: 'ready'; revision: number }
   | { type: 'response'; requestId: string; ok: true; data?: unknown }
   | { type: 'response'; requestId: string; ok: false; error: StructuredError }
-  | { type: 'projection'; frame: ProjectionFrame }
+  | {
+      type: 'projection';
+      sessionId: string;
+      logEpoch: string;
+      subscriptionId?: string;
+      frame: ProjectionFrame;
+    }
   | {
       type: 'approval_request';
       approvalId: string;

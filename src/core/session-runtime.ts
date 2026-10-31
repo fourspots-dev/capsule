@@ -9,7 +9,13 @@ import type { Clock, IdGenerator, ModelTransport } from './ports';
 import { PermissionModeRegistry, type PermissionMode } from './policy';
 import { buildProjection } from './projection';
 import { SessionLifecycleController } from './session-lifecycle';
-import { cloneSnapshot, type SessionSnapshot, type SessionStore } from './session-store';
+import {
+  cloneSnapshot,
+  summarizeSnapshot,
+  type SessionSnapshot,
+  type SessionStore,
+  type SessionSummary,
+} from './session-store';
 import { SessionTree, type SessionEntry, type SessionMessagePayload } from './session-tree';
 import { TaskGraph } from './task-graph';
 import type { TraceRecorder } from './trace-recorder';
@@ -82,6 +88,7 @@ export class SessionRuntime {
   private eventSeq = 0;
   private activeTaskId?: string;
   private lastError?: StructuredError;
+  private title?: string;
   private running = false;
   private abort?: AbortController;
   private persistTail: Promise<void> = Promise.resolve();
@@ -114,6 +121,7 @@ export class SessionRuntime {
         | string
         | undefined) ??
       '';
+    this.title = options.initialSnapshot?.title?.trim() || undefined;
     this.lifecycle = new SessionLifecycleController(
       options.sessionId,
       options.clock,
@@ -190,6 +198,15 @@ export class SessionRuntime {
     return true;
   }
 
+  rename(title: string): void {
+    const normalized = title.trim().slice(0, 120);
+    if (!normalized) {
+      throw new AgentError('SESSION_TITLE_INVALID', 'Session title cannot be empty');
+    }
+    this.title = normalized;
+    this.touch('session.renamed');
+  }
+
   view(): SessionView {
     const mode = this.permissionModes.get(this.sessionId).getState();
     return {
@@ -223,6 +240,10 @@ export class SessionRuntime {
 
   projection(): ProductProjection {
     return buildProjection(this.view());
+  }
+
+  summary(): SessionSummary {
+    return summarizeSnapshot(this.snapshot());
   }
 
   eventLog(): RuntimeEvent[] {
@@ -893,6 +914,10 @@ export class SessionRuntime {
       activeLeafId: this.sessionTree.activeLeaf,
       tasks: this.taskGraph.list(),
       permission: this.permissionModes.get(this.sessionId).getState(),
+      ...(this.title ? { title: this.title } : {}),
+      ...(this.children.size
+        ? { children: [...this.children.values()].map((child) => ({ ...child })) }
+        : {}),
     });
   }
 
@@ -909,6 +934,11 @@ export class SessionRuntime {
     this.revision = snapshot.revision;
     this.eventSeq = snapshot.eventSeq;
     this.status = snapshot.taskStatus;
+    this.title = snapshot.title?.trim() || undefined;
+    this.children.clear();
+    for (const child of snapshot.children ?? []) {
+      this.children.set(child.taskId, { ...child });
+    }
     if (!snapshot.sessionEntries?.length && this.messages.length) {
       for (const message of this.messages) {
         if (message.role === 'system') continue;
