@@ -16,6 +16,7 @@ import { ToolExecutor } from '../core/tool-executor';
 import type { JsonValue, ToolDefinition } from '../core/types';
 import { WorkspaceRuntime } from '../core/workspace-runtime';
 import { NodeHostBridge } from '../node/node-host';
+import { NodeHostFileSystem } from '../node/host-fs';
 import { runNodeTui } from '../node/run-tui';
 import { WorkspaceSubagentDriver } from '../runtime/workspace-subagent-driver';
 import {
@@ -31,6 +32,7 @@ interface TuiCliOptions {
   model: string;
   baseUrl: string;
   importProject: 'auto' | 'always' | 'never';
+  workspaceMode: 'virtual' | 'host';
 }
 
 const denyPrompt: ApprovalPort = {
@@ -55,23 +57,33 @@ async function main(): Promise<void> {
     projectRoot: resolve(options.workspace),
     terminal: { input: process.stdin, output: process.stdout, error: process.stderr },
   });
+  const hostFileSystem =
+    options.workspaceMode === 'host'
+      ? new NodeHostFileSystem(resolve(options.workspace), () => systemClock.now())
+      : undefined;
   const workspace = new VirtualWorkspace({
     host,
+    ...(hostFileSystem ? { vfs: hostFileSystem } : {}),
     storageKey: 'tinyai:workspace:v1',
     now: () => systemClock.now(),
   });
-  const existing = await workspace.fs.list('', { recursive: true });
-  if (
-    options.importProject === 'always' ||
-    (options.importProject === 'auto' && existing.length === 0)
-  ) {
-    const bundle = await host.workspace.importWorkspace?.();
-    if (bundle) await workspace.initialize(bundle, { replace: false });
+  if (options.workspaceMode === 'virtual') {
+    const existing = await workspace.fs.list('', { recursive: true });
+    if (
+      options.importProject === 'always' ||
+      (options.importProject === 'auto' && existing.length === 0)
+    ) {
+      const bundle = await host.workspace.importWorkspace?.();
+      if (bundle) await workspace.initialize(bundle, { replace: false });
+    }
+    await workspace.sync.captureBaseline(await workspace.exportBundle());
   }
-  await workspace.sync.captureBaseline(await workspace.exportBundle());
-  const baseline = await workspace.checkpoint('tui-baseline');
+  const baseline =
+    options.workspaceMode === 'virtual'
+      ? await workspace.checkpoint('tui-baseline')
+      : undefined;
   const remoteRunner = process.env.TINYAI_REMOTE_RUNNER_URL;
-  if (remoteRunner) {
+  if (remoteRunner && options.workspaceMode === 'virtual') {
     workspace.shell.addProvider(
       new RemoteToolchainProvider({
         endpoint: remoteRunner,
@@ -267,29 +279,33 @@ async function main(): Promise<void> {
     project: resolve(options.workspace).split('/').at(-1) ?? options.workspace,
     branch: process.env.TINYAI_BRANCH,
     model: options.model,
-    provider: 'virtual',
-    review: async () => {
-      const current = await workspace.checkpoint('tui-review');
-      const diff = await workspace.diff(baseline.id, current.id);
-      return {
-        from: diff.from,
-        to: diff.to,
-        files: diff.files,
-        additions: diff.files.reduce(
-          (total, file) =>
-            total +
-            (file.patch?.split('\n').filter((line) => line.startsWith('+')).length ?? 0),
-          0
-        ),
-        deletions: diff.files.reduce(
-          (total, file) =>
-            total +
-            (file.patch?.split('\n').filter((line) => line.startsWith('-')).length ?? 0),
-          0
-        ),
-        risks: [],
-      };
-    },
+    provider: options.workspaceMode === 'host' ? 'host-fs' : 'virtual',
+    ...(baseline
+      ? {
+          review: async () => {
+            const current = await workspace.checkpoint('tui-review');
+            const diff = await workspace.diff(baseline.id, current.id);
+            return {
+              from: diff.from,
+              to: diff.to,
+              files: diff.files,
+              additions: diff.files.reduce(
+                (total, file) =>
+                  total +
+                  (file.patch?.split('\n').filter((line) => line.startsWith('+')).length ?? 0),
+                0
+              ),
+              deletions: diff.files.reduce(
+                (total, file) =>
+                  total +
+                  (file.patch?.split('\n').filter((line) => line.startsWith('-')).length ?? 0),
+                0
+              ),
+              risks: [],
+            };
+          },
+        }
+      : {}),
     agentWorkspace: {
       async previewMerge(taskId) {
         const preview = await coordinator.previewMerge(taskId);
@@ -335,7 +351,15 @@ function parseArgs(args: string[]): TuiCliOptions {
   const positional: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if (['--workspace', '--model', '--base-url', '--import'].includes(arg)) {
+    if (
+      [
+        '--workspace',
+        '--model',
+        '--base-url',
+        '--import',
+        '--workspace-mode',
+      ].includes(arg)
+    ) {
       const value = args[++index];
       if (!value) throw new Error(`${arg} requires a value`);
       values.set(arg, value);
@@ -350,6 +374,10 @@ function parseArgs(args: string[]): TuiCliOptions {
   if (!['auto', 'always', 'never'].includes(imported)) {
     throw new Error('--import must be auto, always or never');
   }
+  const workspaceMode = values.get('--workspace-mode') ?? 'virtual';
+  if (!['virtual', 'host'].includes(workspaceMode)) {
+    throw new Error('--workspace-mode must be virtual or host');
+  }
   return {
     workspace: resolve(values.get('--workspace') ?? positional[0] ?? process.cwd()),
     model:
@@ -363,6 +391,7 @@ function parseArgs(args: string[]): TuiCliOptions {
       process.env.DEEPSEEK_BASE_URL ??
       'https://api.deepseek.com/v1',
     importProject: imported as TuiCliOptions['importProject'],
+    workspaceMode: workspaceMode as TuiCliOptions['workspaceMode'],
   };
 }
 
@@ -375,6 +404,7 @@ function usage(): void {
       '  --model <name>       OpenAI-compatible model',
       '  --base-url <url>     OpenAI-compatible base URL',
       '  --import <mode>      auto | always | never',
+      '  --workspace-mode     virtual | host (host uses fenced range-read FS)',
       '',
       'Environment: DEEPSEEK_API_KEY / TINYAI_API_KEY / OPENAI_API_KEY',
       '',

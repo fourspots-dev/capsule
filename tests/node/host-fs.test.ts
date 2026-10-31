@@ -19,6 +19,8 @@ describe('NodeHostFileSystem', () => {
       ).toBe('new');
       expect((await vfs.list('', { recursive: true })).map((item) => item.path))
         .toEqual(['nested', 'nested/new.txt', 'value.txt']);
+      await expect(vfs.write('.tinyai/host-state.json', new Uint8Array())).rejects
+        .toMatchObject({ code: 'VFS_PATH_RESERVED' });
       await expect(vfs.read('../escape')).rejects.toMatchObject({
         code: 'VFS_PATH_INVALID',
       });

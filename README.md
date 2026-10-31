@@ -162,6 +162,16 @@ export DEEPSEEK_API_KEY='...'
 node dist/tinyai-tui.cjs --workspace /path/to/project
 ```
 
+For very large existing repositories, use the optional fenced host filesystem
+instead of importing a virtual copy:
+
+```bash
+node dist/tinyai-tui.cjs --workspace /path/to/large-repo --workspace-mode host
+```
+
+`host` mode uses `NodeHostFileSystem` byte-range reads and still rejects paths or
+symlinks outside the selected project root. VFS remains the default.
+
 The default screen contains one status line, the conversation and the composer.
 Useful keys:
 

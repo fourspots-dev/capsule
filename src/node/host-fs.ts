@@ -192,6 +192,7 @@ export class NodeHostFileSystem implements VirtualFileSystem {
     for (const entry of await readdir(absolute, { withFileTypes: true })) {
       this.assertActive(signal);
       if (entry.isSymbolicLink()) continue;
+      if (entry.name === '.tinyai') continue;
       const childVirtual = virtualPath ? `${virtualPath}/${entry.name}` : entry.name;
       const childAbsolute = resolve(absolute, entry.name);
       result.push(await this.info(childVirtual, childAbsolute));
@@ -219,6 +220,9 @@ export class NodeHostFileSystem implements VirtualFileSystem {
 
   private absolute(path: string): string {
     const absolute = resolve(this.root, ...path.split('/').filter(Boolean));
+    if (path === '.tinyai' || path.startsWith('.tinyai/')) {
+      throw new AgentError('VFS_PATH_RESERVED', `Path is reserved: ${path}`);
+    }
     if (absolute !== this.root && !absolute.startsWith(`${this.root}/`)) {
       throw new AgentError('VFS_PATH_INVALID', `Path escapes host workspace: ${path}`);
     }
