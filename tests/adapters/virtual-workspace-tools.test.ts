@@ -238,8 +238,41 @@ describe('virtual workspace agent tools', () => {
     expect(descriptors.get('apply_unified_diff')?.description).toContain(
       'exact @@ hunk counts'
     );
+    expect(descriptors.has('git_status')).toBe(true);
+    expect(descriptors.has('git_commit')).toBe(true);
+    expect(descriptors.has('git_log')).toBe(true);
+  });
+
+  it('initializes and commits through the portable Git tool pack', async () => {
+    const { executor, workspace } = setup();
+    await execute(executor, 'write_file', {
+      path: 'src/main.js',
+      text: 'console.log("space");\n',
+    });
+    await execute(executor, 'git_add', {
+      paths: ['src'],
+    }).then((result) => {
+      expect(result.status).toBe('failed');
+      expect(result.error?.code).toBe('GIT_REPOSITORY_NOT_FOUND');
+    });
+    const init = await execute(executor, 'git_init', {});
+    expect(init.status).toBe('succeeded');
+    await execute(executor, 'git_add', { paths: ['src'] });
+    await execute(executor, 'git_commit', { message: 'ship the game' });
+    const log = await execute(executor, 'git_log', {});
+    expect(log.output).toMatchObject([
+      { message: 'ship the game\n' },
+    ]);
+    expect(descriptorToolDefinitions(executor, 'git_status')).toBeDefined();
+    expect(new TextDecoder().decode(await workspace.fs.read('src/main.js'))).toContain(
+      'space'
+    );
   });
 });
+
+function descriptorToolDefinitions(executor: ToolExecutor, name: string) {
+  return executor.descriptors().find((tool) => tool.name === name);
+}
 
 async function execute(
   executor: ToolExecutor,

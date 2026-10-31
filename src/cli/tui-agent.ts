@@ -1,5 +1,7 @@
 import { resolve } from 'node:path';
 import { OpenAIModelTransport } from '../adapters/openai-model';
+import { createHostActionTools } from '../adapters/host-action-tools';
+import { HostArtifactStore } from '../adapters/host-artifact-store';
 import { HostSessionStore } from '../adapters/host-session-store';
 import { RemoteToolchainProvider } from '../adapters/remote-toolchain-provider';
 import { createSubagentTools } from '../adapters/subagent-tools';
@@ -10,6 +12,7 @@ import {
 } from '../core/agent-profile';
 import type { ApprovalPort } from '../core/ports';
 import { SequentialIdGenerator, systemClock } from '../core/ports';
+import { HostActionRegistry } from '../platform/host-action';
 import { PermissionModeRegistry, PolicyEngine } from '../core/policy';
 import { SubagentCoordinator } from '../core/subagent-coordinator';
 import { ToolExecutor } from '../core/tool-executor';
@@ -107,6 +110,16 @@ async function main(): Promise<void> {
   const modes = new PermissionModeRegistry('sandbox-auto', () => systemClock.now());
   const ids = new SequentialIdGenerator();
   const sessionStore = new HostSessionStore(host.storage);
+  const artifactStore = new HostArtifactStore(host.storage);
+  const actionRegistry = new HostActionRegistry();
+  if (host.actions) {
+    actionRegistry.register(host.descriptor.id, host.actions);
+  }
+  const actionTools = host.actions
+    ? await createHostActionTools(actionRegistry, {
+        workspacePath: '',
+      })
+    : [];
   const model = new OpenAIModelTransport({
     baseUrl: options.baseUrl,
     apiKey,
@@ -167,6 +180,7 @@ async function main(): Promise<void> {
       return selected.execute(input, invocation);
     },
   }));
+  const allTools = [...routedTools, ...actionTools];
   let runtime!: WorkspaceRuntime;
   const driver = new WorkspaceSubagentDriver({
     ids,
@@ -206,10 +220,14 @@ async function main(): Promise<void> {
     }),
   });
   const tools = new ToolExecutor(
-    [...routedTools, ...subagentTools],
+    [...allTools, ...subagentTools],
     denyPrompt,
     {
       policy: new PolicyEngine((sessionId) => modes.mode(sessionId)),
+      artifacts: {
+        store: artifactStore,
+        thresholdBytes: 64_000,
+      },
     }
   );
   runtime = new WorkspaceRuntime({

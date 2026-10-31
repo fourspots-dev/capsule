@@ -5,6 +5,7 @@ import type {
   HostCrypto,
   HostStorage,
 } from '../host';
+import type { HostActionProvider } from '../platform/host-action';
 
 export interface ChromeStorageArea {
   get(keys: string | string[] | null): Promise<Record<string, unknown>>;
@@ -16,6 +17,7 @@ export interface ChromeHostOptions {
   storage: ChromeStorageArea;
   id?: string;
   now?: () => number;
+  actions?: HostActionProvider;
 }
 
 export class ChromeHostStorage implements HostStorage {
@@ -47,6 +49,7 @@ export class ChromeHostBridge implements HostBridge {
   readonly scheduler: NonNullable<HostBridge['scheduler']>;
   readonly crypto: HostCrypto;
   readonly clone: NonNullable<HostBridge['clone']>;
+  readonly actions?: HostActionProvider;
 
   constructor(options: ChromeHostOptions) {
     this.storage = new ChromeHostStorage(options.storage);
@@ -65,12 +68,14 @@ export class ChromeHostBridge implements HostBridge {
     };
     this.crypto = chromeCrypto;
     this.clone = { clone: <T>(value: T): T => structuredClone(value) };
+    this.actions = options.actions;
     const capabilities: HostCapability[] = [
       'storage',
       'clock',
       'scheduler',
       'crypto',
       'clone',
+      ...(this.actions ? (['actions'] as const) : []),
     ];
     this.descriptor = {
       id: options.id ?? 'chrome-extension-host',

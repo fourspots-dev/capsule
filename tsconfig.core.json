@@ -6,6 +6,7 @@
   },
   "include": [
     "src/core/**/*.ts",
-    "src/platform/**/*.ts"
+    "src/platform/**/*.ts",
+    "src/git/**/*.ts"
   ]
 }

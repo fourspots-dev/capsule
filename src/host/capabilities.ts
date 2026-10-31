@@ -8,6 +8,7 @@ import type {
 
 const capabilityOrder: readonly HostCapability[] = [
   'storage',
+  'actions',
   'workspace.import',
   'workspace.export',
   'workspace.picker',
@@ -142,6 +143,11 @@ function isCapabilityImplemented(
   switch (capability) {
     case 'storage':
       return Boolean(host.storage);
+    case 'actions':
+      return (
+        typeof host.actions?.describe === 'function' &&
+        typeof host.actions?.invoke === 'function'
+      );
     case 'workspace.import':
       return typeof host.workspace?.importWorkspace === 'function';
     case 'workspace.export':

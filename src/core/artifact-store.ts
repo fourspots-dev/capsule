@@ -31,6 +31,7 @@ export interface ArtifactInput {
 
 export interface ArtifactStore {
   put(input: ArtifactInput): Promise<ArtifactRef>;
+  restore?(metadata: ArtifactMetadata, data: Uint8Array): Promise<ArtifactRef>;
   metadata(artifactId: string): Promise<ArtifactMetadata | undefined>;
   read(artifactId: string): Promise<Uint8Array | undefined>;
   remove(artifactId: string): Promise<boolean>;
@@ -76,6 +77,17 @@ export class InMemoryArtifactStore implements ArtifactStore {
   async metadata(artifactId: string): Promise<ArtifactMetadata | undefined> {
     const artifact = this.artifacts.get(artifactId);
     return artifact ? { ...artifact.metadata } : undefined;
+  }
+
+  async restore(metadata: ArtifactMetadata, data: Uint8Array): Promise<ArtifactRef> {
+    if (!metadata.id || !metadata.name.trim() || !(data instanceof Uint8Array)) {
+      throw new AgentError('ARTIFACT_DATA_INVALID', 'Artifact metadata or data is invalid');
+    }
+    this.artifacts.set(metadata.id, {
+      metadata: { ...metadata },
+      data: new Uint8Array(data),
+    });
+    return toRef(metadata);
   }
 
   async read(artifactId: string): Promise<Uint8Array | undefined> {

@@ -1,5 +1,7 @@
 import { AgentError } from '../core/errors';
 import type { JsonValue, ToolDefinition, ToolInvocation } from '../core/types';
+import { PortableGitBackend } from '../git/backend';
+import { createGitTools } from '../git/tools';
 import type { VirtualWorkspace } from '../virtual';
 import { globVirtualFiles, searchVirtualFiles } from '../virtual/search';
 import { createPatchTools } from './patch-tools';
@@ -9,6 +11,7 @@ type ObjectInput = Record<string, JsonValue>;
 export function createVirtualWorkspaceTools(
   workspace: VirtualWorkspace
 ): ToolDefinition[] {
+  const git = new PortableGitBackend(workspace.fs);
   return [
     tool(
       'read_file',
@@ -365,6 +368,7 @@ export function createVirtualWorkspaceTools(
       'execute',
       async (input) => workspace.jobs.cancel(requiredString(input, 'job_id')) as unknown as JsonValue
     ),
+    ...createGitTools(git),
   ];
 }
 

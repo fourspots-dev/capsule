@@ -953,6 +953,24 @@
     async metadata(artifactId) {
       return (await this.load(artifactId))?.metadata;
     }
+    async restore(metadata, data) {
+      if (!metadata.id || !metadata.name.trim()) {
+        throw new AgentError("ARTIFACT_INPUT_INVALID", "Artifact metadata is invalid");
+      }
+      await this.storage.set({
+        [this.key(metadata.id)]: {
+          metadata: { ...metadata },
+          dataBase64: bytesToBase64(data)
+        }
+      });
+      return {
+        artifactId: metadata.id,
+        name: metadata.name,
+        mimeType: metadata.mimeType,
+        bytes: metadata.bytes,
+        kind: metadata.kind
+      };
+    }
     async read(artifactId) {
       const artifact = await this.load(artifactId);
       return artifact ? base64ToBytes(artifact.dataBase64) : void 0;
@@ -1076,9 +1094,9 @@
       const result = await this.transport.request("tools/list", {}, signal);
       const tools = result?.tools;
       if (!Array.isArray(tools)) return [];
-      return tools.flatMap((tool4) => {
-        if (!tool4 || typeof tool4 !== "object") return [];
-        const value = tool4;
+      return tools.flatMap((tool5) => {
+        if (!tool5 || typeof tool5 !== "object") return [];
+        const value = tool5;
         if (typeof value.name !== "string") return [];
         return [
           {
@@ -1093,17 +1111,17 @@
       return this.transport.request("tools/call", { name, arguments: input }, signal);
     }
     async definitions() {
-      return (await this.tools()).map((tool4) => ({
-        name: `${this.prefix}__${sanitize(tool4.name)}`,
-        description: tool4.description,
-        parameters: tool4.inputSchema,
+      return (await this.tools()).map((tool5) => ({
+        name: `${this.prefix}__${sanitize(tool5.name)}`,
+        description: tool5.description,
+        parameters: tool5.inputSchema,
         risk: "write",
         effect: "network",
         capabilities: ["mcp:call"],
         executionMode: "sequential",
         replay: "never",
         timeoutMs: 12e4,
-        execute: async (input, invocation) => this.call(tool4.name, input, invocation.signal)
+        execute: async (input, invocation) => this.call(tool5.name, input, invocation.signal)
       }));
     }
     close() {
@@ -1523,13 +1541,13 @@
     }
     return { role: message.role, content: message.content };
   }
-  function toOpenAITool(tool4) {
+  function toOpenAITool(tool5) {
     return {
       type: "function",
       function: {
-        name: tool4.name,
-        description: tool4.description,
-        parameters: tool4.parameters
+        name: tool5.name,
+        description: tool5.description,
+        parameters: tool5.parameters
       }
     };
   }
@@ -1735,6 +1753,7 @@
     scheduler;
     crypto;
     clone;
+    actions;
     constructor(options) {
       this.storage = new ChromeHostStorage(options.storage);
       const now = options.now ?? (() => Date.now());
@@ -1750,12 +1769,14 @@
       };
       this.crypto = chromeCrypto;
       this.clone = { clone: (value) => structuredClone(value) };
+      this.actions = options.actions;
       const capabilities = [
         "storage",
         "clock",
         "scheduler",
         "crypto",
-        "clone"
+        "clone",
+        ...this.actions ? ["actions"] : []
       ];
       this.descriptor = {
         id: options.id ?? "chrome-extension-host",
@@ -1784,6 +1805,1880 @@
       return bytes;
     }
   };
+
+  // src/git/binary.ts
+  var encoder = new TextEncoder();
+  async function sha1(data) {
+    if (!globalThis.crypto?.subtle) {
+      throw new AgentError(
+        "GIT_CRYPTO_UNAVAILABLE",
+        "SHA-1 requires Web Crypto digest support"
+      );
+    }
+    const digest2 = await globalThis.crypto.subtle.digest(
+      "SHA-1",
+      toArrayBuffer(data)
+    );
+    return new Uint8Array(digest2);
+  }
+  async function sha1Hex(data) {
+    return bytesToHex(await sha1(data));
+  }
+  async function deflateZlib(data) {
+    if (typeof CompressionStream === "undefined" || typeof Blob === "undefined") {
+      throw new AgentError(
+        "GIT_COMPRESSION_UNAVAILABLE",
+        "zlib compression is unavailable in this runtime"
+      );
+    }
+    const stream = new Blob([toArrayBuffer(data)]).stream().pipeThrough(new CompressionStream("deflate"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  async function inflateZlib(data) {
+    if (typeof DecompressionStream === "undefined" || typeof Blob === "undefined") {
+      throw new AgentError(
+        "GIT_COMPRESSION_UNAVAILABLE",
+        "zlib decompression is unavailable in this runtime"
+      );
+    }
+    try {
+      const stream = new Blob([toArrayBuffer(data)]).stream().pipeThrough(new DecompressionStream("deflate"));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    } catch (error2) {
+      throw new AgentError(
+        "GIT_OBJECT_INVALID",
+        `Invalid zlib stream: ${errorMessage(error2)}`
+      );
+    }
+  }
+  function bytesToHex(data) {
+    let output = "";
+    for (const byte of data) output += byte.toString(16).padStart(2, "0");
+    return output;
+  }
+  function hexToBytes(value) {
+    if (!/^[0-9a-fA-F]*$/.test(value) || value.length % 2 !== 0) {
+      throw new AgentError("GIT_OBJECT_ID_INVALID", `Invalid hexadecimal value: ${value}`);
+    }
+    const result = new Uint8Array(value.length / 2);
+    for (let index = 0; index < result.length; index += 1) {
+      result[index] = Number.parseInt(value.slice(index * 2, index * 2 + 2), 16);
+    }
+    return result;
+  }
+  function concatBytes(...values) {
+    const size = values.reduce((total, value) => total + value.byteLength, 0);
+    const result = new Uint8Array(size);
+    let offset = 0;
+    for (const value of values) {
+      result.set(value, offset);
+      offset += value.byteLength;
+    }
+    return result;
+  }
+  function compareBytes(left, right) {
+    const length = Math.min(left.byteLength, right.byteLength);
+    for (let index = 0; index < length; index += 1) {
+      if (left[index] !== right[index]) return left[index] - right[index];
+    }
+    return left.byteLength - right.byteLength;
+  }
+  function encodeText(value) {
+    return encoder.encode(value);
+  }
+  function decodeText(value) {
+    return new TextDecoder().decode(value);
+  }
+  function indexOfByte(data, byte, start = 0) {
+    for (let index = start; index < data.length; index += 1) {
+      if (data[index] === byte) return index;
+    }
+    return -1;
+  }
+  function readUint32(data, offset) {
+    if (offset < 0 || offset + 4 > data.byteLength) {
+      throw invalidObject("Unexpected end of binary data");
+    }
+    return new DataView(
+      data.buffer,
+      data.byteOffset + offset,
+      4
+    ).getUint32(0, false);
+  }
+  function writeUint32(value) {
+    const result = new Uint8Array(4);
+    new DataView(result.buffer).setUint32(0, value >>> 0, false);
+    return result;
+  }
+  function bytesToBase642(data) {
+    let binary = "";
+    for (const byte of data) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  }
+  function base64ToBytes2(value) {
+    try {
+      const binary = atob(value);
+      const result = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) {
+        result[index] = binary.charCodeAt(index);
+      }
+      return result;
+    } catch {
+      throw new AgentError("GIT_REPOSITORY_INVALID", "Invalid base64 data");
+    }
+  }
+  function readUint16(data, offset) {
+    if (offset < 0 || offset + 2 > data.byteLength) {
+      throw invalidObject("Unexpected end of binary data");
+    }
+    return new DataView(
+      data.buffer,
+      data.byteOffset + offset,
+      2
+    ).getUint16(0, false);
+  }
+  function toArrayBuffer(data) {
+    return data.buffer.slice(
+      data.byteOffset,
+      data.byteOffset + data.byteLength
+    );
+  }
+  function invalidObject(message) {
+    return new AgentError("GIT_OBJECT_INVALID", message);
+  }
+  function errorMessage(error2) {
+    return error2 instanceof Error ? error2.message : String(error2);
+  }
+
+  // src/git/path.ts
+  function normalizeGitPath(path) {
+    if (path.includes("\0")) {
+      throw new AgentError("GIT_PATH_INVALID", "Git path contains NUL");
+    }
+    const normalized = path.replaceAll("\\", "/").normalize("NFC").replace(/^\/+/, "");
+    if (/^[A-Za-z]:\//.test(normalized) || normalized.startsWith("//")) {
+      throw new AgentError("GIT_PATH_INVALID", `Absolute Git path is not allowed: ${path}`);
+    }
+    const parts = [];
+    for (const part of normalized.split("/")) {
+      if (!part || part === ".") continue;
+      if (part === "..") {
+        throw new AgentError(
+          "GIT_PATH_INVALID",
+          `Git path escapes workspace: ${path}`
+        );
+      }
+      if (part === ".git") {
+        throw new AgentError("GIT_PATH_RESERVED", "The .git directory is reserved");
+      }
+      parts.push(part);
+    }
+    return parts.join("/");
+  }
+  function assertBranchName(name) {
+    if (!name || name.startsWith("-") || name.startsWith("/") || name.endsWith("/") || name.endsWith(".") || name.includes("..") || name.includes("@{") || /[\s~^:?*[\]\\\0]/.test(name)) {
+      throw new AgentError("GIT_BRANCH_INVALID", `Invalid Git branch name: ${name}`);
+    }
+  }
+
+  // src/git/index-file.ts
+  var SIGNATURE = 1145655875;
+  var VERSION = 2;
+  async function readGitIndex(fs, gitDir = ".git") {
+    const path = `${gitDir}/index`;
+    if (!await fs.stat(path)) return [];
+    const data = await fs.read(path);
+    if (data.byteLength < 32 || readUint32(data, 0) !== SIGNATURE) {
+      throw invalidIndex("Missing DIRC signature");
+    }
+    const version = readUint32(data, 4);
+    if (version < 2 || version > 4) {
+      throw new AgentError(
+        "GIT_INDEX_UNSUPPORTED",
+        `Unsupported Git index version: ${version}`
+      );
+    }
+    const count = readUint32(data, 8);
+    const expected = bytesToHex(await sha1(data.subarray(0, data.byteLength - 20)));
+    const actual = bytesToHex(data.subarray(data.byteLength - 20));
+    if (expected !== actual) {
+      throw invalidIndex(`Git index checksum mismatch: expected ${expected}, received ${actual}`);
+    }
+    const entries = [];
+    let offset = 12;
+    let previousPath = "";
+    for (let index = 0; index < count; index += 1) {
+      const start = offset;
+      if (offset + 62 > data.byteLength - 20) {
+        throw invalidIndex("Truncated Git index entry");
+      }
+      const flags = readUint16(data, offset + 60);
+      offset += 62;
+      let path2;
+      if (version === 4) {
+        const remove = readIndexVarint(data, offset);
+        offset = remove.offset;
+        const nul = findNul(data, offset, data.byteLength - 20);
+        const suffix = new TextDecoder().decode(data.subarray(offset, nul));
+        path2 = previousPath.slice(0, Math.max(0, previousPath.length - remove.value)) + suffix;
+        offset = nul + 1;
+        previousPath = path2;
+      } else {
+        const declared = flags & 4095;
+        const nul = declared < 4095 ? offset + declared : findNul(data, offset, data.byteLength - 20);
+        path2 = new TextDecoder().decode(data.subarray(offset, nul));
+        offset = start + Math.ceil((nul + 1 - start) / 8) * 8;
+      }
+      entries.push({
+        ctimeSeconds: readUint32(data, start),
+        ctimeNanos: readUint32(data, start + 4),
+        mtimeSeconds: readUint32(data, start + 8),
+        mtimeNanos: readUint32(data, start + 12),
+        dev: readUint32(data, start + 16),
+        ino: readUint32(data, start + 20),
+        mode: readUint32(data, start + 24),
+        uid: readUint32(data, start + 28),
+        gid: readUint32(data, start + 32),
+        size: readUint32(data, start + 36),
+        oid: bytesToHex(data.subarray(start + 40, start + 60)),
+        flags,
+        stage: flags >>> 12 & 3,
+        path: normalizeGitPath(path2)
+      });
+    }
+    while (offset + 8 <= data.byteLength - 20) {
+      const signature = new TextDecoder().decode(data.subarray(offset, offset + 4));
+      const size = readUint32(data, offset + 4);
+      offset += 8;
+      if (offset + size > data.byteLength - 20) throw invalidIndex("Truncated index extension");
+      if (/^[A-Z]/.test(signature) && !["TREE", "REUC", "UNTR"].includes(signature)) {
+        throw new AgentError(
+          "GIT_INDEX_UNSUPPORTED",
+          `Unsupported required Git index extension: ${signature}`
+        );
+      }
+      offset += size;
+    }
+    return entries;
+  }
+  async function writeGitIndex(fs, entries, gitDir = ".git") {
+    const sorted = [...entries].sort(compareIndexEntries);
+    const parts = [
+      writeUint32(SIGNATURE),
+      writeUint32(VERSION),
+      writeUint32(sorted.length)
+    ];
+    for (const entry of sorted) {
+      const path = new TextEncoder().encode(normalizeGitPath(entry.path));
+      const flags = entry.flags & 61440 | (entry.stage & 3) << 12 | Math.min(path.byteLength, 4095);
+      const fixed = new Uint8Array(62);
+      const view = new DataView(fixed.buffer);
+      view.setUint32(0, entry.ctimeSeconds >>> 0, false);
+      view.setUint32(4, entry.ctimeNanos >>> 0, false);
+      view.setUint32(8, entry.mtimeSeconds >>> 0, false);
+      view.setUint32(12, entry.mtimeNanos >>> 0, false);
+      view.setUint32(16, entry.dev >>> 0, false);
+      view.setUint32(20, entry.ino >>> 0, false);
+      view.setUint32(24, entry.mode >>> 0, false);
+      view.setUint32(28, entry.uid >>> 0, false);
+      view.setUint32(32, entry.gid >>> 0, false);
+      view.setUint32(36, entry.size >>> 0, false);
+      fixed.set(hexToBytes(entry.oid), 40);
+      view.setUint16(60, flags, false);
+      const raw = concatBytes(fixed, path);
+      const paddedLength = Math.ceil((raw.byteLength + 1) / 8) * 8;
+      const encoded = new Uint8Array(paddedLength);
+      encoded.set(raw);
+      parts.push(encoded);
+    }
+    const body = concatBytes(...parts);
+    const checksum = await sha1(body);
+    const data = concatBytes(body, checksum);
+    await fs.write(`${gitDir}/index`, data, { mode: 420 });
+  }
+  function indexEntryFromFile(file, oid, stage = 0) {
+    const seconds = Math.max(0, Math.trunc(file.modifiedAt / 1e3));
+    const nanos = Math.max(0, Math.trunc(file.modifiedAt % 1e3) * 1e6);
+    return {
+      path: normalizeGitPath(file.path),
+      oid,
+      mode: file.mode & 73 ? 33261 : 33188,
+      stage,
+      ctimeSeconds: seconds,
+      ctimeNanos: nanos,
+      mtimeSeconds: seconds,
+      mtimeNanos: nanos,
+      dev: 0,
+      ino: 0,
+      uid: 0,
+      gid: 0,
+      size: file.size,
+      flags: 0
+    };
+  }
+  function compareIndexEntries(left, right) {
+    return compareBytes(
+      new TextEncoder().encode(left.path),
+      new TextEncoder().encode(right.path)
+    ) || left.stage - right.stage;
+  }
+  function readIndexVarint(data, offset) {
+    let byte = data[offset++];
+    let value = byte & 127;
+    while (byte & 128) {
+      byte = data[offset++];
+      value = value + 1 << 7 | byte & 127;
+    }
+    return { value, offset };
+  }
+  function findNul(data, start, end) {
+    for (let index = start; index < end; index += 1) {
+      if (data[index] === 0) return index;
+    }
+    throw invalidIndex("Git index path is not NUL terminated");
+  }
+  function invalidIndex(message) {
+    return new AgentError("GIT_INDEX_INVALID", message);
+  }
+
+  // src/git/glob.ts
+  function gitGlobToRegExp(pattern) {
+    const normalized = pattern.replaceAll("\\", "/").replace(/^\/+/, "");
+    let source = "";
+    for (let index = 0; index < normalized.length; index += 1) {
+      const char = normalized[index];
+      if (char === "*") {
+        if (normalized[index + 1] === "*") {
+          index += 1;
+          if (normalized[index + 1] === "/") {
+            index += 1;
+            source += "(?:.*/)?";
+          } else {
+            source += ".*";
+          }
+        } else {
+          source += "[^/]*";
+        }
+        continue;
+      }
+      if (char === "?") {
+        source += "[^/]";
+        continue;
+      }
+      if (char === "[") {
+        const end = normalized.indexOf("]", index + 1);
+        if (end > index) {
+          const body = normalized.slice(index + 1, end);
+          source += `[${body.startsWith("!") ? `^${body.slice(1)}` : body}]`;
+          index = end;
+          continue;
+        }
+      }
+      source += char.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+    return new RegExp(`^${source}$`, "u");
+  }
+
+  // src/git/ignore.ts
+  var GitIgnoreMatcher = class {
+    rules;
+    constructor(lines = []) {
+      this.rules = lines.flatMap((line) => parseRule(line));
+    }
+    matches(path, isDirectory = false) {
+      let ignored = false;
+      for (const rule of this.rules) {
+        if (rule.regex.test(path)) ignored = !rule.negate;
+      }
+      return ignored;
+    }
+  };
+  function parseGitIgnore(text) {
+    return new GitIgnoreMatcher(text.split(/\r?\n/));
+  }
+  function parseRule(input) {
+    let line = input.trim();
+    if (!line || line.startsWith("#")) return [];
+    let negate = false;
+    if (line.startsWith("!")) {
+      negate = true;
+      line = line.slice(1);
+    } else if (line.startsWith("\\!") || line.startsWith("\\#")) {
+      line = line.slice(1);
+    }
+    const directoryOnly = line.endsWith("/");
+    if (directoryOnly) line = `${line.slice(0, -1)}/**`;
+    if (line.startsWith("/")) line = line.slice(1);
+    const anchored = line.includes("/");
+    const pattern = anchored ? line : `**/${line}`;
+    const regex = gitGlobToRegExp(pattern);
+    return [{ negate, directoryOnly, regex }];
+  }
+
+  // src/git/diff.ts
+  function unifiedGitDiff(before, after, path) {
+    const beforeText = decodeText2(before);
+    const afterText = decodeText2(after);
+    if (beforeText === void 0 || afterText === void 0) {
+      return { status: "binary" };
+    }
+    return {
+      patch: buildPatch(beforeText, afterText, path),
+      status: "modified"
+    };
+  }
+  function buildPatch(before, after, path) {
+    const oldLines = splitLines(before);
+    const newLines = splitLines(after);
+    const lines = [
+      `--- a/${path}`,
+      `+++ b/${path}`,
+      `@@ -1,${oldLines.length} +1,${newLines.length} @@`
+    ];
+    let oldIndex = 0;
+    let newIndex = 0;
+    for (const [commonOld, commonNew] of commonPairs(oldLines, newLines)) {
+      while (oldIndex < commonOld) lines.push(`-${oldLines[oldIndex++]}`);
+      while (newIndex < commonNew) lines.push(`+${newLines[newIndex++]}`);
+      lines.push(` ${oldLines[oldIndex]}`);
+      oldIndex += 1;
+      newIndex += 1;
+    }
+    while (oldIndex < oldLines.length) lines.push(`-${oldLines[oldIndex++]}`);
+    while (newIndex < newLines.length) lines.push(`+${newLines[newIndex++]}`);
+    return `${lines.join("\n")}
+`;
+  }
+  function commonPairs(left, right) {
+    const dp = Array.from(
+      { length: left.length + 1 },
+      () => new Array(right.length + 1).fill(0)
+    );
+    for (let leftIndex2 = left.length - 1; leftIndex2 >= 0; leftIndex2 -= 1) {
+      for (let rightIndex2 = right.length - 1; rightIndex2 >= 0; rightIndex2 -= 1) {
+        dp[leftIndex2][rightIndex2] = left[leftIndex2] === right[rightIndex2] ? dp[leftIndex2 + 1][rightIndex2 + 1] + 1 : Math.max(
+          dp[leftIndex2 + 1][rightIndex2],
+          dp[leftIndex2][rightIndex2 + 1]
+        );
+      }
+    }
+    const result = [];
+    let leftIndex = 0;
+    let rightIndex = 0;
+    while (leftIndex < left.length && rightIndex < right.length) {
+      if (left[leftIndex] === right[rightIndex]) {
+        result.push([leftIndex, rightIndex]);
+        leftIndex += 1;
+        rightIndex += 1;
+      } else if (dp[leftIndex + 1][rightIndex] >= dp[leftIndex][rightIndex + 1]) {
+        leftIndex += 1;
+      } else {
+        rightIndex += 1;
+      }
+    }
+    return result;
+  }
+  function splitLines(value) {
+    if (!value) return [];
+    const lines = value.split("\n");
+    if (lines.at(-1) === "") lines.pop();
+    return lines;
+  }
+  function decodeText2(value) {
+    try {
+      const text = new TextDecoder("utf-8", { fatal: true }).decode(value);
+      return text.includes("\0") ? void 0 : text;
+    } catch {
+      return void 0;
+    }
+  }
+
+  // src/git/pack.ts
+  var objectTypes = {
+    1: "commit",
+    2: "tree",
+    3: "blob",
+    4: "tag"
+  };
+  var GitPackStore = class {
+    constructor(fs, gitDir = ".git") {
+      this.fs = fs;
+      this.gitDir = gitDir;
+    }
+    fs;
+    gitDir;
+    loaded;
+    packData = /* @__PURE__ */ new Map();
+    async readObject(oid) {
+      const entries = await this.load();
+      const entry = entries.get(oid.toLowerCase());
+      if (!entry) {
+        throw new AgentError("GIT_OBJECT_NOT_FOUND", `Git object not found: ${oid}`);
+      }
+      return this.readPacked(entry, 0);
+    }
+    async hasObject(oid) {
+      return (await this.load()).has(oid.toLowerCase());
+    }
+    async load() {
+      this.loaded ??= this.loadAll();
+      return this.loaded;
+    }
+    async loadAll() {
+      const entries = /* @__PURE__ */ new Map();
+      const root = `${this.gitDir}/objects/pack`;
+      if (!await this.fs.stat(root)) return entries;
+      const files = await this.fs.list(root, { recursive: true });
+      for (const file of files) {
+        if (file.kind !== "file" || !file.path.endsWith(".idx")) continue;
+        const packPath = file.path.slice(0, -4) + ".pack";
+        if (!await this.fs.stat(packPath)) continue;
+        const index = await parsePackIndex(await this.fs.read(file.path));
+        for (const [oid, entry] of index.entries) {
+          if (entries.has(oid)) {
+            throw new AgentError(
+              "GIT_PACK_INVALID",
+              `Object ${oid} appears in multiple pack indexes`
+            );
+          }
+          entries.set(oid, { ...entry, packPath });
+        }
+      }
+      return entries;
+    }
+    async readPacked(entry, depth) {
+      if (depth > 32) {
+        throw new AgentError("GIT_PACK_INVALID", "Pack delta chain is too deep");
+      }
+      const data = await this.pack(entry.packPath);
+      const index = await this.indexFor(entry.packPath);
+      const position = index.offsets.findIndex((item) => item.offset === entry.offset);
+      if (position < 0) {
+        throw new AgentError("GIT_PACK_INVALID", `Pack offset missing: ${entry.offset}`);
+      }
+      const nextOffset = index.offsets[position + 1]?.offset ?? data.byteLength - 20;
+      if (nextOffset <= entry.offset || nextOffset > data.byteLength - 20) {
+        throw new AgentError("GIT_PACK_INVALID", "Invalid packed object boundary");
+      }
+      const header = parseObjectHeader(data, entry.offset);
+      const end = nextOffset;
+      const compressed = data.subarray(header.dataOffset, end);
+      const inflated = await inflateZlib(compressed);
+      if (header.type !== 6 && header.type !== 7) {
+        if (inflated.byteLength !== header.size) {
+          throw new AgentError("GIT_PACK_INVALID", "Packed object size mismatch");
+        }
+        const type = objectTypes[header.type];
+        if (!type) {
+          throw new AgentError("GIT_PACK_INVALID", `Unknown packed object type: ${header.type}`);
+        }
+        return { type, data: inflated };
+      }
+      let base;
+      if (header.type === 6) {
+        const baseOffset = header.baseOffset;
+        if (baseOffset === void 0) {
+          throw new AgentError("GIT_PACK_INVALID", "OFS_DELTA base offset is missing");
+        }
+        const baseOid = index.offsets.find(
+          (item) => item.offset === baseOffset
+        )?.oid;
+        if (!baseOid) {
+          throw new AgentError("GIT_PACK_INVALID", "OFS_DELTA base is missing");
+        }
+        base = await this.readPacked(
+          { oid: baseOid, offset: baseOffset, packPath: entry.packPath },
+          depth + 1
+        );
+      } else {
+        if (!header.baseOid) {
+          throw new AgentError("GIT_PACK_INVALID", "REF_DELTA base is missing");
+        }
+        base = await this.readObject(header.baseOid);
+      }
+      const result = applyDelta(base.data, inflated);
+      if (result.byteLength !== header.size) {
+        throw new AgentError("GIT_PACK_INVALID", "Delta result size mismatch");
+      }
+      return { type: base.type, data: result };
+    }
+    async pack(path) {
+      let pending = this.packData.get(path);
+      if (!pending) {
+        pending = this.fs.read(path);
+        this.packData.set(path, pending);
+      }
+      return pending;
+    }
+    async indexFor(path) {
+      return parsePackIndex(await this.fs.read(path.slice(0, -5) + ".idx"));
+    }
+  };
+  function parsePackIndex(data) {
+    if (data.byteLength < 8 + 256 * 4 + 40 || readUint32(data, 0) !== 4285812579 || readUint32(data, 4) !== 2) {
+      throw new AgentError("GIT_PACK_INDEX_INVALID", "Unsupported Git pack index");
+    }
+    const count = readUint32(data, 8 + 255 * 4);
+    const oidTable = 8 + 256 * 4;
+    const checksumTable = oidTable + count * 20;
+    const offsetTable = checksumTable + count * 4;
+    const largeOffsetTable = offsetTable + count * 4;
+    if (largeOffsetTable + 40 > data.byteLength) {
+      throw new AgentError("GIT_PACK_INDEX_INVALID", "Truncated Git pack index");
+    }
+    const entries = /* @__PURE__ */ new Map();
+    const offsets = [];
+    for (let index = 0; index < count; index += 1) {
+      const oid = bytesToHex(
+        data.subarray(oidTable + index * 20, oidTable + (index + 1) * 20)
+      );
+      const rawOffset = readUint32(data, offsetTable + index * 4);
+      const offset = rawOffset & 2147483648 ? readUint64(
+        data,
+        largeOffsetTable + (rawOffset & 2147483647) * 8
+      ) : rawOffset;
+      entries.set(oid, { oid, offset, packPath: "" });
+      offsets.push({ offset, oid });
+    }
+    offsets.sort((left, right) => left.offset - right.offset);
+    const packChecksum = bytesToHex(
+      data.subarray(data.byteLength - 40, data.byteLength - 20)
+    );
+    return { entries, offsets, packChecksum };
+  }
+  function parseObjectHeader(data, offset) {
+    let cursor = offset;
+    let byte = data[cursor++];
+    if (byte === void 0) throw invalidPack("Missing packed object header");
+    const type = byte >>> 4 & 7;
+    let size = byte & 15;
+    let shift = 4;
+    while (byte & 128) {
+      byte = data[cursor++];
+      if (byte === void 0 || shift > 56) throw invalidPack("Invalid packed object size");
+      size += (byte & 127) * 2 ** shift;
+      shift += 7;
+    }
+    if (type === 6) {
+      byte = data[cursor++];
+      if (byte === void 0) throw invalidPack("Missing OFS_DELTA base");
+      let baseOffset = byte & 127;
+      while (byte & 128) {
+        byte = data[cursor++];
+        if (byte === void 0) throw invalidPack("Invalid OFS_DELTA base");
+        baseOffset = (baseOffset + 1) * 128 + (byte & 127);
+      }
+      return {
+        type,
+        size,
+        dataOffset: cursor,
+        baseOffset: offset - baseOffset
+      };
+    }
+    if (type === 7) {
+      if (cursor + 20 > data.byteLength) throw invalidPack("Missing REF_DELTA base");
+      const baseOid = bytesToHex(data.subarray(cursor, cursor + 20));
+      return { type, size, dataOffset: cursor + 20, baseOid };
+    }
+    return { type, size, dataOffset: cursor };
+  }
+  function applyDelta(base, delta) {
+    let offset = 0;
+    const baseSize = readDeltaVarint(delta, offset);
+    offset = baseSize.offset;
+    const resultSize = readDeltaVarint(delta, offset);
+    offset = resultSize.offset;
+    if (baseSize.value !== base.byteLength || resultSize.value > 512 * 1024 * 1024) {
+      throw invalidPack("Invalid delta sizes");
+    }
+    const chunks = [];
+    let written = 0;
+    while (offset < delta.byteLength) {
+      const op = delta[offset++];
+      if (op & 128) {
+        let copyOffset = 0;
+        let copySize = 0;
+        if (op & 1) copyOffset |= delta[offset++];
+        if (op & 2) copyOffset |= delta[offset++] << 8;
+        if (op & 4) copyOffset |= delta[offset++] << 16;
+        if (op & 8) copyOffset |= delta[offset++] << 24;
+        if (op & 16) copySize |= delta[offset++];
+        if (op & 32) copySize |= delta[offset++] << 8;
+        if (op & 64) copySize |= delta[offset++] << 16;
+        if (copySize === 0) copySize = 65536;
+        if (copyOffset + copySize > base.byteLength) {
+          throw invalidPack("Delta copy exceeds base object");
+        }
+        chunks.push(base.subarray(copyOffset, copyOffset + copySize));
+        written += copySize;
+      } else if (op > 0) {
+        if (offset + op > delta.byteLength) {
+          throw invalidPack("Delta insert exceeds stream");
+        }
+        chunks.push(delta.subarray(offset, offset + op));
+        offset += op;
+        written += op;
+      } else {
+        throw invalidPack("Delta opcode 0 is invalid");
+      }
+    }
+    if (written !== resultSize.value) throw invalidPack("Delta result size mismatch");
+    return concatBytes(...chunks);
+  }
+  function readDeltaVarint(data, offset) {
+    let value = 0;
+    let shift = 0;
+    let byte;
+    do {
+      byte = data[offset++];
+      if (byte === void 0 || shift > 49) throw invalidPack("Invalid delta varint");
+      value += (byte & 127) * 2 ** shift;
+      shift += 7;
+    } while (byte & 128);
+    return { value, offset };
+  }
+  function readUint64(data, offset) {
+    if (offset < 0 || offset + 8 > data.byteLength) throw invalidPack("Truncated uint64");
+    const view = new DataView(data.buffer, data.byteOffset + offset, 8);
+    const value = view.getBigUint64(0, false);
+    if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw invalidPack("Pack offset exceeds safe integer range");
+    }
+    return Number(value);
+  }
+  function invalidPack(message) {
+    return new AgentError("GIT_PACK_INVALID", message);
+  }
+
+  // src/git/objects.ts
+  var encoder2 = new TextEncoder();
+  var GitObjectStore = class {
+    constructor(fs, gitDir = ".git") {
+      this.fs = fs;
+      this.gitDir = gitDir;
+      this.packs = new GitPackStore(fs, gitDir);
+    }
+    fs;
+    gitDir;
+    packs;
+    async hashObject(type, data) {
+      return sha1Hex(encodeObject(type, data));
+    }
+    async writeObject(type, data) {
+      const canonical = encodeObject(type, data);
+      const oid = bytesToHex(await sha1(canonical));
+      const path = this.objectPath(oid);
+      if (!await this.fs.stat(path)) {
+        await this.fs.mkdir(path.slice(0, path.lastIndexOf("/")), {
+          recursive: true
+        });
+        await this.fs.write(path, await deflateZlib(canonical), { mode: 292 });
+      }
+      return oid;
+    }
+    async readObject(oid) {
+      assertOid(oid);
+      const loosePath = this.objectPath(oid);
+      const info2 = await this.fs.stat(loosePath);
+      if (!info2) {
+        const packed = await this.packs.readObject(oid);
+        const canonical2 = encodeObject(packed.type, packed.data);
+        const actual2 = bytesToHex(await sha1(canonical2));
+        if (actual2 !== oid.toLowerCase()) {
+          throw new AgentError(
+            "GIT_OBJECT_INVALID",
+            `Packed Git object hash mismatch: expected ${oid}, received ${actual2}`
+          );
+        }
+        return packed;
+      }
+      const compressed = await this.fs.read(loosePath);
+      const canonical = await inflateZlib(compressed);
+      const actual = bytesToHex(await sha1(canonical));
+      if (actual !== oid.toLowerCase()) {
+        throw new AgentError(
+          "GIT_OBJECT_INVALID",
+          `Git object hash mismatch: expected ${oid}, received ${actual}`
+        );
+      }
+      return parseObjectBytes(canonical);
+    }
+    async readBlob(oid) {
+      const object = await this.readObject(oid);
+      if (object.type !== "blob") {
+        throw new AgentError("GIT_OBJECT_TYPE", `Object ${oid} is not a blob`);
+      }
+      return object.data;
+    }
+    async readTree(oid) {
+      const object = await this.readObject(oid);
+      if (object.type !== "tree") {
+        throw new AgentError("GIT_OBJECT_TYPE", `Object ${oid} is not a tree`);
+      }
+      return decodeTree(object.data);
+    }
+    objectPath(oid) {
+      return `${this.gitDir}/objects/${oid.slice(0, 2)}/${oid.slice(2)}`;
+    }
+  };
+  function encodeTree(entries) {
+    const sorted = [...entries].sort(compareTreeEntries);
+    const parts = [];
+    for (const entry of sorted) {
+      if (!entry.name || entry.name.includes("/") || entry.name.includes("\0")) {
+        throw new AgentError(
+          "GIT_TREE_INVALID",
+          `Invalid tree entry name: ${JSON.stringify(entry.name)}`
+        );
+      }
+      assertOid(entry.oid);
+      parts.push(
+        encoder2.encode(`${entry.mode.toString(8)} ${entry.name}\0`),
+        hexToBytes(entry.oid)
+      );
+    }
+    return concatBytes(...parts);
+  }
+  function decodeTree(data) {
+    const entries = [];
+    let offset = 0;
+    while (offset < data.byteLength) {
+      const space = indexOfByte(data, 32, offset);
+      const nul = space < 0 ? -1 : indexOfByte(data, 0, space + 1);
+      if (space < 0 || nul < 0 || nul + 21 > data.byteLength) {
+        throw new AgentError("GIT_TREE_INVALID", "Malformed Git tree object");
+      }
+      const modeText = decodeText(data.subarray(offset, space));
+      const mode = Number.parseInt(modeText, 8);
+      if (!Number.isInteger(mode) || mode <= 0) {
+        throw new AgentError("GIT_TREE_INVALID", `Invalid Git tree mode: ${modeText}`);
+      }
+      const name = decodeText(data.subarray(space + 1, nul));
+      if (!name || name.includes("/")) {
+        throw new AgentError("GIT_TREE_INVALID", "Invalid Git tree entry name");
+      }
+      const oid = bytesToHex(data.subarray(nul + 1, nul + 21));
+      entries.push({ mode, name, oid });
+      offset = nul + 21;
+    }
+    return entries;
+  }
+  function encodeCommit(input) {
+    assertOid(input.tree);
+    for (const parent of input.parents) assertOid(parent);
+    const lines = [
+      `tree ${input.tree}`,
+      ...input.parents.map((parent) => `parent ${parent}`),
+      `author ${sanitizeIdentity(input.authorName)} <${sanitizeEmail(input.authorEmail)}> ${Math.trunc(input.authorTimestamp)} ${input.authorTimezone}`,
+      `committer ${sanitizeIdentity(input.committerName)} <${sanitizeEmail(input.committerEmail)}> ${Math.trunc(input.committerTimestamp)} ${input.committerTimezone}`,
+      "",
+      input.message.endsWith("\n") ? input.message : `${input.message}
+`
+    ];
+    return encoder2.encode(lines.join("\n"));
+  }
+  function parseCommit(oid, data) {
+    const text = decodeText(data);
+    const separator = text.indexOf("\n\n");
+    if (separator < 0) {
+      throw new AgentError("GIT_COMMIT_INVALID", `Malformed commit object: ${oid}`);
+    }
+    const headers = text.slice(0, separator).split("\n");
+    let tree;
+    const parents = [];
+    let author;
+    let committer;
+    for (const line of headers) {
+      if (line.startsWith("tree ")) tree = line.slice(5);
+      else if (line.startsWith("parent ")) parents.push(line.slice(7));
+      else if (line.startsWith("author ")) author = parseSignature(line.slice(7));
+      else if (line.startsWith("committer ")) committer = parseSignature(line.slice(10));
+    }
+    if (!tree || !author || !committer) {
+      throw new AgentError("GIT_COMMIT_INVALID", `Incomplete commit object: ${oid}`);
+    }
+    assertOid(tree);
+    for (const parent of parents) assertOid(parent);
+    return { tree, parents, author, committer, message: text.slice(separator + 2) };
+  }
+  function encodeObject(type, data) {
+    return concatBytes(
+      encoder2.encode(`${type} ${data.byteLength}\0`),
+      data
+    );
+  }
+  function parseObjectBytes(data) {
+    const nul = indexOfByte(data, 0);
+    if (nul < 0) {
+      throw new AgentError("GIT_OBJECT_INVALID", "Git object header is missing");
+    }
+    const header = decodeText(data.subarray(0, nul));
+    const [type, sizeText] = header.split(" ");
+    const size = Number(sizeText);
+    if (!["blob", "tree", "commit", "tag"].includes(type) || !Number.isInteger(size) || size < 0 || nul + 1 + size !== data.byteLength) {
+      throw new AgentError("GIT_OBJECT_INVALID", `Invalid Git object header: ${header}`);
+    }
+    return {
+      type,
+      data: new Uint8Array(data.subarray(nul + 1))
+    };
+  }
+  function compareTreeEntries(left, right) {
+    const leftKey = encoder2.encode(
+      left.mode === 16384 ? `${left.name}/` : left.name
+    );
+    const rightKey = encoder2.encode(
+      right.mode === 16384 ? `${right.name}/` : right.name
+    );
+    return compareBytes(leftKey, rightKey);
+  }
+  function assertOid(oid) {
+    if (!/^[0-9a-f]{40}$/i.test(oid)) {
+      throw new AgentError("GIT_OBJECT_ID_INVALID", `Invalid SHA-1 object id: ${oid}`);
+    }
+  }
+  function parseSignature(value) {
+    const match = /^(.*) <([^>]*)> (-?\d+) ([+-]\d{4})$/.exec(value);
+    if (!match) {
+      throw new AgentError("GIT_COMMIT_INVALID", `Invalid commit signature: ${value}`);
+    }
+    return {
+      name: match[1],
+      email: match[2],
+      timestamp: Number(match[3]),
+      timezone: match[4]
+    };
+  }
+  function sanitizeIdentity(value) {
+    return value.replace(/[\r\n<>]/g, "").trim() || "tinyai";
+  }
+  function sanitizeEmail(value) {
+    return value.replace(/[\r\n<>]/g, "").trim() || "tinyai@localhost";
+  }
+
+  // src/git/refs.ts
+  var GitRefStore = class {
+    constructor(fs, gitDir = ".git") {
+      this.fs = fs;
+      this.gitDir = gitDir;
+    }
+    fs;
+    gitDir;
+    async readHead() {
+      const path = `${this.gitDir}/HEAD`;
+      if (!await this.fs.stat(path)) {
+        return { branch: null, oid: null, detached: false };
+      }
+      const value = decodeText(await this.fs.read(path)).trim();
+      if (value.startsWith("ref: ")) {
+        const ref = value.slice(5);
+        const branch = ref.startsWith("refs/heads/") ? ref.slice(11) : null;
+        return {
+          branch,
+          oid: await this.readRef(ref),
+          detached: false
+        };
+      }
+      if (!/^[0-9a-f]{40}$/i.test(value)) {
+        throw new AgentError("GIT_REF_INVALID", `Invalid HEAD: ${value}`);
+      }
+      return { branch: null, oid: value.toLowerCase(), detached: true };
+    }
+    async setBranch(branch) {
+      assertBranchName(branch);
+      await this.writeAtomic(
+        `${this.gitDir}/HEAD`,
+        encodeText(`ref: refs/heads/${branch}
+`)
+      );
+    }
+    async setDetached(oid) {
+      assertOid2(oid);
+      await this.writeAtomic(`${this.gitDir}/HEAD`, encodeText(`${oid}
+`));
+    }
+    async readRef(ref) {
+      const path = `${this.gitDir}/${ref}`;
+      const info2 = await this.fs.stat(path);
+      if (info2) {
+        const value = decodeText(await this.fs.read(path)).trim();
+        assertOid2(value);
+        return value.toLowerCase();
+      }
+      const packed = await this.readPackedRefs();
+      return packed.get(ref) ?? null;
+    }
+    async writeBranch(branch, oid) {
+      assertBranchName(branch);
+      assertOid2(oid);
+      await this.writeRef(`refs/heads/${branch}`, oid);
+    }
+    async writeRef(ref, oid) {
+      assertOid2(oid);
+      const path = `${this.gitDir}/${ref}`;
+      const parent = path.slice(0, path.lastIndexOf("/"));
+      if (parent) await this.fs.mkdir(parent, { recursive: true });
+      await this.writeAtomic(path, encodeText(`${oid}
+`));
+    }
+    async deleteBranch(branch) {
+      assertBranchName(branch);
+      const removed = await this.fs.remove(
+        `${this.gitDir}/refs/heads/${branch}`
+      );
+      if (!removed && !(await this.readPackedRefs()).has(`refs/heads/${branch}`)) {
+        throw new AgentError("GIT_BRANCH_NOT_FOUND", `Branch not found: ${branch}`);
+      }
+    }
+    async listBranches() {
+      const branches = /* @__PURE__ */ new Set();
+      const root = `${this.gitDir}/refs/heads`;
+      const entries = (await this.fs.list(root, { recursive: true })).filter(
+        (entry) => entry.kind === "file"
+      );
+      for (const entry of entries) {
+        branches.add(entry.path.slice(root.length + 1));
+      }
+      for (const ref of (await this.readPackedRefs()).keys()) {
+        if (ref.startsWith("refs/heads/")) branches.add(ref.slice(11));
+      }
+      return [...branches].sort();
+    }
+    async resolve(revision) {
+      if (!revision || revision === "HEAD") {
+        const head = await this.readHead();
+        if (!head.oid) {
+          throw new AgentError("GIT_REVISION_NOT_FOUND", "HEAD has no commit");
+        }
+        return head.oid;
+      }
+      if (/^[0-9a-f]{40}$/i.test(revision)) return revision.toLowerCase();
+      if (revision.startsWith("refs/")) {
+        const oid = await this.readRef(revision);
+        if (oid) return oid;
+      }
+      assertBranchName(revision);
+      const branchOid = await this.readRef(`refs/heads/${revision}`);
+      if (branchOid) return branchOid;
+      const tagOid = await this.readRef(`refs/tags/${revision}`);
+      if (tagOid) return tagOid;
+      throw new AgentError(
+        "GIT_REVISION_NOT_FOUND",
+        `Git revision not found: ${revision}`
+      );
+    }
+    async readPackedRefs() {
+      const result = /* @__PURE__ */ new Map();
+      const path = `${this.gitDir}/packed-refs`;
+      if (!await this.fs.stat(path)) return result;
+      for (const line of decodeText(await this.fs.read(path)).split("\n")) {
+        if (!line || line.startsWith("#") || line.startsWith("^")) continue;
+        const [oid, ref] = line.trim().split(/\s+/, 2);
+        if (oid && ref && /^[0-9a-f]{40}$/i.test(oid)) {
+          result.set(ref, oid.toLowerCase());
+        }
+      }
+      return result;
+    }
+    async writeAtomic(path, data) {
+      const lock = `${path}.lock`;
+      if (await this.fs.stat(lock)) {
+        throw new AgentError("GIT_REF_LOCKED", `Git ref is locked: ${path}`);
+      }
+      await this.fs.write(lock, new Uint8Array());
+      try {
+        await this.fs.write(path, data);
+      } finally {
+        await this.fs.remove(lock).catch(() => false);
+      }
+    }
+  };
+  function assertOid2(oid) {
+    if (!/^[0-9a-f]{40}$/i.test(oid)) {
+      throw new AgentError("GIT_OBJECT_ID_INVALID", `Invalid object id: ${oid}`);
+    }
+  }
+
+  // src/git/backend.ts
+  var PortableGitBackend = class {
+    constructor(fs, options = {}) {
+      this.fs = fs;
+      this.options = options;
+      this.gitDir = options.gitDir ?? ".git";
+      this.now = options.now ?? (() => Date.now());
+      this.maxDiffBytes = options.maxDiffBytes ?? 2e6;
+      this.objects = new GitObjectStore(fs, this.gitDir);
+      this.refs = new GitRefStore(fs, this.gitDir);
+    }
+    fs;
+    options;
+    descriptor = {
+      kind: "portable",
+      version: "1.0.0",
+      limitations: [
+        "sha1-only",
+        "local-commands-only",
+        "no-merge-or-rebase",
+        "no-hooks-or-filters",
+        "no-recursive-submodules",
+        "no-lfs-download"
+      ]
+    };
+    gitDir;
+    now;
+    maxDiffBytes;
+    objects;
+    refs;
+    async init(options = {}) {
+      if (await this.repository()) {
+        throw new AgentError("GIT_REPOSITORY_EXISTS", "Git repository already exists");
+      }
+      const branch = options.initialBranch?.trim() || "main";
+      assertBranchName(branch);
+      await this.fs.mkdir(`${this.gitDir}/objects`, { recursive: true });
+      await this.fs.mkdir(`${this.gitDir}/refs/heads`, { recursive: true });
+      await this.fs.mkdir(`${this.gitDir}/refs/tags`, { recursive: true });
+      await this.refs.setBranch(branch);
+      return {
+        gitDir: this.gitDir,
+        head: null,
+        branch,
+        objectFormat: "sha1"
+      };
+    }
+    async repository() {
+      const headPath = `${this.gitDir}/HEAD`;
+      if (!await this.fs.stat(headPath)) return void 0;
+      const head = await this.refs.readHead();
+      return {
+        gitDir: this.gitDir,
+        head: head.oid,
+        branch: head.branch,
+        objectFormat: "sha1"
+      };
+    }
+    async status(signal) {
+      this.assertRepository(await this.repository());
+      assertActive2(signal);
+      const head = await this.refs.readHead();
+      const headFiles = head.oid ? await this.readTreeFiles(head.oid) : /* @__PURE__ */ new Map();
+      const index = await readGitIndex(this.fs, this.gitDir);
+      const conflicted = index.filter((entry) => entry.stage !== 0).map((entry) => ({
+        path: entry.path,
+        index: "conflicted",
+        worktree: null,
+        staged: true,
+        untracked: false,
+        ignored: false,
+        stage: entry.stage
+      }));
+      const indexByIdentity = /* @__PURE__ */ new Map();
+      for (const entry of index) {
+        if (entry.stage === 0) indexByIdentity.set(entry.path, entry);
+      }
+      const staged = compareMaps(headFiles, indexByIdentity);
+      const files = (await this.fs.list("", { recursive: true, signal })).filter((entry) => entry.kind === "file").filter((entry) => !entry.path.startsWith(`${this.gitDir}/`));
+      const ignore = await this.loadIgnore();
+      const untracked = [];
+      const ignored = [];
+      const worktreeByPath = /* @__PURE__ */ new Map();
+      for (const file of files) {
+        assertActive2(signal);
+        if (indexByIdentity.has(file.path)) worktreeByPath.set(file.path, file);
+        else if (ignore.matches(file.path, false)) ignored.push(file.path);
+        else untracked.push(file.path);
+      }
+      const unstaged = [];
+      for (const [path, entry] of indexByIdentity) {
+        assertActive2(signal);
+        const file = worktreeByPath.get(path);
+        if (!file) {
+          unstaged.push(statusEntry(path, null, "deleted", false, false, false));
+          continue;
+        }
+        const data = await this.fs.read(path, { signal });
+        const oid = await this.objectStoreHash(data);
+        const worktreeMode = file.mode & 73 ? 33261 : 33188;
+        if (oid !== entry.oid || worktreeMode !== entry.mode) {
+          unstaged.push(statusEntry(path, null, "modified", false, false, false));
+        }
+      }
+      const stagedWithRenames = staged;
+      const unstagedWithRenames = unstaged;
+      const clean = !stagedWithRenames.length && !unstagedWithRenames.length && !untracked.length && !conflicted.length;
+      return {
+        branch: head.branch,
+        head: head.oid,
+        detached: head.detached,
+        clean,
+        staged: stagedWithRenames,
+        unstaged: unstagedWithRenames,
+        untracked: untracked.sort(),
+        ignored: ignored.sort(),
+        conflicted
+      };
+    }
+    async add(paths, signal) {
+      this.assertRepository(await this.repository());
+      if (!paths.length) {
+        throw new AgentError("GIT_PATH_INVALID", "At least one path is required");
+      }
+      const index = await readGitIndex(this.fs, this.gitDir);
+      const indexByPath = new Map(index.filter((entry) => entry.stage === 0).map((entry) => [entry.path, entry]));
+      const selected = /* @__PURE__ */ new Set();
+      for (const input of paths) {
+        assertActive2(signal);
+        if (!input.trim() || input.trim() === ".") {
+          for (const file of await this.fs.list("", { recursive: true, signal })) {
+            if (file.kind === "file" && !file.path.startsWith(`${this.gitDir}/`)) {
+              selected.add(file.path);
+            }
+          }
+          continue;
+        }
+        const path = normalizeGitPath(input);
+        const info2 = await this.fs.stat(path, signal);
+        if (!info2) {
+          for (const existing of [...indexByPath.keys()]) {
+            if (existing === path || existing.startsWith(`${path}/`)) {
+              indexByPath.delete(existing);
+            }
+          }
+          continue;
+        }
+        if (info2.kind === "file") selected.add(path);
+        else {
+          const nested = await this.fs.list(path, { recursive: true, signal });
+          for (const file of nested) {
+            if (file.kind === "file" && !file.path.startsWith(`${this.gitDir}/`)) {
+              selected.add(file.path);
+            }
+          }
+        }
+      }
+      for (const path of selected) {
+        assertActive2(signal);
+        const file = await this.fs.stat(path, signal);
+        if (!file || file.kind !== "file") continue;
+        const data = await this.fs.read(path, { signal });
+        const oid = await this.objects.writeObject("blob", data);
+        indexByPath.set(path, indexEntryFromFile(file, oid));
+      }
+      await writeGitIndex(
+        this.fs,
+        [...indexByPath.values()].filter((entry) => entry.stage === 0),
+        this.gitDir
+      );
+    }
+    async commit(input, signal) {
+      this.assertRepository(await this.repository());
+      const message = input.message.trim();
+      if (!message) {
+        throw new AgentError("GIT_COMMIT_MESSAGE_REQUIRED", "Commit message is required");
+      }
+      const index = await readGitIndex(this.fs, this.gitDir);
+      if (index.some((entry) => entry.stage !== 0)) {
+        throw new AgentError("GIT_INDEX_CONFLICTED", "Cannot commit unresolved index entries");
+      }
+      assertActive2(signal);
+      const tree = await this.writeTreeFromIndex(index);
+      const head = await this.refs.readHead();
+      if (!input.allowEmpty && head.oid) {
+        const parent = await this.readCommit(head.oid);
+        if (parent.tree === tree) {
+          throw new AgentError("GIT_EMPTY_COMMIT", "No staged changes to commit");
+        }
+      }
+      const now = this.now();
+      const author = mergeSignature(this.options.defaultAuthor, input.author, now);
+      const committer = mergeSignature(this.options.defaultAuthor, input.committer, now);
+      const data = encodeCommit({
+        tree,
+        parents: head.oid ? [head.oid] : [],
+        authorName: author.name,
+        authorEmail: author.email,
+        authorTimestamp: author.timestamp,
+        authorTimezone: author.timezone,
+        committerName: committer.name,
+        committerEmail: committer.email,
+        committerTimestamp: committer.timestamp,
+        committerTimezone: committer.timezone,
+        message
+      });
+      const oid = await this.objects.writeObject("commit", data);
+      if (head.branch) await this.refs.writeBranch(head.branch, oid);
+      else await this.refs.setDetached(oid);
+      return {
+        oid,
+        tree,
+        ...head.oid ? { parent: head.oid } : {},
+        branch: head.branch
+      };
+    }
+    async log(options = {}, signal) {
+      this.assertRepository(await this.repository());
+      let oid;
+      try {
+        oid = await this.refs.resolve(options.revision ?? "HEAD");
+      } catch (error2) {
+        if (!options.revision && error2.code === "GIT_REVISION_NOT_FOUND") {
+          return [];
+        }
+        throw error2;
+      }
+      const result = [];
+      const seen = /* @__PURE__ */ new Set();
+      const queue = [oid];
+      while (queue.length && result.length < (options.maxCount ?? 100)) {
+        assertActive2(signal);
+        const next = queue.shift();
+        if (seen.has(next)) continue;
+        seen.add(next);
+        const commit = await this.readCommit(next);
+        result.push({ oid: next, ...commit });
+        queue.unshift(...commit.parents);
+      }
+      return result;
+    }
+    async show(revision, signal) {
+      assertActive2(signal);
+      const oid = await this.refs.resolve(revision);
+      const object = await this.objects.readObject(oid);
+      if (object.type === "commit") {
+        const commit = parseCommit(oid, object.data);
+        return {
+          type: "commit",
+          oid,
+          tree: commit.tree,
+          parents: commit.parents,
+          author: commit.author,
+          committer: commit.committer,
+          message: commit.message
+        };
+      }
+      if (object.type === "tree") {
+        return {
+          type: "tree",
+          oid,
+          entries: (await this.objects.readTree(oid)).map((entry) => ({ ...entry }))
+        };
+      }
+      if (object.type === "blob") {
+        const text = decodeTextStrict(object.data);
+        return text === void 0 ? { type: "blob", oid, bytes: object.data.byteLength, dataBase64: bytesToBase642(object.data) } : { type: "blob", oid, bytes: object.data.byteLength, text };
+      }
+      return { type: "tag", oid, data: decodeText(object.data) };
+    }
+    async diff(options = {}, signal) {
+      const head = await this.refs.readHead();
+      const index = await readGitIndex(this.fs, this.gitDir);
+      const indexMap = new Map(
+        index.filter((entry) => entry.stage === 0).map((entry) => [entry.path, { mode: entry.mode, oid: entry.oid }])
+      );
+      const fromId = options.from ?? head.oid ?? "empty";
+      const from = options.from ? await this.readTreeFiles(await this.refs.resolve(options.from)) : head.oid ? await this.readTreeFiles(head.oid) : /* @__PURE__ */ new Map();
+      const to = options.staged ? indexMap : await this.worktreeFiles(signal);
+      const toId = options.to ?? (options.staged ? "index" : "worktree");
+      const paths = [.../* @__PURE__ */ new Set([...from.keys(), ...to.keys()])].sort();
+      const files = [];
+      for (const path of paths) {
+        assertActive2(signal);
+        const before = from.get(path);
+        const after = to.get(path);
+        if (before?.oid === after?.oid && before?.mode === after?.mode) continue;
+        const beforeData = before ? await this.objects.readBlob(before.oid) : new Uint8Array();
+        const afterData = after ? options.staged ? await this.objects.readBlob(after.oid) : await this.fs.stat(path, signal) ? await this.fs.read(path, { signal }) : new Uint8Array() : new Uint8Array();
+        const patch = unifiedGitDiff(beforeData, afterData, path);
+        files.push({
+          path,
+          status: !before ? "added" : !after ? "deleted" : patch.patch ? "modified" : "binary",
+          ...patch.patch ? { patch: patch.patch } : {},
+          ...patch.status === "binary" ? { binary: true } : {}
+        });
+      }
+      return { from: fromId, to: toId, files };
+    }
+    async branches() {
+      const head = await this.refs.readHead();
+      return { current: head.branch, names: await this.refs.listBranches() };
+    }
+    async createBranch(name) {
+      assertBranchName(name);
+      const head = await this.refs.readHead();
+      if (!head.oid) {
+        throw new AgentError("GIT_HEAD_UNBORN", "Cannot create branch before first commit");
+      }
+      if ((await this.refs.listBranches()).includes(name)) {
+        throw new AgentError("GIT_BRANCH_EXISTS", `Branch already exists: ${name}`);
+      }
+      await this.refs.writeBranch(name, head.oid);
+    }
+    async deleteBranch(name) {
+      const head = await this.refs.readHead();
+      if (head.branch === name) {
+        throw new AgentError("GIT_BRANCH_CURRENT", "Cannot delete the current branch");
+      }
+      await this.refs.deleteBranch(name);
+    }
+    async checkout(target, signal) {
+      const status = await this.status(signal);
+      if (status.staged.length || status.unstaged.length || status.conflicted.length) {
+        throw new AgentError(
+          "GIT_CHECKOUT_DIRTY",
+          "Cannot checkout with staged or unstaged tracked changes"
+        );
+      }
+      const branches = await this.refs.listBranches();
+      const branch = branches.includes(target) ? target : null;
+      const oid = await this.refs.resolve(target);
+      const targetFiles = await this.readTreeFiles(oid);
+      const untracked = new Set(status.untracked);
+      for (const path of targetFiles.keys()) {
+        if (untracked.has(path)) {
+          throw new AgentError(
+            "GIT_CHECKOUT_UNTRACKED",
+            `Checkout would overwrite untracked file: ${path}`
+          );
+        }
+      }
+      const currentIndex = await readGitIndex(this.fs, this.gitDir);
+      const currentPaths = new Set(currentIndex.map((entry) => entry.path));
+      for (const path of currentPaths) {
+        assertActive2(signal);
+        if (!targetFiles.has(path)) await this.fs.remove(path);
+      }
+      const entries = [];
+      for (const file of targetFiles.values()) {
+        assertActive2(signal);
+        const data = await this.objects.readBlob(file.oid);
+        const parent = file.path.slice(0, file.path.lastIndexOf("/"));
+        if (parent) await this.fs.mkdir(parent, { recursive: true });
+        const info2 = await this.fs.write(file.path, data, { mode: file.mode });
+        entries.push(indexEntryFromFile(info2, file.oid));
+      }
+      await writeGitIndex(this.fs, entries, this.gitDir);
+      if (branch) await this.refs.setBranch(branch);
+      else await this.refs.setDetached(oid);
+    }
+    async revParse(revision) {
+      return this.refs.resolve(revision);
+    }
+    async exportRepository() {
+      const entries = await this.fs.list(this.gitDir, { recursive: true });
+      const files = [];
+      for (const entry of entries) {
+        if (entry.kind !== "file") continue;
+        files.push({
+          path: entry.path.slice(this.gitDir.length + 1),
+          dataBase64: bytesToBase642(await this.fs.read(entry.path)),
+          mode: entry.mode
+        });
+      }
+      return encodeText(
+        JSON.stringify({
+          format: "tinyai.git.repository",
+          schemaVersion: 1,
+          files
+        })
+      );
+    }
+    async importRepository(data, signal) {
+      let parsed;
+      try {
+        parsed = JSON.parse(decodeText(data));
+      } catch {
+        throw new AgentError("GIT_REPOSITORY_INVALID", "Repository archive is not valid JSON");
+      }
+      if (parsed.format !== "tinyai.git.repository" || parsed.schemaVersion !== 1 || !Array.isArray(parsed.files)) {
+        throw new AgentError("GIT_REPOSITORY_INVALID", "Unsupported repository archive");
+      }
+      for (const file of parsed.files) {
+        assertActive2(signal);
+        if (typeof file.path !== "string" || typeof file.dataBase64 !== "string") {
+          throw new AgentError("GIT_REPOSITORY_INVALID", "Invalid repository file entry");
+        }
+        const path = `.git/${normalizeGitPath(file.path)}`;
+        const parent = path.slice(0, path.lastIndexOf("/"));
+        if (parent) await this.fs.mkdir(parent, { recursive: true });
+        await this.fs.write(path, base64ToBytes2(file.dataBase64), {
+          ...file.mode === void 0 ? {} : { mode: file.mode }
+        });
+      }
+    }
+    async readCommit(oid) {
+      const object = await this.objects.readObject(oid);
+      if (object.type !== "commit") {
+        throw new AgentError("GIT_OBJECT_TYPE", `Object ${oid} is not a commit`);
+      }
+      return parseCommit(oid, object.data);
+    }
+    async readTreeFiles(commitOid) {
+      const commit = await this.readCommit(commitOid);
+      return this.flattenTree(commit.tree, "");
+    }
+    async flattenTree(treeOid, prefix) {
+      const result = /* @__PURE__ */ new Map();
+      for (const entry of await this.objects.readTree(treeOid)) {
+        const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (entry.mode === 16384) {
+          for (const [child, value] of await this.flattenTree(entry.oid, path)) {
+            result.set(child, value);
+          }
+        } else if (entry.mode === 57344) {
+          result.set(path, { path, mode: entry.mode, oid: entry.oid });
+        } else {
+          result.set(path, { path, mode: entry.mode, oid: entry.oid });
+        }
+      }
+      return result;
+    }
+    async writeTreeFromIndex(index) {
+      const root = createTreeNode("");
+      for (const entry of index) {
+        const parts = entry.path.split("/");
+        let node = root;
+        for (let indexPart = 0; indexPart < parts.length - 1; indexPart += 1) {
+          const name = parts[indexPart];
+          let child = node.directories.get(name);
+          if (!child) {
+            child = createTreeNode(name);
+            node.directories.set(name, child);
+          }
+          node = child;
+        }
+        node.files.set(parts.at(-1), { mode: entry.mode, oid: entry.oid });
+      }
+      return this.writeTreeNode(root);
+    }
+    async writeTreeNode(node) {
+      const entries = [];
+      for (const [name, child] of node.directories) {
+        entries.push({ mode: 16384, name, oid: await this.writeTreeNode(child) });
+      }
+      for (const [name, file] of node.files) {
+        entries.push({ mode: file.mode, name, oid: file.oid });
+      }
+      return this.objects.writeObject("tree", encodeTree(entries));
+    }
+    async worktreeFiles(signal) {
+      const result = /* @__PURE__ */ new Map();
+      for (const file of await this.fs.list("", { recursive: true, signal })) {
+        if (file.kind !== "file" || file.path.startsWith(`${this.gitDir}/`)) continue;
+        const data = await this.fs.read(file.path, { signal });
+        result.set(file.path, {
+          path: file.path,
+          mode: file.mode & 73 ? 33261 : 33188,
+          oid: await this.objects.hashObject("blob", data)
+        });
+      }
+      return result;
+    }
+    async objectStoreHash(data) {
+      return sha1Hex(concatObjectHeader("blob", data));
+    }
+    async loadIgnore() {
+      const path = ".gitignore";
+      if (!await this.fs.stat(path)) return parseGitIgnore("");
+      return parseGitIgnore(decodeText(await this.fs.read(path)));
+    }
+    assertRepository(repository) {
+      if (!repository) {
+        throw new AgentError("GIT_REPOSITORY_NOT_FOUND", "Git repository not found");
+      }
+    }
+  };
+  function createTreeNode(name) {
+    return { name, files: /* @__PURE__ */ new Map(), directories: /* @__PURE__ */ new Map() };
+  }
+  function compareMaps(before, after) {
+    const paths = [.../* @__PURE__ */ new Set([...before.keys(), ...after.keys()])].sort();
+    const result = [];
+    const additions = [];
+    const deletions = [];
+    for (const path of paths) {
+      const old = before.get(path);
+      const next = after.get(path);
+      if (!old && next) additions.push(next);
+      else if (old && !next) deletions.push(old);
+      else if (old && next && (old.oid !== next.oid || old.mode !== next.mode)) {
+        result.push(statusEntry(path, null, "modified", true, false, false));
+      }
+    }
+    const pairedDeletes = /* @__PURE__ */ new Set();
+    for (const addition of additions) {
+      const deletion = deletions.find(
+        (candidate) => candidate.oid === addition.oid && !pairedDeletes.has(candidate.path)
+      );
+      if (deletion) {
+        pairedDeletes.add(deletion.path);
+        result.push({
+          path: addition.path,
+          oldPath: deletion.path,
+          index: "renamed",
+          worktree: null,
+          staged: true,
+          untracked: false,
+          ignored: false
+        });
+      } else {
+        result.push(statusEntry(addition.path, null, "added", true, false, false));
+      }
+    }
+    for (const deletion of deletions) {
+      if (!pairedDeletes.has(deletion.path)) {
+        result.push(statusEntry(deletion.path, null, "deleted", true, false, false));
+      }
+    }
+    return result;
+  }
+  function statusEntry(path, oldPath, status, staged, untracked, ignored) {
+    return {
+      path,
+      ...oldPath ? { oldPath } : {},
+      index: staged ? status : null,
+      worktree: staged ? null : status,
+      staged,
+      untracked,
+      ignored
+    };
+  }
+  function mergeSignature(defaults, input, now) {
+    return {
+      name: input?.name ?? defaults?.name ?? "tinyai",
+      email: input?.email ?? defaults?.email ?? "tinyai@localhost",
+      timestamp: input?.timestamp ?? defaults?.timestamp ?? Math.floor(now / 1e3),
+      timezone: input?.timezone ?? defaults?.timezone ?? "+0000"
+    };
+  }
+  function concatObjectHeader(type, data) {
+    const header = encodeText(`${type} ${data.byteLength}\0`);
+    const result = new Uint8Array(header.byteLength + data.byteLength);
+    result.set(header);
+    result.set(data, header.byteLength);
+    return result;
+  }
+  function decodeTextStrict(data) {
+    try {
+      const text = new TextDecoder("utf-8", { fatal: true }).decode(data);
+      return text.includes("\0") ? void 0 : text;
+    } catch {
+      return void 0;
+    }
+  }
+  function assertActive2(signal) {
+    if (signal?.aborted) {
+      const error2 = new Error("Git operation was cancelled");
+      error2.name = "AbortError";
+      throw error2;
+    }
+  }
+
+  // src/git/tools.ts
+  function createGitTools(git) {
+    return [
+      tool2(
+        "git_init",
+        "Initialize a Git-compatible repository in the workspace root.",
+        {
+          initial_branch: { type: "string" }
+        },
+        "write",
+        "write",
+        async (input) => git.init({
+          ...optionalString2(input, "initial_branch") ? { initialBranch: optionalString2(input, "initial_branch") } : {}
+        })
+      ),
+      tool2(
+        "git_status",
+        "Show branch, staged, unstaged, untracked and conflicted Git state.",
+        {},
+        "read",
+        "read",
+        async (_input, signal) => git.status(signal)
+      ),
+      tool2(
+        "git_add",
+        "Stage one or more workspace-relative paths in Git.",
+        {
+          paths: {
+            type: "array",
+            items: { type: "string" }
+          }
+        },
+        "write",
+        "write",
+        async (input, signal) => {
+          const paths = stringArray(input.paths);
+          if (!paths?.length) {
+            throw new AgentError("GIT_PATH_INVALID", "paths must be a non-empty array");
+          }
+          await git.add(paths, signal);
+          return { staged: paths };
+        },
+        ["paths"]
+      ),
+      tool2(
+        "git_commit",
+        "Create a commit from the current Git index.",
+        {
+          message: { type: "string" },
+          allow_empty: { type: "boolean" },
+          author_name: { type: "string" },
+          author_email: { type: "string" }
+        },
+        "dangerous",
+        "write",
+        async (input, signal) => git.commit(
+          {
+            message: requiredString2(input, "message"),
+            ...input.allow_empty === true ? { allowEmpty: true } : {},
+            ...optionalString2(input, "author_name") || optionalString2(input, "author_email") ? {
+              author: {
+                ...optionalString2(input, "author_name") ? { name: optionalString2(input, "author_name") } : {},
+                ...optionalString2(input, "author_email") ? { email: optionalString2(input, "author_email") } : {}
+              }
+            } : {}
+          },
+          signal
+        ),
+        ["message"]
+      ),
+      tool2(
+        "git_log",
+        "List commits reachable from HEAD or a revision.",
+        {
+          max_count: { type: "integer" },
+          revision: { type: "string" }
+        },
+        "read",
+        "read",
+        async (input, signal) => git.log(
+          {
+            ...numberValue(input.max_count) === void 0 ? {} : { maxCount: Math.max(1, Math.min(1e3, numberValue(input.max_count))) },
+            ...optionalString2(input, "revision") ? { revision: optionalString2(input, "revision") } : {}
+          },
+          signal
+        )
+      ),
+      tool2(
+        "git_show",
+        "Show a commit, tree, blob or tag by revision.",
+        { revision: { type: "string" } },
+        "read",
+        "read",
+        async (input, signal) => git.show(requiredString2(input, "revision"), signal),
+        ["revision"]
+      ),
+      tool2(
+        "git_diff",
+        "Show changes between the working tree, index, HEAD or revisions.",
+        {
+          from: { type: "string" },
+          to: { type: "string" },
+          staged: { type: "boolean" }
+        },
+        "read",
+        "read",
+        async (input, signal) => git.diff(
+          {
+            ...optionalString2(input, "from") ? { from: optionalString2(input, "from") } : {},
+            ...optionalString2(input, "to") ? { to: optionalString2(input, "to") } : {},
+            ...input.staged === true ? { staged: true } : {}
+          },
+          signal
+        )
+      ),
+      tool2(
+        "git_branch",
+        "List, create or delete local Git branches.",
+        {
+          action: { type: "string", enum: ["list", "create", "delete"] },
+          name: { type: "string" }
+        },
+        "write",
+        "write",
+        async (input, signal) => {
+          const action = optionalString2(input, "action") ?? "list";
+          if (action === "list") {
+            return git.branches(signal);
+          }
+          const name = requiredString2(input, "name");
+          if (action === "create") await git.createBranch(name);
+          else if (action === "delete") await git.deleteBranch(name);
+          else throw new AgentError("GIT_ARGUMENT_INVALID", `Unknown branch action: ${action}`);
+          return { action, name };
+        },
+        ["action"]
+      ),
+      tool2(
+        "git_checkout",
+        "Switch the working tree to a branch or commit. Dirty tracked files block checkout.",
+        { target: { type: "string" } },
+        "dangerous",
+        "write",
+        async (input, signal) => {
+          await git.checkout(requiredString2(input, "target"), signal);
+          return { checkedOut: requiredString2(input, "target") };
+        },
+        ["target"]
+      ),
+      tool2(
+        "git_rev_parse",
+        "Resolve HEAD, a branch, tag or full SHA-1 to a commit id.",
+        { revision: { type: "string" } },
+        "read",
+        "read",
+        async (input, signal) => ({
+          revision: requiredString2(input, "revision"),
+          oid: await git.revParse(requiredString2(input, "revision"))
+        }),
+        ["revision"]
+      )
+    ];
+  }
+  function tool2(name, description, properties, risk, effect, execute, required = []) {
+    return {
+      name,
+      description,
+      parameters: {
+        type: "object",
+        properties,
+        ...required.length ? { required } : {}
+      },
+      risk,
+      effect,
+      capabilities: ["workspace:git", "git:portable"],
+      executionMode: effect === "read" ? "parallel" : "sequential",
+      replay: effect === "read" ? "safe" : "never",
+      timeoutMs: 12e4,
+      execute: async (input, invocation) => {
+        if (!input || typeof input !== "object" || Array.isArray(input)) {
+          throw new AgentError("TOOL_ARGUMENTS_INVALID", "Git tool input must be an object");
+        }
+        return execute(
+          input,
+          invocation.signal
+        );
+      }
+    };
+  }
+  function requiredString2(input, key) {
+    const value = input[key];
+    if (typeof value !== "string" || !value.trim()) {
+      throw new AgentError("TOOL_ARGUMENTS_INVALID", `${key} must be a non-empty string`);
+    }
+    return value;
+  }
+  function optionalString2(input, key) {
+    const value = input[key];
+    return typeof value === "string" && value.trim() ? value : void 0;
+  }
+  function numberValue(value) {
+    return typeof value === "number" && Number.isFinite(value) ? value : void 0;
+  }
+  function stringArray(value) {
+    return Array.isArray(value) ? value.filter((item) => typeof item === "string") : void 0;
+  }
 
   // src/virtual/path.ts
   function normalizeVirtualPath(path) {
@@ -1839,7 +3734,7 @@
       if (file.size > (options.maxFileBytes ?? 5 * 1024 * 1024)) continue;
       if (include.length && !include.some((matcher2) => matcher2.test(file.path))) continue;
       if (exclude.some((matcher2) => matcher2.test(file.path))) continue;
-      const text = decodeText(await vfs.read(file.path, { signal: options.signal }));
+      const text = decodeText3(await vfs.read(file.path, { signal: options.signal }));
       if (text === void 0) continue;
       const lines = text.split("\n");
       for (let index = 0; index < lines.length; index += 1) {
@@ -1938,7 +3833,7 @@
     const escaped = escapeRegExp(options.pattern);
     return new RegExp(options.wholeWord ? `\\b${escaped}\\b` : escaped, flags);
   }
-  function decodeText(value) {
+  function decodeText3(value) {
     const text = decodeVirtualText(value);
     return text?.includes("\0") ? void 0 : text;
   }
@@ -2395,7 +4290,7 @@
       }
       for (const file of manifest.files ?? []) {
         const path = normalizeVirtualPath(file.path);
-        await this.memory.write(path, base64ToBytes2(file.data), {
+        await this.memory.write(path, base64ToBytes3(file.data), {
           mode: file.mode
         });
       }
@@ -2411,7 +4306,7 @@
         if (item.kind !== "file") continue;
         manifest.files.push({
           path: item.path,
-          data: bytesToBase642(await this.memory.read(item.path)),
+          data: bytesToBase643(await this.memory.read(item.path)),
           mode: item.mode,
           modifiedAt: item.modifiedAt,
           version: item.version
@@ -2420,12 +4315,12 @@
       await this.storage.set(this.storageKey, manifest);
     }
   };
-  function bytesToBase642(value) {
+  function bytesToBase643(value) {
     let binary = "";
     for (const byte of value) binary += String.fromCharCode(byte);
     return btoa(binary);
   }
-  function base64ToBytes2(value) {
+  function base64ToBytes3(value) {
     const binary = atob(value);
     const result = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) {
@@ -2486,7 +4381,7 @@
       for (const file of this.bundle.files) {
         await this.source.write(
           file.path,
-          base64ToBytes3(file.dataBase64, file.path),
+          base64ToBytes4(file.dataBase64, file.path),
           { ...file.mode === void 0 ? {} : { mode: file.mode } }
         );
       }
@@ -2535,7 +4430,7 @@
       }
       paths.add(path);
       const mode = file.mode === void 0 ? void 0 : Number.isInteger(file.mode) && file.mode >= 0 ? file.mode : invalidBundle(`Invalid file mode: ${path}`);
-      base64ToBytes3(file.dataBase64, path);
+      base64ToBytes4(file.dataBase64, path);
       return {
         path,
         dataBase64: file.dataBase64,
@@ -2611,7 +4506,7 @@
     }
     return result;
   }
-  function base64ToBytes3(value, path) {
+  function base64ToBytes4(value, path) {
     try {
       const binary = atob(value);
       const result = new Uint8Array(binary.length);
@@ -2779,7 +4674,7 @@
       this.head = state.head;
       for (const snapshot of state.snapshots) this.snapshots.set(snapshot.id, snapshot);
       for (const [id, encoded] of Object.entries(state.objects)) {
-        this.objects.set(id, base64ToBytes4(encoded));
+        this.objects.set(id, base64ToBytes5(encoded));
       }
     }
     async persist() {
@@ -2795,17 +4690,17 @@
           )
         })),
         objects: Object.fromEntries(
-          [...this.objects].map(([id, data]) => [id, bytesToBase643(data)])
+          [...this.objects].map(([id, data]) => [id, bytesToBase644(data)])
         )
       };
       await this.storage.set(this.storageKey, state);
     }
   };
   function unifiedDiff(before, after, path) {
-    const beforeText = decodeText2(before);
-    const afterText = decodeText2(after);
+    const beforeText = decodeText4(before);
+    const afterText = decodeText4(after);
     if (beforeText === void 0 || afterText === void 0) return { status: "binary" };
-    return { patch: buildPatch(beforeText, afterText, path), status: "modified" };
+    return { patch: buildPatch2(beforeText, afterText, path), status: "modified" };
   }
   function summarize(snapshot) {
     return {
@@ -2819,15 +4714,15 @@
   function textPatch(before, after, path) {
     return unifiedDiff(before, after, path).patch ? { patch: unifiedDiff(before, after, path).patch } : {};
   }
-  function buildPatch(before, after, path) {
-    const oldLines = splitLines(before);
-    const newLines = splitLines(after);
+  function buildPatch2(before, after, path) {
+    const oldLines = splitLines2(before);
+    const newLines = splitLines2(after);
     const lcs = longestCommonSubsequence(oldLines, newLines);
     if (lcs === oldLines.length && lcs === newLines.length) return "";
     const lines = [`--- a/${path}`, `+++ b/${path}`, `@@ -1,${oldLines.length} +1,${newLines.length} @@`];
     let oldIndex = 0;
     let newIndex = 0;
-    for (const [commonOld, commonNew] of commonPairs(oldLines, newLines)) {
+    for (const [commonOld, commonNew] of commonPairs2(oldLines, newLines)) {
       while (oldIndex < commonOld) lines.push(`-${oldLines[oldIndex++]}`);
       while (newIndex < commonNew) lines.push(`+${newLines[newIndex++]}`);
       lines.push(` ${oldLines[oldIndex]}`);
@@ -2850,7 +4745,7 @@
     }
     return previous[right.length];
   }
-  function commonPairs(left, right) {
+  function commonPairs2(left, right) {
     const dp = Array.from(
       { length: left.length + 1 },
       () => new Array(right.length + 1).fill(0)
@@ -2873,13 +4768,13 @@
     }
     return result;
   }
-  function splitLines(value) {
+  function splitLines2(value) {
     if (!value) return [];
     const lines = value.split("\n");
     if (lines.at(-1) === "") lines.pop();
     return lines;
   }
-  function decodeText2(value) {
+  function decodeText4(value) {
     try {
       return new TextDecoder("utf-8", { fatal: true }).decode(value);
     } catch {
@@ -2898,12 +4793,12 @@
     if (left.byteLength !== right.byteLength) return false;
     return left.every((byte, index) => byte === right[index]);
   }
-  function bytesToBase643(value) {
+  function bytesToBase644(value) {
     let binary = "";
     for (const byte of value) binary += String.fromCharCode(byte);
     return btoa(binary);
   }
-  function base64ToBytes4(value) {
+  function base64ToBytes5(value) {
     const binary = atob(value);
     const result = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) {
@@ -4563,7 +6458,7 @@
         if (file) {
           await this.vfs.write(
             normalizeVirtualPath(file.path),
-            base64ToBytes5(file.dataBase64),
+            base64ToBytes6(file.dataBase64),
             {
               ...file.mode === void 0 ? {} : { mode: file.mode },
               signal: options.signal
@@ -4606,9 +6501,9 @@
     return result;
   }
   function hashBase64(value) {
-    return hashVirtualBytes(base64ToBytes5(value));
+    return hashVirtualBytes(base64ToBytes6(value));
   }
-  function base64ToBytes5(value) {
+  function base64ToBytes6(value) {
     const binary = atob(value);
     const result = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) {
@@ -4620,6 +6515,7 @@
   // src/host/capabilities.ts
   var capabilityOrder = [
     "storage",
+    "actions",
     "workspace.import",
     "workspace.export",
     "workspace.picker",
@@ -4735,6 +6631,8 @@
     switch (capability) {
       case "storage":
         return Boolean(host.storage);
+      case "actions":
+        return typeof host.actions?.describe === "function" && typeof host.actions?.invoke === "function";
       case "workspace.import":
         return typeof host.workspace?.importWorkspace === "function";
       case "workspace.export":
@@ -4834,7 +6732,7 @@
       }
       const digest2 = await globalThis.crypto.subtle.digest(
         algorithm,
-        toArrayBuffer(data)
+        toArrayBuffer2(data)
       );
       return new Uint8Array(digest2);
     },
@@ -4844,7 +6742,7 @@
       return bytes;
     }
   };
-  function toArrayBuffer(data) {
+  function toArrayBuffer2(data) {
     return data.buffer.slice(
       data.byteOffset,
       data.byteOffset + data.byteLength
@@ -5090,7 +6988,7 @@
       }
       files.push({
         path: entry.path,
-        dataBase64: bytesToBase644(await vfs.read(entry.path)),
+        dataBase64: bytesToBase645(await vfs.read(entry.path)),
         mode: entry.mode,
         modifiedAt: entry.modifiedAt
       });
@@ -5117,18 +7015,18 @@
       await vfs.mkdir(directory, { recursive: true });
     }
     for (const file of bundle.files) {
-      await vfs.write(file.path, base64ToBytes6(file.dataBase64), {
+      await vfs.write(file.path, base64ToBytes7(file.dataBase64), {
         ...file.mode === void 0 ? {} : { mode: file.mode }
       });
     }
     return cloneBundle(bundle);
   }
-  function bytesToBase644(value) {
+  function bytesToBase645(value) {
     let binary = "";
     for (const byte of value) binary += String.fromCharCode(byte);
     return btoa(binary);
   }
-  function base64ToBytes6(value) {
+  function base64ToBytes7(value) {
     const binary = atob(value);
     const result = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) {
@@ -5145,7 +7043,7 @@
         "Apply a contextual patch to one or more files. Use *** Begin Patch ... *** End Patch with Update File, Add File, Delete File and Move to directives. Every Update File hunk starts with @@ or @@ anchor text. Context lines use a leading space, removed lines use -, added lines use +. Do not provide unified-diff hunk counts or ---/+++ headers; use apply_unified_diff for those.",
         async (input, invocation) => applyContextPatch(
           workspace,
-          requiredString2(input, "patch"),
+          requiredString3(input, "patch"),
           patchOptions(input, invocation)
         )
       ),
@@ -5154,7 +7052,7 @@
         "Apply a strict Git-style unified diff with ---/+++ headers and exact @@ hunk counts. Use this only for standard unified diffs; prefer apply_patch for model-authored edits.",
         async (input, invocation) => applyUnifiedPatch(
           workspace,
-          requiredString2(input, "patch"),
+          requiredString3(input, "patch"),
           patchOptions(input, invocation)
         )
       )
@@ -5198,7 +7096,7 @@
     }
     return value;
   }
-  function requiredString2(input, key) {
+  function requiredString3(input, key) {
     const value = input[key];
     if (typeof value !== "string" || !value.trim()) {
       throw new AgentError("TOOL_ARGUMENTS_INVALID", `${key} must be a non-empty string`);
@@ -5224,8 +7122,9 @@
 
   // src/adapters/virtual-workspace-tools.ts
   function createVirtualWorkspaceTools(workspace) {
+    const git = new PortableGitBackend(workspace.fs);
     return [
-      tool2(
+      tool3(
         "read_file",
         "Read a UTF-8 or base64 file from the virtual workspace.",
         schema2(
@@ -5245,7 +7144,7 @@
         "read",
         "read",
         async (input, invocation) => {
-          const path = requiredString3(input, "path");
+          const path = requiredString4(input, "path");
           let data = await workspace.fs.read(path, {
             signal: invocation.signal,
             ...optionalNumber(input, "offset") === void 0 ? {} : { offset: optionalNumber(input, "offset") },
@@ -5262,11 +7161,11 @@
           return {
             path,
             bytes: data.byteLength,
-            ...input.encoding === "base64" ? { dataBase64: bytesToBase645(data) } : { text: new TextDecoder().decode(data) }
+            ...input.encoding === "base64" ? { dataBase64: bytesToBase646(data) } : { text: new TextDecoder().decode(data) }
           };
         }
       ),
-      tool2(
+      tool3(
         "write_file",
         "Atomically write a UTF-8 or base64 file in the virtual workspace.",
         schema2(
@@ -5282,9 +7181,9 @@
         "write",
         "write",
         async (input, invocation) => {
-          const path = requiredString3(input, "path");
-          const text = optionalString2(input, "text");
-          const base64 = optionalString2(input, "dataBase64");
+          const path = requiredString4(input, "path");
+          const text = optionalString3(input, "text");
+          const base64 = optionalString3(input, "dataBase64");
           if (text === void 0 && base64 === void 0) {
             throw new AgentError(
               "TOOL_ARGUMENTS_INVALID",
@@ -5294,7 +7193,7 @@
           const expected = optionalNumber(input, "expected_version");
           return workspace.fs.write(
             path,
-            base64 === void 0 ? new TextEncoder().encode(text) : base64ToBytes7(base64),
+            base64 === void 0 ? new TextEncoder().encode(text) : base64ToBytes8(base64),
             {
               signal: invocation.signal,
               ...expected === void 0 ? {} : { expectedVersion: expected },
@@ -5303,7 +7202,7 @@
           );
         }
       ),
-      tool2(
+      tool3(
         "replace_in_file",
         "Replace an exact text occurrence in a UTF-8 file. Prefer this for small reliable edits.",
         schema2(
@@ -5319,8 +7218,8 @@
         "write",
         "write",
         async (input, invocation) => {
-          const path = requiredString3(input, "path");
-          const oldText = requiredString3(input, "old_text");
+          const path = requiredString4(input, "path");
+          const oldText = requiredString4(input, "old_text");
           const newText = typeof input.new_text === "string" ? input.new_text : "";
           const info2 = await workspace.fs.stat(path, invocation.signal);
           if (!info2 || info2.kind !== "file") {
@@ -5351,7 +7250,7 @@
           });
         }
       ),
-      tool2(
+      tool3(
         "append_file",
         "Append UTF-8 text to a file, creating it when absent.",
         schema2(
@@ -5365,7 +7264,7 @@
         "write",
         "write",
         async (input, invocation) => {
-          const path = requiredString3(input, "path");
+          const path = requiredString4(input, "path");
           const info2 = await workspace.fs.stat(path, invocation.signal);
           const existing = info2 ? new TextDecoder().decode(
             await workspace.fs.read(path, { signal: invocation.signal })
@@ -5383,7 +7282,7 @@
           );
         }
       ),
-      tool2(
+      tool3(
         "list_files",
         "List files and directories in the virtual workspace.",
         schema2({
@@ -5392,12 +7291,12 @@
         }),
         "read",
         "read",
-        async (input, invocation) => workspace.fs.list(optionalString2(input, "path") ?? "", {
+        async (input, invocation) => workspace.fs.list(optionalString3(input, "path") ?? "", {
           recursive: input.recursive === true,
           signal: invocation.signal
         })
       ),
-      tool2(
+      tool3(
         "delete_file",
         "Delete a file or directory tree in the virtual workspace.",
         schema2({
@@ -5407,12 +7306,12 @@
         "write",
         "write",
         async (input, invocation) => ({
-          deleted: await workspace.fs.remove(requiredString3(input, "path"), {
+          deleted: await workspace.fs.remove(requiredString4(input, "path"), {
             recursive: input.recursive === true
           })
         })
       ),
-      tool2(
+      tool3(
         "search",
         "Search text in virtual files with optional regex, glob and context filters.",
         schema2(
@@ -5432,19 +7331,19 @@
         "read",
         "read",
         async (input, invocation) => searchVirtualFiles(workspace.fs, {
-          pattern: requiredString3(input, "pattern"),
+          pattern: requiredString4(input, "pattern"),
           signal: invocation.signal,
           caseSensitive: input.case_sensitive === true,
           regex: input.regex === true,
           wholeWord: input.whole_word === true,
-          ...optionalString2(input, "path") ? { path: optionalString2(input, "path") } : {},
-          ...stringArray(input.include) ? { include: stringArray(input.include) } : {},
-          ...stringArray(input.exclude) ? { exclude: stringArray(input.exclude) } : {},
+          ...optionalString3(input, "path") ? { path: optionalString3(input, "path") } : {},
+          ...stringArray2(input.include) ? { include: stringArray2(input.include) } : {},
+          ...stringArray2(input.exclude) ? { exclude: stringArray2(input.exclude) } : {},
           ...optionalNumber(input, "context_lines") === void 0 ? {} : { contextLines: optionalNumber(input, "context_lines") },
           ...optionalNumber(input, "max_results") === void 0 ? {} : { maxResults: optionalNumber(input, "max_results") }
         })
       ),
-      tool2(
+      tool3(
         "glob",
         "Find virtual files using one or more glob patterns.",
         schema2(
@@ -5458,19 +7357,19 @@
         "read",
         "read",
         async (input, invocation) => {
-          const patterns = stringArray(input.patterns);
+          const patterns = stringArray2(input.patterns);
           if (!patterns) {
             throw new AgentError("TOOL_ARGUMENTS_INVALID", "patterns must be an array");
           }
           return globVirtualFiles(workspace.fs, patterns, {
             signal: invocation.signal,
-            ...optionalString2(input, "path") ? { path: optionalString2(input, "path") } : {},
-            ...stringArray(input.exclude) ? { exclude: stringArray(input.exclude) } : {}
+            ...optionalString3(input, "path") ? { path: optionalString3(input, "path") } : {},
+            ...stringArray2(input.exclude) ? { exclude: stringArray2(input.exclude) } : {}
           });
         }
       ),
       ...createPatchTools(workspace.fs),
-      tool2(
+      tool3(
         "exec",
         "Execute the supported Virtual Shell subset without host Bash.",
         schema2(
@@ -5485,7 +7384,7 @@
         "dangerous",
         "execute",
         async (input, invocation) => {
-          const script = optionalString2(input, "script") ?? buildCommandScript(input);
+          const script = optionalString3(input, "script") ?? buildCommandScript(input);
           if (!script) {
             throw new AgentError(
               "TOOL_ARGUMENTS_INVALID",
@@ -5494,11 +7393,11 @@
           }
           return workspace.shell.execute(script, {
             signal: invocation.signal,
-            ...optionalString2(input, "stdin") === void 0 ? {} : { stdin: optionalString2(input, "stdin") }
+            ...optionalString3(input, "stdin") === void 0 ? {} : { stdin: optionalString3(input, "stdin") }
           });
         }
       ),
-      tool2(
+      tool3(
         "job_start",
         "Start a cancellable background Virtual Shell job.",
         schema2({
@@ -5507,19 +7406,19 @@
         }, ["script"]),
         "dangerous",
         "execute",
-        async (input) => workspace.jobs.start(requiredString3(input, "script"), {
-          ...optionalString2(input, "stdin") === void 0 ? {} : { stdin: optionalString2(input, "stdin") }
+        async (input) => workspace.jobs.start(requiredString4(input, "script"), {
+          ...optionalString3(input, "stdin") === void 0 ? {} : { stdin: optionalString3(input, "stdin") }
         })
       ),
-      tool2(
+      tool3(
         "job_read",
         "Read a background job status and captured output.",
         schema2({ job_id: { type: "string" } }, ["job_id"]),
         "read",
         "read",
-        async (input) => workspace.jobs.read(requiredString3(input, "job_id"))
+        async (input) => workspace.jobs.read(requiredString4(input, "job_id"))
       ),
-      tool2(
+      tool3(
         "job_list",
         "List background jobs newest first.",
         schema2({}),
@@ -5527,17 +7426,18 @@
         "read",
         async () => workspace.jobs.list()
       ),
-      tool2(
+      tool3(
         "job_cancel",
         "Cancel a queued or running background job.",
         schema2({ job_id: { type: "string" } }, ["job_id"]),
         "dangerous",
         "execute",
-        async (input) => workspace.jobs.cancel(requiredString3(input, "job_id"))
-      )
+        async (input) => workspace.jobs.cancel(requiredString4(input, "job_id"))
+      ),
+      ...createGitTools(git)
     ];
   }
-  function tool2(name, description, parameters, risk, effect, execute) {
+  function tool3(name, description, parameters, risk, effect, execute) {
     return {
       name,
       description,
@@ -5563,14 +7463,14 @@
     }
     return value;
   }
-  function requiredString3(input, key) {
+  function requiredString4(input, key) {
     const value = input[key];
     if (typeof value !== "string" || !value.trim()) {
       throw new AgentError("TOOL_ARGUMENTS_INVALID", `${key} must be a non-empty string`);
     }
     return value;
   }
-  function optionalString2(input, key) {
+  function optionalString3(input, key) {
     const value = input[key];
     return typeof value === "string" && value ? value : void 0;
   }
@@ -5578,15 +7478,15 @@
     const value = input[key];
     return typeof value === "number" && Number.isFinite(value) ? value : void 0;
   }
-  function stringArray(value) {
+  function stringArray2(value) {
     return Array.isArray(value) ? value.filter((item) => typeof item === "string") : void 0;
   }
-  function bytesToBase645(value) {
+  function bytesToBase646(value) {
     let binary = "";
     for (const byte of value) binary += String.fromCharCode(byte);
     return btoa(binary);
   }
-  function base64ToBytes7(value) {
+  function base64ToBytes8(value) {
     const binary = atob(value);
     const result = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) {
@@ -5595,10 +7495,10 @@
     return result;
   }
   function buildCommandScript(input) {
-    const command = optionalString2(input, "command");
+    const command = optionalString3(input, "command");
     if (!command) return void 0;
-    const args = stringArray(input.args) ?? [];
-    const cwd = optionalString2(input, "cwd");
+    const args = stringArray2(input.args) ?? [];
+    const cwd = optionalString3(input, "cwd");
     const invocation = [command, ...args].map(shellQuote).join(" ");
     return cwd ? `cd ${shellQuote(cwd)}; ${invocation}` : invocation;
   }
@@ -6996,7 +8896,7 @@ ${skillListing}` : ""
           }
           this.reply(port, requestId, {
             metadata,
-            dataBase64: bytesToBase646(data)
+            dataBase64: bytesToBase647(data)
           });
           return;
         }
@@ -7064,7 +8964,7 @@ ${skillListing}` : ""
       return this.runtime;
     }
   };
-  function bytesToBase646(value) {
+  function bytesToBase647(value) {
     let binary = "";
     for (const byte of value) binary += String.fromCharCode(byte);
     return btoa(binary);
@@ -7097,7 +8997,7 @@ ${skillListing}` : ""
     constructor(tools, approval, options = {}) {
       this.approval = approval;
       this.options = options;
-      this.tools = new Map([...tools].map((tool4) => [tool4.name, tool4]));
+      this.tools = new Map([...tools].map((tool5) => [tool5.name, tool5]));
     }
     approval;
     options;
@@ -7118,8 +9018,8 @@ ${skillListing}` : ""
     }
     async execute(invocation) {
       const base = { callId: invocation.call.id, name: invocation.call.name };
-      const tool4 = this.tools.get(invocation.call.name);
-      if (!tool4) {
+      const tool5 = this.tools.get(invocation.call.name);
+      if (!tool5) {
         return {
           ...base,
           status: "failed",
@@ -7129,7 +9029,7 @@ ${skillListing}` : ""
       let input;
       try {
         input = parseToolArguments(invocation.call.arguments);
-        validateToolInput(tool4.parameters, input);
+        validateToolInput(tool5.parameters, input);
         this.assertActive(invocation.signal);
       } catch (error2) {
         return { ...base, status: "failed", error: toStructuredError(error2, "TOOL_VALIDATION_FAILED") };
@@ -7141,7 +9041,7 @@ ${skillListing}` : ""
             sessionId: invocation.sessionId,
             taskId: invocation.taskId,
             callId: invocation.call.id,
-            toolName: tool4.name,
+            toolName: tool5.name,
             input
           },
           invocation.signal
@@ -7152,14 +9052,14 @@ ${skillListing}` : ""
             status: "denied",
             error: new AgentError(
               "TOOL_HOOK_DENIED",
-              hook.reason ?? `A pre-tool hook denied ${tool4.name}`
+              hook.reason ?? `A pre-tool hook denied ${tool5.name}`
             ).toStructured()
           };
         }
         hookRequiresApproval = hook.decision === "ask";
         input = hook.input;
         try {
-          validateToolInput(tool4.parameters, input);
+          validateToolInput(tool5.parameters, input);
         } catch (error2) {
           return {
             ...base,
@@ -7168,7 +9068,7 @@ ${skillListing}` : ""
           };
         }
       }
-      const failureKey = tool4.risk === "read" ? void 0 : this.failureKey(invocation, tool4.name, input);
+      const failureKey = tool5.risk === "read" ? void 0 : this.failureKey(invocation, tool5.name, input);
       const repeated = failureKey ? this.repeatedFailures.get(failureKey) : void 0;
       if (failureKey && repeated && repeated.count >= 3) {
         return {
@@ -7176,10 +9076,10 @@ ${skillListing}` : ""
           status: "failed",
           error: new AgentError(
             "TOOL_RETRY_BLOCKED",
-            `Blocked repeated ${tool4.name} call after ${repeated.count} identical failures. Re-read current state or change the request before retrying.`,
+            `Blocked repeated ${tool5.name} call after ${repeated.count} identical failures. Re-read current state or change the request before retrying.`,
             {
               details: {
-                tool: tool4.name,
+                tool: tool5.name,
                 retryCount: repeated.count,
                 lastCode: repeated.lastCode,
                 suggestion: "Re-read the current file and submit a smaller or corrected operation"
@@ -7196,10 +9096,10 @@ ${skillListing}` : ""
             sessionId: invocation.sessionId,
             taskId: invocation.taskId,
             callId: invocation.call.id,
-            toolName: tool4.name,
-            capabilities: [...tool4.capabilities ?? []],
-            effect: tool4.effect ?? (tool4.risk === "read" ? "read" : "write"),
-            risk: tool4.risk,
+            toolName: tool5.name,
+            capabilities: [...tool5.capabilities ?? []],
+            effect: tool5.effect ?? (tool5.risk === "read" ? "read" : "write"),
+            risk: tool5.risk,
             input
           },
           invocation.signal
@@ -7211,13 +9111,13 @@ ${skillListing}` : ""
             status: "denied",
             error: new AgentError(
               "TOOL_POLICY_DENIED",
-              decision.reason ?? `${tool4.name} is denied by policy`
+              decision.reason ?? `${tool5.name} is denied by policy`
             ).toStructured()
           };
         }
         policyRequiresApproval = decision.decision === "ask";
       }
-      if (tool4.risk !== "read" && !this.options.policy || hookRequiresApproval || policyRequiresApproval) {
+      if (tool5.risk !== "read" && !this.options.policy || hookRequiresApproval || policyRequiresApproval) {
         let approved = false;
         try {
           approved = await this.approval.requestApproval(
@@ -7225,8 +9125,8 @@ ${skillListing}` : ""
               sessionId: invocation.sessionId,
               taskId: invocation.taskId,
               callId: invocation.call.id,
-              toolName: tool4.name,
-              risk: tool4.risk === "read" ? "write" : tool4.risk,
+              toolName: tool5.name,
+              risk: tool5.risk === "read" ? "write" : tool5.risk,
               input,
               ...actionDigest ? { actionDigest } : {}
             },
@@ -7239,13 +9139,13 @@ ${skillListing}` : ""
           return {
             ...base,
             status: "denied",
-            error: new AgentError("TOOL_DENIED", `User denied ${tool4.name}`).toStructured()
+            error: new AgentError("TOOL_DENIED", `User denied ${tool5.name}`).toStructured()
           };
         }
       }
       try {
-        const rawOutput = await this.executeWithTimeout(tool4, input, invocation);
-        if (tool4.outputSchema) validateToolInput(tool4.outputSchema, rawOutput);
+        const rawOutput = await this.executeWithTimeout(tool5, input, invocation);
+        if (tool5.outputSchema) validateToolInput(tool5.outputSchema, rawOutput);
         this.assertActive(invocation.signal);
         const output = await this.artifactize(rawOutput, invocation);
         const result = { ...base, status: "succeeded", output };
@@ -7288,8 +9188,8 @@ ${skillListing}` : ""
     assertActive(signal) {
       if (signal.aborted) throw new AgentError("TASK_CANCELLED", "Task was cancelled");
     }
-    async executeWithTimeout(tool4, input, invocation) {
-      const timeoutMs = tool4.timeoutMs ?? this.options.defaultTimeoutMs ?? 12e4;
+    async executeWithTimeout(tool5, input, invocation) {
+      const timeoutMs = tool5.timeoutMs ?? this.options.defaultTimeoutMs ?? 12e4;
       const controller = new AbortController();
       const abort = () => controller.abort();
       invocation.signal.addEventListener("abort", abort, { once: true });
@@ -7303,7 +9203,7 @@ ${skillListing}` : ""
       });
       try {
         return await Promise.race([
-          tool4.execute(input, { ...invocation, signal: controller.signal }),
+          tool5.execute(input, { ...invocation, signal: controller.signal }),
           timeout
         ]);
       } finally {
@@ -9608,7 +11508,7 @@ ${lines.join("\n")}
   // src/adapters/browser-tools.ts
   function createBrowserTools(browser, dependencies = {}) {
     return [
-      tool3(
+      tool4(
         "list_tabs",
         "List inspectable Chrome tabs with stable ids, URLs, titles and current-session marker.",
         objectSchema({}),
@@ -9627,7 +11527,7 @@ ${lines.join("\n")}
           return tabs.map((tab) => ({ ...tab, current: tab.id === current }));
         }
       ),
-      tool3(
+      tool4(
         "list_frames",
         "List frames in the working tab, including frameId values usable by snapshot and frame-scoped tools.",
         objectSchema({}),
@@ -9641,14 +11541,14 @@ ${lines.join("\n")}
           return await browser.listFrames(tabId);
         }
       ),
-      tool3(
+      tool4(
         "switch_tab",
         "Make an existing tab the working tab for this session.",
         objectSchema({ tabId: { type: "string" } }, ["tabId"]),
         "write",
         ["browser:read"],
         async (input, invocation) => {
-          const tabId = requiredString4(input, "tabId");
+          const tabId = requiredString5(input, "tabId");
           if (dependencies.workspaceTabs) {
             await dependencies.workspaceTabs.switchTab(invocation.sessionId, tabId);
             return { tabId };
@@ -9663,7 +11563,7 @@ ${lines.join("\n")}
           return { tabId };
         }
       ),
-      tool3(
+      tool4(
         "new_tab",
         "Open a new tab and make it the working tab.",
         objectSchema({ url: { type: "string" } }),
@@ -9673,7 +11573,7 @@ ${lines.join("\n")}
           if (dependencies.workspaceTabs) {
             const tab2 = await dependencies.workspaceTabs.createTab(
               invocation.sessionId,
-              optionalString3(input, "url") ?? "about:blank"
+              optionalString4(input, "url") ?? "about:blank"
             );
             return tab2;
           }
@@ -9683,12 +11583,12 @@ ${lines.join("\n")}
               "Tabs are isolated conversations; use the browser tabs UI to open another tab session."
             );
           }
-          const tab = await browser.createTab(optionalString3(input, "url") ?? "about:blank");
+          const tab = await browser.createTab(optionalString4(input, "url") ?? "about:blank");
           await browser.setWorkingTab(invocation.sessionId, tab.id);
           return tab;
         }
       ),
-      tool3(
+      tool4(
         "navigate",
         "Navigate the working tab to a URL and wait for readiness.",
         objectSchema({ url: { type: "string" } }, ["url"]),
@@ -9698,12 +11598,12 @@ ${lines.join("\n")}
           const tabId = await workingTab(browser, invocation.sessionId);
           return await browser.navigate(
             tabId,
-            requiredString4(input, "url"),
+            requiredString5(input, "url"),
             invocation.signal
           );
         }
       ),
-      tool3(
+      tool4(
         "snapshot",
         "Capture a compact accessibility snapshot with @eN refs for interactive elements.",
         objectSchema({
@@ -9716,12 +11616,12 @@ ${lines.join("\n")}
           const tabId = await workingTab(browser, invocation.sessionId);
           return await browser.snapshot(tabId, {
             interactiveOnly: optionalBoolean(input, "interactive") === true,
-            frameId: optionalString3(input, "frameId"),
+            frameId: optionalString4(input, "frameId"),
             signal: invocation.signal
           });
         }
       ),
-      tool3(
+      tool4(
         "find",
         "Find accessibility nodes by name substring and return clickable refs where available.",
         objectSchema({
@@ -9734,13 +11634,13 @@ ${lines.join("\n")}
           const tabId = await workingTab(browser, invocation.sessionId);
           const snapshot = await browser.snapshot(tabId, {
             signal: invocation.signal,
-            frameId: optionalString3(input, "frameId")
+            frameId: optionalString4(input, "frameId")
           });
-          const query = requiredString4(input, "query").toLowerCase();
+          const query = requiredString5(input, "query").toLowerCase();
           return snapshot.nodes.filter((node) => node.name.toLowerCase().includes(query)).slice(0, 20);
         }
       ),
-      tool3(
+      tool4(
         "read_page",
         "Read visible text from the working tab.",
         objectSchema({ maxChars: { type: "integer" }, frameId: { type: "string" } }),
@@ -9752,13 +11652,13 @@ ${lines.join("\n")}
           return {
             tabId,
             text: await browser.readText(tabId, maxChars, {
-              frameId: optionalString3(input, "frameId"),
+              frameId: optionalString4(input, "frameId"),
               signal: invocation.signal
             })
           };
         }
       ),
-      tool3(
+      tool4(
         "evaluate",
         "Evaluate JavaScript in the working tab. This is a high-risk capability.",
         objectSchema({
@@ -9769,14 +11669,14 @@ ${lines.join("\n")}
         ["browser:script"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const output = await browser.evaluate(tabId, requiredString4(input, "code"), {
-            frameId: optionalString3(input, "frameId"),
+          const output = await browser.evaluate(tabId, requiredString5(input, "code"), {
+            frameId: optionalString4(input, "frameId"),
             signal: invocation.signal
           });
           return output === void 0 ? null : output;
         }
       ),
-      tool3(
+      tool4(
         "click",
         "Click an element by @eN snapshot ref or CSS selector.",
         targetSchema(),
@@ -9788,7 +11688,7 @@ ${lines.join("\n")}
           return { clicked: true };
         }
       ),
-      tool3(
+      tool4(
         "mouse_click",
         "Click an element center with real CDP mouse events.",
         targetSchema(),
@@ -9799,7 +11699,7 @@ ${lines.join("\n")}
           return browser.mouseClick(tabId, targetFrom(input));
         }
       ),
-      tool3(
+      tool4(
         "hover",
         "Move the real mouse over an element to reveal hover content.",
         targetSchema(),
@@ -9810,7 +11710,7 @@ ${lines.join("\n")}
           return browser.hover(tabId, targetFrom(input));
         }
       ),
-      tool3(
+      tool4(
         "fill",
         "Fill an input, textarea or contentEditable element by ref or selector.",
         {
@@ -9827,11 +11727,11 @@ ${lines.join("\n")}
         ["browser:interact"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          await browser.fill(tabId, targetFrom(input), requiredString4(input, "value"));
+          await browser.fill(tabId, targetFrom(input), requiredString5(input, "value"));
           return { filled: true };
         }
       ),
-      tool3(
+      tool4(
         "type_text",
         "Insert text at the currently focused element.",
         objectSchema({ text: { type: "string" } }, ["text"]),
@@ -9842,13 +11742,13 @@ ${lines.join("\n")}
           await browser.cdp(
             tabId,
             "Input.insertText",
-            { text: requiredString4(input, "text") },
+            { text: requiredString5(input, "text") },
             invocation.signal
           );
           return { typed: true };
         }
       ),
-      tool3(
+      tool4(
         "select_option",
         "Select options in a native select control by value or visible label.",
         objectSchema({
@@ -9864,7 +11764,7 @@ ${lines.join("\n")}
           return await browser.selectOption(tabId, targetFrom(input), values);
         }
       ),
-      tool3(
+      tool4(
         "drag",
         "Drag one element to another using real mouse events.",
         objectSchema({
@@ -9876,22 +11776,22 @@ ${lines.join("\n")}
         ["browser:interact"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const frameId = optionalString3(input, "frameId");
+          const frameId = optionalString4(input, "frameId");
           await browser.drag(
             tabId,
             {
-              selector: requiredString4(input, "from"),
+              selector: requiredString5(input, "from"),
               ...frameId ? { frameId } : {}
             },
             {
-              selector: requiredString4(input, "to"),
+              selector: requiredString5(input, "to"),
               ...frameId ? { frameId } : {}
             }
           );
           return { dragged: true };
         }
       ),
-      tool3(
+      tool4(
         "scroll",
         "Scroll the page by one viewport, to an edge, selector or text target.",
         objectSchema({
@@ -9905,19 +11805,19 @@ ${lines.join("\n")}
         ["browser:read"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const to = optionalString3(input, "to");
-          const direction = optionalString3(input, "direction");
+          const to = optionalString4(input, "to");
+          const direction = optionalString4(input, "direction");
           return await browser.scroll(tabId, {
             ...to === "top" || to === "bottom" ? { to } : {},
             ...direction === "up" || direction === "down" ? { direction } : {},
-            ...optionalString3(input, "selector") ? { selector: optionalString3(input, "selector") } : {},
-            ...optionalString3(input, "text") ? { text: optionalString3(input, "text") } : {},
-            ...optionalString3(input, "frameId") ? { frameId: optionalString3(input, "frameId") } : {},
+            ...optionalString4(input, "selector") ? { selector: optionalString4(input, "selector") } : {},
+            ...optionalString4(input, "text") ? { text: optionalString4(input, "text") } : {},
+            ...optionalString4(input, "frameId") ? { frameId: optionalString4(input, "frameId") } : {},
             signal: invocation.signal
           });
         }
       ),
-      tool3(
+      tool4(
         "send_keys",
         "Dispatch a keyboard key such as Enter, Tab or Escape.",
         objectSchema({ keys: { type: "string" } }, ["keys"]),
@@ -9925,12 +11825,12 @@ ${lines.join("\n")}
         ["browser:interact"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const keys = requiredString4(input, "keys").split(/\s+/).filter(Boolean);
+          const keys = requiredString5(input, "keys").split(/\s+/).filter(Boolean);
           for (const key of keys) await sendKey(browser, tabId, key, invocation.signal);
           return { sent: keys };
         }
       ),
-      tool3(
+      tool4(
         "wait",
         "Wait for text, text disappearance or a selector in the working tab.",
         objectSchema({
@@ -9948,18 +11848,18 @@ ${lines.join("\n")}
             met: await browser.waitFor(
               tabId,
               {
-                text: optionalString3(input, "text"),
-                textGone: optionalString3(input, "text_gone"),
-                selector: optionalString3(input, "selector"),
+                text: optionalString4(input, "text"),
+                textGone: optionalString4(input, "text_gone"),
+                selector: optionalString4(input, "selector"),
                 timeoutMs: optionalNumber2(input, "timeout_ms")
               },
               invocation.signal,
-              { frameId: optionalString3(input, "frameId") }
+              { frameId: optionalString4(input, "frameId") }
             )
           };
         }
       ),
-      tool3(
+      tool4(
         "screenshot",
         "Capture the working tab viewport as a PNG data URL.",
         objectSchema({ format: { type: "string", enum: ["png", "jpeg"] } }),
@@ -9967,11 +11867,11 @@ ${lines.join("\n")}
         ["browser:read"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const format = optionalString3(input, "format") === "jpeg" ? "jpeg" : "png";
+          const format = optionalString4(input, "format") === "jpeg" ? "jpeg" : "png";
           return await browser.screenshot(tabId, format);
         }
       ),
-      tool3(
+      tool4(
         "upload",
         "Place base64 files into a page file input.",
         objectSchema({
@@ -9986,16 +11886,16 @@ ${lines.join("\n")}
           const files = requiredArray(input, "files").map((entry) => {
             const file = isObject(entry);
             return {
-              name: requiredString4(file, "name"),
-              type: optionalString3(file, "type") ?? "application/octet-stream",
-              base64: requiredString4(file, "base64")
+              name: requiredString5(file, "name"),
+              type: optionalString4(file, "type") ?? "application/octet-stream",
+              base64: requiredString5(file, "base64")
             };
           });
-          const target = optionalString3(input, "ref") || optionalString3(input, "selector") ? targetFrom(input) : void 0;
+          const target = optionalString4(input, "ref") || optionalString4(input, "selector") ? targetFrom(input) : void 0;
           return { uploaded: await browser.upload(tabId, target, files) };
         }
       ),
-      tool3(
+      tool4(
         "save_as_pdf",
         "Render the current page as PDF and save it through the configured download port.",
         objectSchema({
@@ -10015,7 +11915,7 @@ ${lines.join("\n")}
             scale: optionalNumber2(input, "scale"),
             printBackground: optionalBoolean(input, "print_background")
           });
-          const name = `${(optionalString3(input, "file_name") ?? "page").replace(/\.pdf$/i, "").replace(/[\\/:*?"<>|]+/g, "-")}.pdf`;
+          const name = `${(optionalString4(input, "file_name") ?? "page").replace(/\.pdf$/i, "").replace(/[\\/:*?"<>|]+/g, "-")}.pdf`;
           if (dependencies.download) {
             await dependencies.download(name, "application/pdf", result.dataBase64);
             return { saved: name, bytes: result.bytes };
@@ -10027,7 +11927,7 @@ ${lines.join("\n")}
           };
         }
       ),
-      tool3(
+      tool4(
         "dialog",
         "Inspect, accept or dismiss a blocking JavaScript dialog.",
         objectSchema({
@@ -10038,14 +11938,14 @@ ${lines.join("\n")}
         ["browser:interact"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const action = requiredString4(input, "action");
+          const action = requiredString5(input, "action");
           if (action !== "status" && action !== "accept" && action !== "dismiss") {
             throw new AgentError("TOOL_ARGUMENTS_INVALID", "dialog.action is invalid");
           }
-          return await browser.dialog(tabId, action, optionalString3(input, "text"));
+          return await browser.dialog(tabId, action, optionalString4(input, "text"));
         }
       ),
-      tool3(
+      tool4(
         "network",
         "Start, stop, list or read captured network requests.",
         objectSchema({
@@ -10057,11 +11957,11 @@ ${lines.join("\n")}
         ["browser:network"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const cmd = requiredString4(input, "cmd");
+          const cmd = requiredString5(input, "cmd");
           if (cmd === "detail") {
             return await browser.network(tabId, {
               cmd: "detail",
-              requestId: requiredString4(input, "requestId")
+              requestId: requiredString5(input, "requestId")
             });
           }
           if (cmd !== "start" && cmd !== "stop" && cmd !== "list") {
@@ -10069,11 +11969,11 @@ ${lines.join("\n")}
           }
           return await browser.network(tabId, {
             cmd,
-            filter: optionalString3(input, "filter")
+            filter: optionalString4(input, "filter")
           });
         }
       ),
-      tool3(
+      tool4(
         "close_tab",
         "Close the working tab and clear the session binding.",
         objectSchema({}),
@@ -10085,14 +11985,14 @@ ${lines.join("\n")}
           return { closed: tabId };
         }
       ),
-      tool3(
+      tool4(
         "find_tab",
         "Find an inspectable tab by URL/domain and make it the working tab.",
         objectSchema({ url: { type: "string" } }, ["url"]),
         "write",
         ["browser:read"],
         async (input, invocation) => {
-          const needle = requiredString4(input, "url").toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+          const needle = requiredString5(input, "url").toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
           const tab = (await browser.listTabs()).find((candidate) => {
             const value = String(candidate.url ?? "").toLowerCase();
             const domain = value.replace(/^https?:\/\//, "").split("/")[0];
@@ -10103,7 +12003,7 @@ ${lines.join("\n")}
           return tab;
         }
       ),
-      tool3(
+      tool4(
         "close_session",
         "Close browser resources owned by this task session.",
         objectSchema({}),
@@ -10114,7 +12014,7 @@ ${lines.join("\n")}
           return report;
         }
       ),
-      tool3(
+      tool4(
         "await_user_action",
         "Pause for a manual login, captcha or confirmation, then continue after explicit user action.",
         objectSchema({ reason: { type: "string" } }, ["reason"]),
@@ -10128,7 +12028,7 @@ ${lines.join("\n")}
             );
           }
           const result = await dependencies.handoff.requestHandoff(
-            requiredString4(input, "reason"),
+            requiredString5(input, "reason"),
             {
               sessionId: invocation.sessionId,
               taskId: invocation.taskId,
@@ -10144,7 +12044,7 @@ ${lines.join("\n")}
       )
     ];
   }
-  function tool3(name, description, parameters, risk, capabilities, execute) {
+  function tool4(name, description, parameters, risk, capabilities, execute) {
     return {
       name,
       description,
@@ -10168,14 +12068,14 @@ ${lines.join("\n")}
     }
     return value;
   }
-  function requiredString4(input, key) {
+  function requiredString5(input, key) {
     const value = input[key];
     if (typeof value !== "string" || !value.trim()) {
       throw new AgentError("TOOL_ARGUMENTS_INVALID", `${key} must be a non-empty string`);
     }
     return value;
   }
-  function optionalString3(input, key) {
+  function optionalString4(input, key) {
     const value = input[key];
     return typeof value === "string" && value.trim() ? value : void 0;
   }
@@ -10195,9 +12095,9 @@ ${lines.join("\n")}
     return typeof value === "string" && values.includes(value) ? value : void 0;
   }
   function targetFrom(input) {
-    const ref = optionalString3(input, "ref");
-    const selector = optionalString3(input, "selector");
-    const frameId = optionalString3(input, "frameId");
+    const ref = optionalString4(input, "ref");
+    const selector = optionalString4(input, "selector");
+    const frameId = optionalString4(input, "frameId");
     if (!ref && !selector) {
       throw new AgentError("BROWSER_TARGET_INVALID", "A ref or selector is required");
     }
@@ -10520,24 +12420,24 @@ ${lines.join("\n")}
           instructions: stringValue(item.instructions),
           source,
           ...stringValue(item.sourceId) ? { sourceId: stringValue(item.sourceId) } : {},
-          skills: stringArray2(item.skills),
+          skills: stringArray3(item.skills),
           tools: {
-            ...Array.isArray(item.allowTools) ? { allow: stringArray2(item.allowTools) } : {},
-            ...Array.isArray(item.denyTools) ? { deny: stringArray2(item.denyTools) } : {}
+            ...Array.isArray(item.allowTools) ? { allow: stringArray3(item.allowTools) } : {},
+            ...Array.isArray(item.denyTools) ? { deny: stringArray3(item.denyTools) } : {}
           },
-          mcpServers: stringArray2(item.mcpServers),
+          mcpServers: stringArray3(item.mcpServers),
           permissions: {
-            capabilities: stringArray2(item.capabilities),
+            capabilities: stringArray3(item.capabilities),
             effects: ["read", "write", "execute", "network"].filter(
-              (effect) => stringArray2(item.effects).includes(effect)
+              (effect) => stringArray3(item.effects).includes(effect)
             ),
-            deniedCapabilities: stringArray2(item.deniedCapabilities),
-            deniedTools: stringArray2(item.deniedTools)
+            deniedCapabilities: stringArray3(item.deniedCapabilities),
+            deniedTools: stringArray3(item.deniedTools)
           },
           contextMode: item.contextMode === "fork" || item.contextMode === "artifacts" ? item.contextMode : "fresh",
           execution: {
             defaultMode: item.executionMode === "background" || item.executionMode === "isolated-worktree" || item.executionMode === "sandbox" ? item.executionMode : "foreground",
-            allowedModes: stringArray2(item.allowedModes).length > 0 ? stringArray2(item.allowedModes).filter(
+            allowedModes: stringArray3(item.allowedModes).length > 0 ? stringArray3(item.allowedModes).filter(
               (mode) => ["foreground", "background", "isolated-worktree", "sandbox"].includes(mode)
             ) : ["foreground", "background"]
           },
@@ -10588,7 +12488,7 @@ ${lines.join("\n")}
   function stringValue(value) {
     return typeof value === "string" ? value.trim() : "";
   }
-  function stringArray2(value) {
+  function stringArray3(value) {
     return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
   }
   function positiveInteger(value, fallback) {
@@ -11179,8 +13079,8 @@ ${lines.join("\n")}
       }
       if (request.type === "select_tab") {
         await this.browser.setWorkingTab(
-          requiredString5(request, "sessionId"),
-          requiredString5(request, "tabId")
+          requiredString6(request, "sessionId"),
+          requiredString6(request, "tabId")
         );
         return { handled: true, data: true };
       }
@@ -11193,7 +13093,7 @@ ${lines.join("\n")}
       if (request.type === "bind_tab_session") {
         const binding = await this.tabs.bind(
           activationContext(request),
-          requiredString5(request, "sessionId")
+          requiredString6(request, "sessionId")
         );
         return {
           handled: true,
@@ -11233,7 +13133,7 @@ ${lines.join("\n")}
   };
   function activationContext(request) {
     const windowId = Number(request.windowId);
-    const tabId = requiredString5(request, "tabId");
+    const tabId = requiredString6(request, "tabId");
     if (!Number.isFinite(windowId)) {
       throw new AgentError("TAB_CONTEXT_INVALID", "A valid windowId is required");
     }
@@ -11244,7 +13144,7 @@ ${lines.join("\n")}
       ...Number.isFinite(groupId) && groupId >= 0 ? { groupId } : {}
     };
   }
-  function requiredString5(request, key) {
+  function requiredString6(request, key) {
     const value = request[key];
     if (typeof value !== "string" || !value) {
       throw new AgentError(

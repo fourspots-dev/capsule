@@ -102,6 +102,12 @@
     return '<div class="wb-rt-tablewrap"><table class="wb-rt-table"><thead><tr>' + head.map((cell) => `<th class="wb-rt-th">${inline(cell)}</th>`).join("") + "</tr></thead><tbody>" + body.map((row) => `<tr>${row.map((cell) => `<td class="wb-rt-td">${inline(cell)}</td>`).join("")}</tr>`).join("") + "</tbody></table></div>";
   }
 
+  // src/git/binary.ts
+  var encoder = new TextEncoder();
+
+  // src/git/objects.ts
+  var encoder2 = new TextEncoder();
+
   // src/platform/workspace-edit-prompt.ts
   var workspaceEditPrompt = [
     "When editing workspace files, use apply_patch with *** Begin Patch / *** End Patch for multi-line or multi-file changes.",

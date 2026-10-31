@@ -2,7 +2,11 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 const root = resolve('src');
-const allowedRoots = [resolve(root, 'core'), resolve(root, 'platform')];
+const allowedRoots = [
+  resolve(root, 'core'),
+  resolve(root, 'platform'),
+  resolve(root, 'git')
+];
 const failures = [];
 
 for (const directory of allowedRoots) {

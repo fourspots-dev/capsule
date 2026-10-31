@@ -13,6 +13,7 @@ import type {
   HostTerminal,
   HostWorkspaceBridge,
 } from '../host';
+import type { HostActionProvider } from '../platform/host-action';
 import {
   createWorkspaceBundle,
   serializeWorkspaceBundle,
@@ -32,6 +33,7 @@ export interface NodeHostOptions {
   stateRoot?: string;
   terminal?: NodeTerminalStreams;
   process?: boolean;
+  actions?: HostActionProvider;
   now?: () => number;
 }
 
@@ -47,6 +49,7 @@ export class NodeHostBridge implements HostBridge {
   readonly workspace: HostWorkspaceBridge;
   readonly terminal?: NodeTerminal;
   readonly process?: HostProcessBridge;
+  readonly actions?: HostActionProvider;
 
   constructor(private readonly options: NodeHostOptions) {
     const stateRoot = options.stateRoot ?? join(options.projectRoot ?? process.cwd(), '.tinyai');
@@ -70,6 +73,7 @@ export class NodeHostBridge implements HostBridge {
       },
     };
     this.terminal = options.terminal ? new NodeTerminal(options.terminal) : undefined;
+    this.actions = options.actions;
     this.process = options.process
       ? new NodeProcessBridge(options.projectRoot ?? process.cwd())
       : undefined;
@@ -84,6 +88,7 @@ export class NodeHostBridge implements HostBridge {
       'clone',
       ...(this.terminal ? (['terminal'] as const) : []),
       ...(this.process ? (['process'] as const) : []),
+      ...(this.actions ? (['actions'] as const) : []),
     ];
     this.descriptor = {
       id: options.id ?? 'node-host',

@@ -71,6 +71,25 @@ export class ChromeArtifactStore implements ArtifactStore {
     return (await this.load(artifactId))?.metadata;
   }
 
+  async restore(metadata: ArtifactMetadata, data: Uint8Array): Promise<ArtifactRef> {
+    if (!metadata.id || !metadata.name.trim()) {
+      throw new AgentError('ARTIFACT_INPUT_INVALID', 'Artifact metadata is invalid');
+    }
+    await this.storage.set({
+      [this.key(metadata.id)]: {
+        metadata: { ...metadata },
+        dataBase64: bytesToBase64(data),
+      } satisfies StoredArtifact,
+    });
+    return {
+      artifactId: metadata.id,
+      name: metadata.name,
+      mimeType: metadata.mimeType,
+      bytes: metadata.bytes,
+      kind: metadata.kind,
+    };
+  }
+
   async read(artifactId: string): Promise<Uint8Array | undefined> {
     const artifact = await this.load(artifactId);
     return artifact ? base64ToBytes(artifact.dataBase64) : undefined;

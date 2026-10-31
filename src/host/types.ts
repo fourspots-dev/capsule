@@ -1,5 +1,8 @@
+import type { HostActionProvider } from '../platform/host-action';
+
 export type HostCapability =
   | 'storage'
+  | 'actions'
   | 'workspace.import'
   | 'workspace.export'
   | 'workspace.picker'
@@ -111,6 +114,7 @@ export interface HostBridge {
   crypto?: HostCrypto;
   clone?: HostClone;
   workspace?: HostWorkspaceBridge;
+  actions?: HostActionProvider;
   terminal?: HostTerminal;
   process?: HostProcessBridge;
   network?: HostNetworkBridge;
