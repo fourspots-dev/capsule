@@ -55,6 +55,11 @@ The UI follows the original tinyai visual language:
 
 The UI consumes only `Command` and `ProductProjection`. Runtime state is not reconstructed from rendered messages.
 
+The UI design and its test strategy are maintained in:
+
+- [UI detailed design](docs/tinyai-ui-design-v1.html)
+- [UI test design](docs/tinyai-ui-testing-v1.html)
+
 ## Runtime
 
 ```text

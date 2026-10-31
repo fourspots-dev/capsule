@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="tinyai UI 测试方案：视图模型、过程折叠、工具渲染、Composer、审批、子 Agent、响应式与 Chrome E2E。">
+  <title>tinyai UI · 测试方案 v1.0</title>
+  <style>
+    :root{
+      color-scheme:light;--bg:#f3f0ea;--surface:#fffdf8;--surface-2:#ebe6dd;--surface-3:#ddd6ca;
+      --text:#191a17;--muted:#686b63;--faint:#8d9085;--border:#d7d1c5;--border-strong:#b4ada0;
+      --accent:#b1512e;--accent-soft:#fae5dc;--accent-ink:#792a15;--blue:#2e608a;--blue-soft:#e1edf7;
+      --green:#246e51;--green-soft:#ddf0e7;--amber:#886019;--amber-soft:#f7ebc9;--red:#a12f38;--red-soft:#f8e0e2;
+      --purple:#66508e;--purple-soft:#eee5f7;--code:#20211e;--code-text:#f1eee7;--shadow:0 18px 50px rgba(55,42,28,.08);
+      --sidebar:250px;--drawer:442px;--font:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC","Microsoft YaHei",sans-serif;
+    }
+    html[data-theme="dark"]{
+      color-scheme:dark;--bg:#11120f;--surface:#1a1c18;--surface-2:#24271f;--surface-3:#30342b;
+      --text:#efede5;--muted:#aaa99e;--faint:#85877e;--border:#373a31;--border-strong:#55594d;
+      --accent:#ef7854;--accent-soft:#3d241c;--accent-ink:#ffc4b1;--blue:#8bc3ed;--blue-soft:#1c3041;
+      --green:#72cba4;--green-soft:#19362a;--amber:#e1ba73;--amber-soft:#382e1b;--red:#f0898f;--red-soft:#401f22;
+      --purple:#c1a8e8;--purple-soft:#30243f;--code:#0d0e0c;--code-text:#e9e7df;--shadow:0 18px 52px rgba(0,0,0,.25);
+    }
+    *{box-sizing:border-box}html{scroll-behavior:smooth}
+    body{margin:0;overflow-x:clip;background:radial-gradient(circle at 88% -5%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 28rem),var(--bg);color:var(--text);font-family:var(--font);font-size:15px;line-height:1.72}
+    a{color:var(--accent-ink);text-underline-offset:3px}button,input,textarea,select{font:inherit;color:inherit}
+    code,pre{font-family:"SFMono-Regular",Consolas,monospace}code{padding:.13em .36em;border-radius:5px;background:var(--surface-2);font-size:.9em}
+    .topbar{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:16px;min-height:64px;padding:0 24px;border-bottom:1px solid color-mix(in srgb,var(--border) 78%,transparent);background:color-mix(in srgb,var(--bg) 91%,transparent);backdrop-filter:blur(18px)}
+    .brand{display:flex;align-items:center;gap:10px;min-width:var(--sidebar);font-weight:650}.brand-mark{display:grid;place-items:center;width:30px;height:30px;border-radius:9px 9px 9px 3px;background:var(--accent);color:#fff;font-family:Georgia,serif;font-size:17px;font-style:italic}
+    .top-meta{overflow:hidden;color:var(--muted);font-size:12px;text-overflow:ellipsis;white-space:nowrap}.top-actions{display:flex;gap:8px;margin-left:auto}.toolbar-button,.icon-button{display:inline-flex;align-items:center;justify-content:center;min-height:36px;border:1px solid var(--border);border-radius:99px;background:var(--surface);cursor:pointer;font-size:12px;font-weight:650}.toolbar-button{gap:6px;padding:0 13px}.icon-button{width:36px;padding:0}.toolbar-button:hover,.icon-button:hover{border-color:var(--border-strong)}.toolbar-button.is-active{background:var(--accent);border-color:var(--accent);color:#fff}
+    .review-count{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:99px;background:color-mix(in srgb,currentColor 12%,transparent);font-size:10px}button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+    .layout{display:grid;grid-template-columns:var(--sidebar) minmax(0,1fr);max-width:1500px;margin:auto}.sidebar{position:sticky;top:64px;align-self:start;height:calc(100vh - 64px);padding:30px 22px 46px 26px;overflow:auto}.sidebar-label{margin:0 0 12px;color:var(--faint);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+    .toc{display:grid;gap:3px;margin:0;padding:0;list-style:none}.toc a{display:block;padding:6px 10px;border-left:2px solid transparent;color:var(--muted);font-size:13px;line-height:1.45;text-decoration:none}.toc a:hover,.toc a.active{border-left-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent);color:var(--text)}.toc a.active{font-weight:650}
+    .sidebar-note,.review-summary{margin-top:24px;padding-top:18px;border-top:1px solid var(--border);color:var(--faint);font-size:11px;line-height:1.55}.review-summary strong{display:block;color:var(--text);font-size:12px}.review-summary button{margin-top:10px}
+    main{width:min(100%,1180px);padding:52px 58px 110px}.hero{position:relative;overflow:hidden;padding:46px 48px 42px;border:1px solid var(--border);border-radius:26px;background:linear-gradient(132deg,var(--surface),color-mix(in srgb,var(--accent) 5%,var(--surface)));box-shadow:var(--shadow)}.hero::after{content:"QA";position:absolute;right:28px;top:8px;color:color-mix(in srgb,var(--accent) 9%,transparent);font-family:Georgia,serif;font-size:124px;line-height:1}
+    .eyebrow{display:flex;align-items:center;gap:8px;margin-bottom:22px;color:var(--accent-ink);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}.status-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 14%,transparent)}
+    h1{position:relative;max-width:840px;margin:0;font-family:Georgia,"Songti SC",serif;font-size:clamp(36px,5vw,62px);font-weight:500;line-height:1.06;letter-spacing:-.045em}.hero-lead{position:relative;max-width:840px;margin:24px 0 0;color:var(--muted);font-size:17px}.meta-strip{display:flex;flex-wrap:wrap;gap:10px 24px;margin-top:32px;padding-top:22px;border-top:1px solid var(--border);color:var(--faint);font-size:12px}.meta-strip strong{margin-right:5px;color:var(--text)}
+    section{scroll-margin-top:88px;margin-top:70px}.section-head{display:flex;align-items:center;gap:12px;margin-bottom:22px}.section-no{color:var(--accent);font:700 11px monospace;letter-spacing:.08em}h2{margin:0;font-family:Georgia,"Songti SC",serif;font-size:clamp(27px,3vw,36px);font-weight:500;letter-spacing:-.025em}h3{margin:30px 0 10px;font-size:18px;font-weight:650}h4{margin:20px 0 8px;font-size:14px}p{margin:10px 0 16px}ul,ol{margin:12px 0 20px;padding-left:23px}li{margin:6px 0}li::marker{color:var(--accent)}.lede{max-width:860px;color:var(--muted);font-size:16px}
+    .grid-2,.grid-3,.grid-4{display:grid;gap:16px}.grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}.card{min-width:0;padding:21px 22px;border:1px solid var(--border);border-radius:16px;background:var(--surface)}.card h3,.card h4{margin-top:0}.card p:last-child,.card ul:last-child{margin-bottom:0}
+    .tag{display:inline-flex;align-items:center;min-height:23px;padding:2px 8px;border-radius:99px;background:var(--surface-2);color:var(--muted);font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}.tag.core{background:var(--accent-soft);color:var(--accent-ink)}.tag.zc{background:var(--blue-soft);color:var(--blue)}.tag.ok{background:var(--green-soft);color:var(--green)}.tag.risk{background:var(--red-soft);color:var(--red)}
+    .callout{display:grid;grid-template-columns:4px 1fr;gap:18px;margin:28px 0;padding:18px 20px;border-radius:10px;background:var(--surface-2)}.callout::before{content:"";border-radius:4px;background:var(--accent)}.callout strong{display:block;margin-bottom:3px}.callout p{margin:0;color:var(--muted)}.callout.warn{background:var(--amber-soft)}.callout.warn::before{background:var(--amber)}
+    .table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:16px;background:var(--surface)}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:11px 12px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}th{color:var(--faint);font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}tr:last-child td{border-bottom:0}.table-wrap table{min-width:760px}
+    .diagram-card{padding:22px;overflow-x:auto;border:1px solid var(--border);border-radius:18px;background:var(--surface)}.diagram-card .mermaid{min-width:760px;text-align:center}.diagram-caption{margin:12px 2px 0;color:var(--faint);font-size:11px;text-align:center}
+    pre{margin:16px 0;padding:18px 20px;overflow-x:auto;border-radius:13px;background:var(--code);color:var(--code-text);font-size:11px;line-height:1.65}pre code{padding:0;background:transparent;color:inherit}.checklist{padding:0;list-style:none}.checklist li{position:relative;margin:9px 0;padding-left:27px}.checklist li::before{content:"✓";position:absolute;left:0;top:1px;display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:var(--green-soft);color:var(--green);font-size:10px;font-weight:800}
+    .roadmap{display:grid;gap:0;margin-top:20px}.phase{display:grid;grid-template-columns:72px 1fr;gap:20px;padding-bottom:30px}.phase-track{position:relative;display:flex;justify-content:center}.phase-track::before{content:"";position:absolute;top:35px;bottom:-30px;width:1px;background:var(--border)}.phase:last-child .phase-track::before{display:none}.phase-dot{position:relative;z-index:1;display:grid;place-items:center;width:40px;height:40px;border:1px solid var(--border);border-radius:50%;background:var(--surface);color:var(--accent);font:700 11px monospace}.phase-body{padding:20px 22px;border:1px solid var(--border);border-radius:16px;background:var(--surface)}.phase-body h3{margin:0 0 5px}.phase-body p{margin:0 0 9px;color:var(--muted);font-size:13px}.phase-body ul{margin-bottom:0;font-size:13px}
+    details{margin:12px 0;padding:14px 16px;border:1px solid var(--border);border-radius:11px;background:var(--surface)}summary{cursor:pointer;font-weight:650;font-size:13px}.footer{margin-top:72px;padding-top:24px;border-top:1px solid var(--border);color:var(--faint);font-size:11px}
+    .review-pin{padding:5px 9px;border:1px solid var(--border);border-radius:99px;background:transparent;color:var(--faint);font-size:10px;font-weight:650;cursor:pointer}.review-pin:hover,.review-pin.has-notes{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink)}body.review-mode [data-reviewable]{outline:1px dashed color-mix(in srgb,var(--accent) 45%,transparent);outline-offset:4px;cursor:crosshair}body.review-mode [data-reviewable]:hover{outline:2px solid var(--accent)}
+    .annotation-drawer{display:none;position:fixed;z-index:80;top:0;right:0;width:min(var(--drawer),100vw);height:100vh;padding:22px;overflow:auto;border-left:1px solid var(--border);background:var(--surface);box-shadow:-20px 0 60px rgba(0,0,0,.15)}.annotation-drawer.is-open{display:block}.drawer-head{display:flex;align-items:center;gap:12px}.drawer-head h2{font-family:inherit;font-size:20px}.drawer-close{margin-left:auto}.drawer-actions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 18px}.field{display:grid;gap:6px;margin:13px 0}.field label{color:var(--muted);font-size:11px;font-weight:650}.field input,.field textarea,.field select{width:100%;padding:9px 10px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2);font-size:13px}.field textarea{min-height:132px;resize:vertical}.field-selection{min-height:48px;padding:9px 10px;border-radius:8px;background:var(--amber-soft);color:var(--amber);font-size:11px}.primary-button,.secondary-button,.danger-button{min-height:36px;padding:0 13px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:650}.primary-button{border:1px solid var(--accent);background:var(--accent);color:#fff}.secondary-button{border:1px solid var(--border);background:var(--surface)}.danger-button{border:1px solid var(--red);background:transparent;color:var(--red)}.notes-list{display:grid;gap:10px}.note{padding:12px;border:1px solid var(--border);border-radius:11px;background:var(--surface-2);font-size:12px}.note-head{display:flex;flex-wrap:wrap;gap:6px;color:var(--faint);font-size:10px}.note p{margin:5px 0}.note-actions{display:flex;gap:8px}.note-actions button{padding:0;border:0;background:transparent;color:var(--accent-ink);cursor:pointer}
+    .toast{position:fixed;z-index:100;left:50%;bottom:24px;padding:9px 14px;border-radius:99px;background:var(--code);color:var(--code-text);font-size:12px;opacity:0;transform:translate(-50%,20px);pointer-events:none;transition:.16s}.toast.is-visible{opacity:1;transform:translate(-50%,0)}
+    @media(max-width:1050px){:root{--sidebar:210px}main{padding:42px 36px 90px}.grid-4,.grid-3{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media(max-width:820px){.topbar{padding:0 15px}.brand{min-width:auto}.top-meta{display:none}.toolbar-button .review-label{display:none}.layout{display:block}.sidebar{display:none}main{padding:26px 18px 76px}.hero{padding:34px 26px 30px}.grid-2,.grid-3,.grid-4{grid-template-columns:1fr}.annotation-drawer{width:100vw;border-left:0}}
+    @media(max-width:520px){body{font-size:14px}.brand>span:last-child{display:none}.section-head,.drawer-head{flex-wrap:wrap}.hero-lead{font-size:15px}.meta-strip{display:grid;gap:7px}.phase{grid-template-columns:50px 1fr;gap:12px}.annotation-drawer{padding:17px}}
+    @media print{.topbar,.sidebar,.top-actions,.review-pin,.annotation-drawer,.toast{display:none!important}.layout{display:block}main{width:100%;max-width:none;padding:0}.hero,.card,.diagram-card,.table-wrap,.phase-body{box-shadow:none;break-inside:avoid}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{transition:none!important;animation:none!important}}
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">T</span><span>tinyai UI testing</span></div>
+    <div class="top-meta">Deterministic UI evidence · Chrome E2E · v1.0</div>
+    <div class="top-actions">
+      <button class="icon-button" id="theme-toggle" type="button" aria-label="切换主题">◐</button>
+      <button class="toolbar-button" id="review-toggle" type="button" aria-pressed="false"><span aria-hidden="true">✎</span><span class="review-label">标注模式</span></button>
+      <button class="toolbar-button" id="open-review" type="button"><span aria-hidden="true">☰</span><span class="review-label">批注</span><span class="review-count" id="review-count">0</span></button>
+      <button class="toolbar-button" id="export-review" type="button"><span aria-hidden="true">⇩</span><span class="review-label">导出修订</span></button>
+      <button class="icon-button" id="print-button" type="button" aria-label="打印">⎙</button>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="文档目录">
+      <p class="sidebar-label">Test map</p>
+      <nav><ol class="toc">
+        <li><a href="#summary">测试目标</a></li>
+        <li><a href="#references">参考基线</a></li>
+        <li><a href="#strategy">测试策略</a></li>
+        <li><a href="#architecture">测试架构</a></li>
+        <li><a href="#contracts">视图模型契约</a></li>
+        <li><a href="#history">过程折叠状态</a></li>
+        <li><a href="#reasoning">思考展示</a></li>
+        <li><a href="#tools">工具渲染</a></li>
+        <li><a href="#subagent">子 Agent</a></li>
+        <li><a href="#composer">Composer 与队列</a></li>
+        <li><a href="#interaction">审批与接管</a></li>
+        <li><a href="#visual">视觉回归</a></li>
+        <li><a href="#chrome">Chrome E2E</a></li>
+        <li><a href="#responsive">响应式与无障碍</a></li>
+        <li><a href="#property">状态空间测试</a></li>
+        <li><a href="#performance">性能与虚拟化</a></li>
+        <li><a href="#fixtures">Fixture 规范</a></li>
+        <li><a href="#matrix">覆盖矩阵</a></li>
+        <li><a href="#roadmap">落地顺序</a></li>
+        <li><a href="#acceptance">发布门禁</a></li>
+      </ol></nav>
+      <div class="review-summary"><strong>修订状态</strong><span>当前 0 条批注，自动保存在本浏览器。</span><br><button class="secondary-button" id="import-review" type="button">导入修订</button><input id="import-review-file" type="file" accept=".json,application/json" hidden></div>
+      <div class="sidebar-note">配套设计：<a href="tinyai-ui-design-v1.html">tinyai UI Design v1.0</a></div>
+    </aside>
+    <main>
+      <section class="hero" id="summary">
+        <div class="eyebrow"><span class="status-dot"></span>UI TEST STRATEGY · v1.0</div>
+        <h1>每条过程展示都必须有确定性证据</h1>
+        <p class="hero-lead">测试重点不是截图是否“看起来差不多”，而是证明 Projection 到 UI view model 的派生正确、运行态与终态行为稳定、工具和审批不丢信息、恢复不制造第二份状态。</p>
+        <div class="meta-strip">
+          <span><strong>对应设计</strong> tinyai UI Design v1.0</span>
+          <span><strong>现有基线</strong> 159 deterministic / 3 Chrome E2E</span>
+          <span><strong>视觉基线</strong> initial tinyai 420×900</span>
+          <span><strong>状态</strong> 待评审</span>
+        </div>
+      </section>
+
+      <div class="callout">
+        <div><strong>测试先行边界</strong><p>UI 只从 Projection 和 Runtime 命令构造。测试必须使用 fake/replay 数据覆盖所有状态，真实模型仅用于少量非阻塞 Live Eval。</p></div>
+      </div>
+
+      <section id="references">
+        <div class="section-head"><span class="section-no">01</span><h2>参考基线与采用方式</h2></div>
+        <div class="table-wrap"><table><thead><tr><th>编号</th><th>来源</th><th>可借鉴测试</th><th>采用</th></tr></thead><tbody>
+          <tr><td>ZQ-01</td><td>ZCode Turn Render Units</td><td>以 UI render unit 为单测对象，不直接断言 raw row DOM</td><td><span class="tag core">直接采用</span></td></tr>
+          <tr><td>ZQ-02</td><td>ZCode Tool Rendering</td><td>每个 tool family 的摘要/展开/失败态矩阵</td><td><span class="tag core">直接采用</span></td></tr>
+          <tr><td>ZQ-03</td><td>ZCode scroll state machine</td><td>用户上滚优先于流式布局变化</td><td><span class="tag core">直接采用</span></td></tr>
+          <tr><td>ZQ-04</td><td>ZCode E2E catalog</td><td>Spec → Case → Fixture → Promotion</td><td><span class="tag zc">适配采用</span></td></tr>
+          <tr><td>ZQ-05</td><td>ZCode settings inert</td><td>打开设置时后台审批不抢焦点</td><td><span class="tag core">直接采用</span></td></tr>
+          <tr><td>TI-01</td><td>initial tinyai screenshot</td><td>主界面视觉回归</td><td><span class="tag ok">现有基线</span></td></tr>
+          <tr><td>TI-02</td><td>当前 Chrome E2E</td><td>Side Panel → SW → SSE → Projection</td><td><span class="tag ok">已有</span></td></tr>
+          <tr><td>TI-03</td><td>当前 Runtime tests</td><td>Command/ACK、Projection、Subagent、审批</td><td><span class="tag ok">已有</span></td></tr>
+        </tbody></table></div>
+      </section>
+
+      <section id="strategy">
+        <div class="section-head"><span class="section-no">02</span><h2>测试策略</h2></div>
+        <div class="grid-4">
+          <div class="card"><h3>L0 Contract</h3><p>纯函数派生、schema、状态机不依赖 DOM。</p></div>
+          <div class="card"><h3>L1 Unit</h3><p>Renderer registry、折叠、滚动和 Composer 逻辑。</p></div>
+          <div class="card"><h3>L2 Integration</h3><p>KernelClient、Gateway、Projection 和 Chrome API fake。</p></div>
+          <div class="card"><h3>L3 E2E</h3><p>真实 Chrome、真实 Side Panel、受控本地模型服务。</p></div>
+        </div>
+        <p>Live Model Eval 属于 L4，只评估模型行为与质量，不替代确定性门禁。任何 UI 状态机问题必须能在 L0–L3 复现。</p>
+      </section>
+
+      <section id="architecture">
+        <div class="section-head"><span class="section-no">03</span><h2>测试架构</h2></div>
+        <div class="diagram-card"><pre class="mermaid">
+flowchart LR
+  P[Projection Fixtures] --> D[RenderUnit Builder]
+  D --> G[Golden JSON]
+  D --> R[React/UI Renderer]
+  R --> S[Screenshot]
+  K[KernelClient / Gateway] --> P
+  F[Fake Browser / Sandbox / Model] --> K
+  E[Chrome E2E] --> K
+  E --> R
+  L[Live Eval] --> M[Quality Report]
+        </pre><p class="diagram-caption">确定性测试与 Live Eval 分离。</p></div>
+        <div class="grid-3">
+          <div class="card"><h3>Fake Projection</h3><p>按场景生成 snapshot/delta，不访问 Chrome。</p></div>
+          <div class="card"><h3>Replay Event Log</h3><p>按 eventSeq 重放，验证 live/cold 视图一致。</p></div>
+          <div class="card"><h3>Chrome Harness</h3><p>临时 profile、固定扩展、本地 SSE 服务。</p></div>
+        </div>
+      </section>
+
+      <section id="contracts">
+        <div class="section-head"><span class="section-no">04</span><h2>视图模型契约</h2></div>
+        <p class="lede">先对 <code>TurnRenderUnit</code> 做纯函数测试，再对 DOM 做薄渲染测试。</p>
+        <div class="table-wrap"><table><thead><tr><th>ID</th><th>输入</th><th>断言</th></tr></thead><tbody>
+          <tr><td>UI-RU-001</td><td>user + assistant + tool rows</td><td>只生成一轮，最新 assistant 位于 history 外</td></tr>
+          <tr><td>UI-RU-002</td><td>同 turn 两个 guided input</td><td>生成两个独立 work segment</td></tr>
+          <tr><td>UI-RU-003</td><td>compact control-only turn</td><td>不生成用户气泡和工作状态</td></tr>
+          <tr><td>UI-RU-004</td><td>final answer 后的 verification row</td><td>进入 tailRows，不被折叠进 history</td></tr>
+          <tr><td>UI-RU-005</td><td>没有 assistant text 的运行 turn</td><td>所有过程可见，不出现空折叠壳</td></tr>
+          <tr><td>UI-RU-006</td><td>delta 重排/重复</td><td>render unit 稳定，不重复 row</td></tr>
+        </tbody></table></div>
+      </section>
+
+      <section id="history">
+        <div class="section-head"><span class="section-no">05</span><h2>过程折叠状态</h2></div>
+        <div class="table-wrap"><table><thead><tr><th>ID</th><th>状态转换</th><th>期望</th></tr></thead><tbody>
+          <tr><td>UI-WS-001</td><td>draft → running</td><td>过程展开，底部显示稳定运行状态与计时</td></tr>
+          <tr><td>UI-WS-002</td><td>running → completedSuccess</td><td>过程折叠为“已工作 N 秒”，最终回答保持可见</td></tr>
+          <tr><td>UI-WS-003</td><td>running → completedInterrupted</td><td>过程强制展开，显示“已停止”，无伪造耗时</td></tr>
+          <tr><td>UI-WS-004</td><td>running → failed</td><td>过程展开，错误与恢复动作可见</td></tr>
+          <tr><td>UI-WS-005</td><td>running 中收到 guide</td><td>整轮仍保持展开；结束后各段独立折叠</td></tr>
+          <tr><td>UI-WS-006</td><td>用户手动折叠/展开</td><td>后续流式更新不覆盖用户选择</td></tr>
+          <tr><td>UI-WS-007</td><td>冷恢复 orphan turn</td><td>归一为 interrupted，禁止成功折叠</td></tr>
+        </tbody></table></div>
+      </section>
+
+      <section id="reasoning">
+        <div class="section-head"><span class="section-no">06</span><h2>思考展示</h2></div>
+        <div class="grid-2">
+          <div class="card"><h3>Provider 有 reasoning</h3><ul><li>首块始终有入口</li><li>默认收起</li><li>流式更新不自动展开</li><li>完成后保留内容</li></ul></div>
+          <div class="card"><h3>Provider 无 reasoning</h3><ul><li>只显示真实运行状态</li><li>不能生成伪 reasoning 文本</li><li>“Thinking”不得被标记为模型思考内容</li></ul></div>
+        </div>
+        <p>用例至少包含 DeepSeek Reasoner 的 <code>reasoning_content</code>、普通模型无 reasoning、reasoning 中断和设置开关四种输入。</p>
+      </section>
+
+      <section id="tools">
+        <div class="section-head"><span class="section-no">07</span><h2>工具 Renderer 测试</h2></div>
+        <div class="table-wrap"><table><thead><tr><th>Family</th><th>收起态</th><th>异常/边界</th></tr></thead><tbody>
+          <tr><td>Explore</td><td>图标 + 类别 + 当前目标</td><td>单条不聚合；连续两条才聚合；隐藏 reasoning 不切断</td></tr>
+          <tr><td>Browser Action</td><td>动作 + selector/title/URL</td><td>元素消失、dialog、frame、超时</td></tr>
+          <tr><td>Terminal</td><td>命令 + 状态</td><td>大输出截断、非零退出、取消</td></tr>
+          <tr><td>Changes</td><td>文件数 + diff 行数</td><td>重名路径、部分失败、inline diff</td></tr>
+          <tr><td>SubAgent</td><td>Bot + profile + 子摘要</td><td>无摘要、后台、完成后自动收起</td></tr>
+          <tr><td>Artifact</td><td>名称 + 类型</td><td>图片、PDF、二进制、损坏文件</td></tr>
+        </tbody></table></div>
+        <div class="callout"><div><strong>共用断言</strong><p>收起态不泄露 API Key、完整原始 JSON、任务内部 ID；展开后仍可访问错误原因、参数和产物。</p></div></div>
+      </section>
+
+      <section id="subagent">
+        <div class="section-head"><span class="section-no">08</span><h2>通用子 Agent</h2></div>
+        <ul><li>任意 Profile 名、图标/颜色、模型、tools、permissions 均来自 profile；UI 无角色白名单。</li><li>父会话只显示摘要，不镜像 child rows。</li><li>View 打开 child session；返回恢复父会话与滚动位置。</li><li>foreground/background、stop、send message、completion 都更新摘要。</li><li>child 失败不能导致父消息误标成功；父取消会清理 child。</li><li>缺少 color 时使用稳定 hash fallback，不表达错误语义。</li></ul>
+      </section>
+
+      <section id="composer">
+        <div class="section-head"><span class="section-no">09</span><h2>Composer 与队列</h2></div>
+        <div class="grid-3">
+          <div class="card"><h3>输入</h3><ul><li>Enter 发送，Shift+Enter 换行</li><li>IME 合成不发送</li><li>草稿按 session scope 隔离</li><li>附件/技能/标签页引用恢复</li></ul></div>
+          <div class="card"><h3>压缩</h3><ul><li>320px 无横向溢出</li><li>模型/审批按优先级收为图标</li><li>发送和输入始终可见</li></ul></div>
+          <div class="card"><h3>队列</h3><ul><li>queue 只来自 Projection</li><li>删除/排序/立即发送以 ACK 为准</li><li>撤回编辑跨会话不得串写</li></ul></div>
+        </div>
+      </section>
+
+      <section id="interaction">
+        <div class="section-head"><span class="section-no">10</span><h2>审批、问答与接管</h2></div>
+        <ul><li>点击与填表审批按 Browser Action family 显示目标和风险。</li><li>文件/终端/脚本审批必须显示实际对象和副作用。</li><li>等待审批或用户输入时隐藏 ChatLoading，不误报“正在思考”。</li><li>重复审批响应必须幂等；过期/陈旧响应有明确提示。</li><li>Handoff Continue 后先重新观察页面，再继续任务。</li><li>Settings 打开期间底层审批不能抢焦点。</li></ul>
+      </section>
+
+      <section id="visual">
+        <div class="section-head"><span class="section-no">11</span><h2>视觉与布局回归</h2></div>
+        <div class="grid-2">
+          <div class="card"><h3>主界面黄金图</h3><ul><li>420×900 空态和对话态</li><li>390×740 紧凑态</li><li>320px 极窄态</li><li>浅色与深色</li></ul></div>
+          <div class="card"><h3>全页页面</h3><ul><li>Settings</li><li>Connections</li><li>History</li><li>Child session / Artifact</li></ul></div>
+        </div>
+        <p>截图比较允许字体抗锯齿和 1px 子像素差异；禁止关键结构变化：顶栏按钮、消息左右、输入区高度、折叠入口、发送按钮和返回路径。</p>
+      </section>
+
+      <section id="chrome">
+        <div class="section-head"><span class="section-no">12</span><h2>真实 Chrome E2E</h2></div>
+        <div class="table-wrap"><table><thead><tr><th>ID</th><th>场景</th><th>核心断言</th></tr></thead><tbody>
+          <tr><td>UI-E2E-001</td><td>首次无配置启动</td><td>显示具体配置错误，不显示 disconnected</td></tr>
+          <tr><td>UI-E2E-002</td><td>Service Worker 重启</td><td>自动重连，任务继续，消息不重复</td></tr>
+          <tr><td>UI-E2E-003</td><td>SSE 文本 + 工具 + 最终回答</td><td>过程展开后折叠，最终回答可见</td></tr>
+          <tr><td>UI-E2E-004</td><td>普通模型 Thinking 状态</td><td>只显示运行状态，不出现虚假 reasoning</td></tr>
+          <tr><td>UI-E2E-005</td><td>Reasoner reasoning_content</td><td>思考入口出现、默认收起、可展开</td></tr>
+          <tr><td>UI-E2E-006</td><td>并行工具</td><td>原序显示，聚合与展开正确</td></tr>
+          <tr><td>UI-E2E-007</td><td>子 Agent</td><td>父摘要、child View、返回父会话</td></tr>
+          <tr><td>UI-E2E-008</td><td>审批与 handoff</td><td>等待态、Allow/Deny、Continue/Cancel</td></tr>
+          <tr><td>UI-E2E-009</td><td>History 恢复</td><td>打开任务、消息及折叠状态可重建</td></tr>
+          <tr><td>UI-E2E-010</td><td>附件与标签页引用</td><td>scope 隔离、重发不丢引用</td></tr>
+        </tbody></table></div>
+      </section>
+
+      <section id="responsive">
+        <div class="section-head"><span class="section-no">13</span><h2>响应式、主题与无障碍</h2></div>
+        <div class="grid-4">
+          <div class="card"><h3>320px</h3><p>无横向滚动；控件不重叠；次要标签隐藏。</p></div>
+          <div class="card"><h3>390px</h3><p>主目标宽度；Composer 无换行错位。</p></div>
+          <div class="card"><h3>736px</h3><p>状态和侧栏展开不挤坏正文。</p></div>
+          <div class="card"><h3>1024px</h3><p>侧面板与内容宽度稳定。</p></div>
+        </div>
+        <details><summary>无障碍检查清单</summary><ul><li>Tab 顺序遵循视觉顺序</li><li>折叠入口有 aria-expanded</li><li>图标按钮有 aria-label</li><li>动态计时低频 aria-live</li><li>Settings 打开时底层 inert</li><li>减少动态效果下无持续 shimmer</li><li>文本与语义背景对比度 ≥ 4.5:1</li></ul></details>
+      </section>
+
+      <section id="property">
+        <div class="section-head"><span class="section-no">14</span><h2>状态空间与 Property Test</h2></div>
+        <div class="diagram-card"><pre class="mermaid">
+stateDiagram-v2
+  [*] --> Draft
+  Draft --> Running: accepted
+  Running --> WaitingApproval: ask
+  WaitingApproval --> Running: approve
+  WaitingApproval --> Failed: deny
+  Running --> WaitingUser: handoff
+  WaitingUser --> Running: continue
+  WaitingUser --> Cancelled: cancel
+  Running --> Completed: answer
+  Running --> Cancelled: stop
+  Running --> Failed: error
+  Completed --> [*]
+  Cancelled --> [*]
+  Failed --> [*]
+        </pre></div>
+        <ul><li>随机生成 row 顺序、delta 重复、乱序和断线点，验证最终投影唯一。</li><li>随机生成工作段和折叠操作，验证任何终态都不会丢失最终回答。</li><li>随机合并合法工具 family，验证聚合不改变原 row identity 和顺序。</li><li>随机调整 Composer 宽度，验证关键控件始终可达且无横向溢出。</li></ul>
+      </section>
+
+      <section id="performance">
+        <div class="section-head"><span class="section-no">15</span><h2>性能与虚拟化</h2></div>
+        <ul><li>5000 轮、50000 rows 重放，渲染首帧不应遍历全部不可见内容。</li><li>虚拟滚动单位是 TurnRenderUnit，用户输入与对应回答不得分离。</li><li>流式 delta 只更新当前 work segment 和必要索引。</li><li>用户离开底部后，布局增长不得抢回 scrollTop。</li><li>计时只更新文本，不重算 TurnRenderUnit 或历史工具。</li><li>无 reduced-motion 才启用 shimmer；动画不得阻塞输入。</li></ul>
+      </section>
+
+      <section id="fixtures">
+        <div class="section-head"><span class="section-no">16</span><h2>Fixture 规范</h2></div>
+        <pre><code>{
+  "fixtureVersion": 1,
+  "name": "running-to-completed-history",
+  "projection": {
+    "phase": "completed",
+    "taskStatus": "completed",
+    "rows": []
+  },
+  "events": [],
+  "expected": {
+    "turnCount": 1,
+    "historyOpen": false,
+    "latestAssistantVisible": true,
+    "toolFamilies": ["Explore"]
+  }
+}</code></pre>
+        <ul><li>Fixture 禁止真实 API Key、浏览器 Cookie 和用户页面正文。</li><li>每个 fixture 固定 UUID、时间、model output 和工具结果。</li><li>截图测试必须同时有 semantic snapshot，避免“像素正确但状态错误”。</li><li>失败时输出 DOM snapshot、projection、event seq、screenshot 和 console。</li></ul>
+      </section>
+
+      <section id="matrix">
+        <div class="section-head"><span class="section-no">17</span><h2>覆盖矩阵</h2></div>
+        <div class="table-wrap"><table><thead><tr><th>设计模块</th><th>Contract</th><th>Component</th><th>E2E</th><th>Visual</th></tr></thead><tbody>
+          <tr><td>TurnRenderUnit</td><td>RU</td><td>TG</td><td>003</td><td>对话态</td></tr>
+          <tr><td>Work history</td><td>WS</td><td>TG</td><td>003/004</td><td>running/completed</td></tr>
+          <tr><td>Reasoning</td><td>RS</td><td>RV</td><td>004/005</td><td>折叠/展开</td></tr>
+          <tr><td>Tools</td><td>TR</td><td>TC</td><td>006</td><td>各 family</td></tr>
+          <tr><td>SubAgent</td><td>SA</td><td>SC</td><td>007</td><td>父/child</td></tr>
+          <tr><td>Composer</td><td>CO</td><td>CP</td><td>010</td><td>三档宽度</td></tr>
+          <tr><td>Approval</td><td>AP</td><td>AC</td><td>008</td><td>风险/等待</td></tr>
+          <tr><td>Connection</td><td>CN</td><td>CL</td><td>001/002</td><td>错误/重连</td></tr>
+          <tr><td>Settings</td><td>ST</td><td>ST</td><td>009</td><td>全页</td></tr>
+        </tbody></table></div>
+      </section>
+
+      <section id="roadmap">
+        <div class="section-head"><span class="section-no">18</span><h2>实施顺序</h2></div>
+        <div class="roadmap">
+          <div class="phase"><div class="phase-track"><div class="phase-dot">T0</div></div><div class="phase-body"><h3>冻结基线</h3><p>提交当前 Git tag、初始截图和 Projection fixture。</p><ul><li>单 UI 入口检查</li><li>视觉黄金图</li><li>无配置启动用例</li></ul></div></div>
+          <div class="phase"><div class="phase-track"><div class="phase-dot">T1</div></div><div class="phase-body"><h3>视图模型与工具</h3><p>先完成纯函数和组件测试。</p><ul><li>TurnRenderUnit</li><li>WorkSegment</li><li>Tool renderer registry</li><li>Reasoning 可见性</li></ul></div></div>
+          <div class="phase"><div class="phase-track"><div class="phase-dot">T2</div></div><div class="phase-body"><h3>决策与恢复</h3><p>验证审批、队列、重连和冷恢复。</p><ul><li>Approval/Handoff</li><li>Queue/Guide</li><li>SW restart</li><li>History restore</li></ul></div></div>
+          <div class="phase"><div class="phase-track"><div class="phase-dot">T3</div></div><div class="phase-body"><h3>性能与多端</h3><p>补充虚拟滚动、窄屏、主题和无障碍。</p><ul><li>5k turns</li><li>320/390/736/1024</li><li>dark/system</li><li>keyboard/a11y</li></ul></div></div>
+        </div>
+      </section>
+
+      <section id="acceptance">
+        <div class="section-head"><span class="section-no">19</span><h2>发布门禁</h2></div>
+        <div class="grid-2">
+          <div class="card"><h3>必须通过</h3><ul class="checklist"><li>TypeScript / unit / integration 全绿</li><li>UI view-model golden 全绿</li><li>Chrome E2E 001–010 全绿</li><li>320/390 无横向溢出</li><li>单 UI 入口与 no-legacy 扫描</li><li>无未处理 Promise rejection</li><li>无 API Key 泄露</li></ul></div>
+          <div class="card"><h3>视觉与性能门禁</h3><ul class="checklist"><li>420×900 主界面对照初始截图</li><li>折叠入口、发送按钮、消息左右一致</li><li>历史过程不进入首帧全量 DOM</li><li>流式更新保持输入可交互</li><li>用户离底后不被自动拉回</li><li>重新打开扩展恢复任务和草稿</li></ul></div>
+        </div>
+        <div class="callout warn"><div><strong>不允许用 Live Eval 替代确定性测试</strong><p>模型回复措辞不稳定。功能正确性必须由 fake/replay 和真实 Chrome fixture 证明；Live 只用于质量、工具选择、压缩连续性和成本评估。</p></div></div>
+      </section>
+
+      <footer class="footer">tinyai UI Testing Strategy v1.0 · 2026-10-31 · Design baseline v1.0 · ZCode 3.17.1</footer>
+    </main>
+  </div>
+  <aside class="annotation-drawer" id="annotation-drawer" role="dialog" aria-modal="false" aria-labelledby="drawer-title" aria-hidden="true">
+    <div class="drawer-head"><h2 id="drawer-title">修订批注</h2><button class="icon-button drawer-close" id="drawer-close" type="button" aria-label="关闭">×</button></div>
+    <p class="sidebar-note" style="margin-top:0">可选中文本后开启标注并点击章节。修订自动保存在本浏览器。</p>
+    <div class="field"><label>标注对象</label><div class="field-selection" id="note-target">尚未选择章节</div></div>
+    <div class="field"><label for="note-type">类型</label><select id="note-type"><option value="comment">修改建议</option><option value="must">必须修改</option><option value="decision">确认决策</option><option value="question">待确认问题</option></select></div>
+    <div class="field"><label for="note-text">修订内容</label><textarea id="note-text" placeholder="例如：审批用例需要补充 SW 重启后的 pending 状态恢复。"></textarea></div>
+    <div class="drawer-actions"><button class="primary-button" id="save-note" type="button">保存批注</button><button class="secondary-button" id="new-note" type="button">清空</button><button class="secondary-button" id="export-review-2" type="button">导出 JSON</button></div>
+    <h3>当前批注</h3><div class="notes-list" id="notes-list"></div>
+    <div class="drawer-actions"><button class="danger-button" id="clear-notes" type="button">清空全部</button></div>
+  </aside>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11.6.0/dist/mermaid.min.js"></script>
+  <script>
+    (()=>{
+      const DOC_ID='tinyai-ui-testing-v1',DOC_VERSION='1.0',KEY='tinyai-ui-testing-review-v1';
+      const root=document.documentElement,drawer=document.getElementById('annotation-drawer'),targetEl=document.getElementById('note-target'),noteType=document.getElementById('note-type'),noteText=document.getElementById('note-text'),notesList=document.getElementById('notes-list'),countEl=document.getElementById('review-count'),toast=document.getElementById('toast');
+      let notes=[],activeTarget=null,editingId=null,reviewMode=false;
+      try{const value=JSON.parse(localStorage.getItem(KEY)||'[]');notes=Array.isArray(value)?value:[]}catch{}
+      const esc=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
+      const labels={comment:'修改建议',must:'必须修改',decision:'确认决策',question:'待确认'};
+      const toastMsg=message=>{toast.textContent=message;toast.classList.add('is-visible');clearTimeout(toastMsg.timer);toastMsg.timer=setTimeout(()=>toast.classList.remove('is-visible'),1800)};
+      const persist=()=>{localStorage.setItem(KEY,JSON.stringify(notes));renderNotes();toastMsg('批注已保存到本浏览器')};
+      const targetInfo=element=>{const block=element.closest('[data-reviewable]')||element.closest('section'),section=element.closest('section');return{id:block?.dataset.reviewable||section?.id||'document',title:block?.dataset.reviewTitle||block?.querySelector('h2,h3')?.textContent?.trim()||'文档',sectionId:section?.id||block?.id||''}};
+      const openDrawer=(element,existingId=null)=>{const existing=existingId?notes.find(note=>note.id===existingId):null,info=existing?{id:existing.targetId,title:existing.targetTitle,sectionId:existing.sectionId}:(element?targetInfo(element):activeTarget||{id:'document',title:'文档全局',sectionId:''});activeTarget=info;editingId=existingId;targetEl.innerHTML=`<strong>${esc(info.title)}</strong><br><span>${esc(info.id)}</span>${window.getSelection()?.toString().trim()?`<br><br>选中文本：${esc(window.getSelection().toString().trim().slice(0,320))}`:''}`;noteType.value=existing?.type||'comment';noteText.value=existing?.comment||'';drawer.classList.add('is-open');drawer.setAttribute('aria-hidden','false');renderNotes();setTimeout(()=>noteText.focus(),100)};
+      const closeDrawer=()=>{drawer.classList.remove('is-open');drawer.setAttribute('aria-hidden','true')};
+      const renderNotes=()=>{countEl.textContent=String(notes.length);const summary=document.querySelector('.review-summary');if(summary){summary.querySelector('strong').textContent=`修订状态 · ${notes.length} 条`;summary.querySelector('span').textContent='批注自动保存在本浏览器；开发前请导出 JSON。'}document.querySelectorAll('.review-pin').forEach(button=>{const count=notes.filter(note=>note.targetId===button.dataset.target).length;button.textContent=count?`批注 ${count}`:'批注';button.classList.toggle('has-notes',count>0)});notesList.innerHTML=notes.length?notes.slice().sort((a,b)=>b.updatedAt-a.updatedAt).map(note=>`<article class="note"><div class="note-head"><span>${esc(labels[note.type]||'修改建议')}</span><button type="button" data-jump="${esc(note.sectionId)}" style="border:0;background:transparent;color:inherit;cursor:pointer">${esc(note.targetTitle)}</button><span>${new Date(note.updatedAt).toLocaleString('zh-CN',{hour12:false})}</span></div>${note.selection?`<div class="sidebar-note" style="margin:4px 0 0">“${esc(note.selection)}”</div>`:''}<p>${esc(note.comment)}</p><div class="note-actions"><button type="button" data-edit="${esc(note.id)}">编辑</button><button type="button" data-delete="${esc(note.id)}">删除</button></div></article>`).join(''):'<div class="sidebar-note">还没有批注。</div>'};
+      const saveNote=()=>{const comment=noteText.value.trim();if(!comment){noteText.focus();toastMsg('请输入修订内容');return}const now=Date.now();if(editingId){const index=notes.findIndex(note=>note.id===editingId);if(index>=0)notes[index]={...notes[index],type:noteType.value,comment,updatedAt:now}}else notes.push({id:crypto.randomUUID?.()||String(now),targetId:activeTarget.id,targetTitle:activeTarget.title,sectionId:activeTarget.sectionId,selection:window.getSelection()?.toString().trim()||'',type:noteType.value,comment,createdAt:now,updatedAt:now,docVersion:DOC_VERSION});editingId=null;noteText.value='';persist()};
+      const exportReview=async()=>{const payload={schemaVersion:1,documentId:DOC_ID,documentVersion:DOC_VERSION,documentFile:'tinyai-ui-testing-v1.html',exportedAt:new Date().toISOString(),annotations:notes},text=JSON.stringify(payload,null,2),name=`tinyai-ui-test-review-${new Date().toISOString().slice(0,10)}.json`;try{if(window.showSaveFilePicker){const handle=await window.showSaveFilePicker({suggestedName:name,types:[{description:'tinyai review JSON',accept:{'application/json':['.json']}}]}),writable=await handle.createWritable();await writable.write(text);await writable.close();return}}catch(error){if(error?.name==='AbortError')return}const url=URL.createObjectURL(new Blob([text],{type:'application/json'})),anchor=document.createElement('a');anchor.href=url;anchor.download=name;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1500)};
+      const importReview=async file=>{if(!file)return;try{const data=JSON.parse(await file.text());if(!Array.isArray(data.annotations)||data.documentId!==DOC_ID)throw new Error('invalid');const byId=new Map(notes.map(note=>[note.id,note]));for(const note of data.annotations)if(note?.comment)byId.set(note.id,note);notes=[...byId.values()];persist()}catch{toastMsg('导入失败：修订文档不匹配')}};
+      document.querySelectorAll('section[id]').forEach(section=>{section.dataset.reviewable=section.id;section.dataset.reviewTitle=section.querySelector('h2')?.textContent?.trim()||section.id});
+      document.querySelectorAll('.section-head').forEach(head=>{const section=head.closest('[data-reviewable]');const button=document.createElement('button');button.type='button';button.className='review-pin';button.dataset.target=section.dataset.reviewable;button.textContent='批注';button.addEventListener('click',event=>{event.stopPropagation();openDrawer(section)});head.appendChild(button)});
+      document.getElementById('review-toggle').addEventListener('click',event=>{reviewMode=!reviewMode;document.body.classList.toggle('review-mode',reviewMode);event.currentTarget.classList.toggle('is-active',reviewMode);event.currentTarget.setAttribute('aria-pressed',String(reviewMode))});
+      document.getElementById('open-review').addEventListener('click',()=>openDrawer(document.querySelector('#summary')));
+      document.getElementById('drawer-close').addEventListener('click',closeDrawer);
+      document.getElementById('save-note').addEventListener('click',saveNote);
+      document.getElementById('new-note').addEventListener('click',()=>{editingId=null;noteText.value='';noteText.focus()});
+      document.getElementById('export-review').addEventListener('click',exportReview);
+      document.getElementById('export-review-2').addEventListener('click',exportReview);
+      document.getElementById('import-review').addEventListener('click',()=>document.getElementById('import-review-file').click());
+      document.getElementById('import-review-file').addEventListener('change',event=>importReview(event.target.files?.[0]));
+      document.getElementById('clear-notes').addEventListener('click',()=>{if(notes.length&&confirm('确定清空全部批注吗？')){notes=[];persist()}});
+      document.addEventListener('click',event=>{if(!reviewMode||event.target.closest('button,a,input,select,textarea,.mermaid'))return;const block=event.target.closest('[data-reviewable]');if(block)openDrawer(block)});
+      document.addEventListener('keydown',event=>{if(event.key==='Escape')closeDrawer()});
+      notesList.addEventListener('click',event=>{const edit=event.target.closest('[data-edit]'),remove=event.target.closest('[data-delete]'),jump=event.target.closest('[data-jump]');if(edit)openDrawer(null,edit.dataset.edit);if(remove&&confirm('删除这条批注吗？')){notes=notes.filter(note=>note.id!==remove.dataset.delete);persist()}if(jump)document.getElementById(jump.dataset.jump)?.scrollIntoView({behavior:'smooth'})});
+      document.getElementById('print-button').addEventListener('click',()=>window.print());
+      const themeToggle=document.getElementById('theme-toggle');root.dataset.theme=localStorage.getItem('tinyai-ui-testing-theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');const syncTheme=()=>{themeToggle.textContent=root.dataset.theme==='dark'?'☀':'◐'};syncTheme();themeToggle.addEventListener('click',async()=>{root.dataset.theme=root.dataset.theme==='dark'?'light':'dark';localStorage.setItem('tinyai-ui-testing-theme',root.dataset.theme);syncTheme();await renderMermaid()});
+      const sources=[...document.querySelectorAll('.mermaid')];sources.forEach(node=>node.dataset.source=node.textContent.trim());async function renderMermaid(){if(!window.mermaid)return;const css=getComputedStyle(root),vars={background:css.getPropertyValue('--surface').trim(),primaryColor:css.getPropertyValue('--surface-2').trim(),primaryTextColor:css.getPropertyValue('--text').trim(),primaryBorderColor:css.getPropertyValue('--border-strong').trim(),secondaryColor:css.getPropertyValue('--blue-soft').trim(),tertiaryColor:css.getPropertyValue('--green-soft').trim(),lineColor:css.getPropertyValue('--muted').trim(),fontFamily:getComputedStyle(document.body).fontFamily,fontSize:'13px'};mermaid.initialize({startOnLoad:false,securityLevel:'loose',theme:'base',themeVariables:vars,flowchart:{curve:'basis',htmlLabels:true,padding:14},sequence:{useMaxWidth:true,wrap:true},state:{useMaxWidth:true}});sources.forEach(node=>{node.removeAttribute('data-processed');node.textContent=node.dataset.source});await mermaid.run({nodes:sources})}
+      const tocLinks=[...document.querySelectorAll('.toc a')],sections=tocLinks.map(link=>document.querySelector(link.getAttribute('href'))).filter(Boolean),observer=new IntersectionObserver(entries=>{const visible=entries.filter(entry=>entry.isIntersecting).sort((a,b)=>b.intersectionRatio-a.intersectionRatio)[0];if(!visible)return;tocLinks.forEach(link=>link.classList.toggle('active',link.getAttribute('href')==='#'+visible.target.id))},{rootMargin:'-15% 0px -70% 0px'});sections.forEach(section=>observer.observe(section));renderNotes();renderMermaid();
+    })();
+  </script>
+</body>
+</html>

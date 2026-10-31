@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="tinyai UI 设计方案：老版视觉基线、任务式对话、过程折叠、工具渲染、Composer、审批与子 Agent。">
+  <title>tinyai UI · 详细设计方案 v1.0</title>
+  <style>
+    :root{
+      color-scheme:light;--bg:#f3f2ed;--surface:#fffefa;--surface-2:#ebe9e2;--surface-3:#ddd9cf;
+      --text:#171916;--muted:#666b64;--faint:#8b9088;--border:#d6d4ca;--border-strong:#b3b2a8;
+      --accent:#176b5b;--accent-soft:#ddf1eb;--accent-ink:#0b4a3e;--blue:#2e608a;--blue-soft:#e2eef7;
+      --amber:#8a6018;--amber-soft:#f7ebc8;--red:#a22f38;--red-soft:#f8e0e2;--purple:#66508e;--purple-soft:#eee5f7;
+      --code:#1c221e;--code-text:#f0f3ef;--shadow:0 18px 48px rgba(27,42,34,.08);
+      --sidebar:252px;--drawer:450px;--font:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC","Microsoft YaHei",sans-serif;
+    }
+    html[data-theme="dark"]{
+      color-scheme:dark;--bg:#101411;--surface:#191e1a;--surface-2:#232a25;--surface-3:#303932;
+      --text:#edf2ed;--muted:#a5afa7;--faint:#7f8881;--border:#354038;--border-strong:#566259;
+      --accent:#67ceb4;--accent-soft:#173a31;--accent-ink:#a9f0dd;--blue:#8bc7ef;--blue-soft:#1b3041;
+      --amber:#e0bc76;--amber-soft:#382e1c;--red:#ef8b91;--red-soft:#401f22;--purple:#c1a8e8;--purple-soft:#30243f;
+      --code:#0b0e0c;--code-text:#e9eee9;--shadow:0 18px 52px rgba(0,0,0,.28);
+    }
+    *{box-sizing:border-box}html{scroll-behavior:smooth}
+    body{margin:0;overflow-x:clip;background:radial-gradient(circle at 88% -5%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 30rem),var(--bg);color:var(--text);font-family:var(--font);font-size:15px;line-height:1.72}
+    a{color:var(--accent-ink);text-underline-offset:3px}button,input,textarea,select{font:inherit;color:inherit}
+    code,pre{font-family:"SFMono-Regular",Consolas,monospace}code{padding:.13em .36em;border-radius:5px;background:var(--surface-2);font-size:.9em}
+    .topbar{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:16px;min-height:64px;padding:0 24px;border-bottom:1px solid color-mix(in srgb,var(--border) 78%,transparent);background:color-mix(in srgb,var(--bg) 91%,transparent);backdrop-filter:blur(18px)}
+    .brand{display:flex;align-items:center;gap:10px;min-width:var(--sidebar);font-weight:650}.brand-mark{display:grid;place-items:center;width:30px;height:30px;border-radius:9px 9px 9px 3px;background:var(--accent);color:#fff;font-family:Georgia,serif;font-size:17px;font-style:italic}
+    .top-meta{overflow:hidden;color:var(--muted);font-size:12px;text-overflow:ellipsis;white-space:nowrap}.top-actions{display:flex;gap:8px;margin-left:auto}
+    .toolbar-button,.icon-button{display:inline-flex;align-items:center;justify-content:center;min-height:36px;border:1px solid var(--border);border-radius:99px;background:var(--surface);cursor:pointer;font-size:12px;font-weight:650}.toolbar-button{gap:6px;padding:0 13px}.icon-button{width:36px;padding:0}.toolbar-button:hover,.icon-button:hover{border-color:var(--border-strong)}.toolbar-button.is-active{background:var(--accent);border-color:var(--accent);color:#fff}
+    .review-count{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:99px;background:color-mix(in srgb,currentColor 12%,transparent);font-size:10px}
+    button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+    .layout{display:grid;grid-template-columns:var(--sidebar) minmax(0,1fr);max-width:1500px;margin:auto}.sidebar{position:sticky;top:64px;align-self:start;height:calc(100vh - 64px);padding:30px 22px 46px 26px;overflow:auto}.sidebar-label{margin:0 0 12px;color:var(--faint);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+    .toc{display:grid;gap:3px;margin:0;padding:0;list-style:none}.toc a{display:block;padding:6px 10px;border-left:2px solid transparent;color:var(--muted);font-size:13px;line-height:1.45;text-decoration:none}.toc a:hover,.toc a.active{border-left-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent);color:var(--text)}.toc a.active{font-weight:650}
+    .sidebar-note,.review-summary{margin-top:24px;padding-top:18px;border-top:1px solid var(--border);color:var(--faint);font-size:11px;line-height:1.55}.review-summary strong{display:block;color:var(--text);font-size:12px}.review-summary button{margin-top:10px}
+    main{width:min(100%,1180px);padding:52px 58px 110px}.hero{position:relative;overflow:hidden;padding:46px 48px 42px;border:1px solid var(--border);border-radius:26px;background:linear-gradient(132deg,var(--surface),color-mix(in srgb,var(--accent) 5%,var(--surface)));box-shadow:var(--shadow)}.hero::after{content:"UI";position:absolute;right:28px;top:8px;color:color-mix(in srgb,var(--accent) 9%,transparent);font-family:Georgia,serif;font-size:124px;font-weight:500;line-height:1}
+    .eyebrow{display:flex;align-items:center;gap:8px;margin-bottom:22px;color:var(--accent-ink);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}.status-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 14%,transparent)}
+    h1{position:relative;max-width:840px;margin:0;font-family:Georgia,"Songti SC",serif;font-size:clamp(36px,5vw,62px);font-weight:500;line-height:1.06;letter-spacing:-.045em}.hero-lead{position:relative;max-width:840px;margin:24px 0 0;color:var(--muted);font-size:17px}
+    .meta-strip{display:flex;flex-wrap:wrap;gap:10px 24px;margin-top:32px;padding-top:22px;border-top:1px solid var(--border);color:var(--faint);font-size:12px}.meta-strip strong{margin-right:5px;color:var(--text)}
+    section{scroll-margin-top:88px;margin-top:70px}.section-head{display:flex;align-items:center;gap:12px;margin-bottom:22px}.section-no{color:var(--accent);font:700 11px monospace;letter-spacing:.08em}h2{margin:0;font-family:Georgia,"Songti SC",serif;font-size:clamp(27px,3vw,36px);font-weight:500;letter-spacing:-.025em}h3{margin:30px 0 10px;font-size:18px;font-weight:650}h4{margin:20px 0 8px;font-size:14px}p{margin:10px 0 16px}ul,ol{margin:12px 0 20px;padding-left:23px}li{margin:6px 0}li::marker{color:var(--accent)}.lede{max-width:860px;color:var(--muted);font-size:16px}
+    .grid-2,.grid-3,.grid-4{display:grid;gap:16px}.grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+    .card{min-width:0;padding:21px 22px;border:1px solid var(--border);border-radius:16px;background:var(--surface)}.card h3,.card h4{margin-top:0}.card p:last-child,.card ul:last-child{margin-bottom:0}
+    .tag{display:inline-flex;align-items:center;min-height:23px;padding:2px 8px;border-radius:99px;background:var(--surface-2);color:var(--muted);font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}.tag.core{background:var(--accent-soft);color:var(--accent-ink)}.tag.zc{background:var(--blue-soft);color:var(--blue)}.tag.warn{background:var(--amber-soft);color:var(--amber)}.tag.risk{background:var(--red-soft);color:var(--red)}
+    .callout{display:grid;grid-template-columns:4px 1fr;gap:18px;margin:28px 0;padding:18px 20px;border-radius:10px;background:var(--surface-2)}.callout::before{content:"";border-radius:4px;background:var(--accent)}.callout strong{display:block;margin-bottom:3px}.callout p{margin:0;color:var(--muted)}.callout.warn{background:var(--amber-soft)}.callout.warn::before{background:var(--amber)}
+    .table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:16px;background:var(--surface)}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:11px 12px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}th{color:var(--faint);font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}tr:last-child td{border-bottom:0}.table-wrap table{min-width:740px}
+    .diagram-card{padding:22px;overflow-x:auto;border:1px solid var(--border);border-radius:18px;background:var(--surface)}.diagram-card .mermaid{min-width:760px;text-align:center}.diagram-caption{margin:12px 2px 0;color:var(--faint);font-size:11px;text-align:center}
+    pre{margin:16px 0;padding:18px 20px;overflow-x:auto;border-radius:13px;background:var(--code);color:var(--code-text);font-size:11px;line-height:1.65}pre code{padding:0;background:transparent;color:inherit}
+    .anatomy{display:grid;grid-template-columns:minmax(230px,320px) 1fr;gap:24px;align-items:start}.phone{border:1px solid var(--border-strong);border-radius:28px;background:#fff;color:#171916;box-shadow:0 18px 50px rgba(0,0,0,.08);overflow:hidden}.phone-bar{display:flex;justify-content:space-between;padding:13px 13px 6px}.phone-dot{width:34px;height:34px;border-radius:50%;background:#f3f3f5}.phone-body{min-height:480px;padding:12px 15px 14px}.phone-user{margin-left:58px;padding:10px 13px;border-radius:18px;background:#f3f3f5;font-size:12px}.phone-answer{font-size:12px}.phone-work{margin:8px 0;padding:8px 10px;border:1px solid #eee;border-radius:10px;color:#777;font-size:10px}.phone-composer{position:relative;margin-top:32px;padding:11px;border:1px solid #ddd;border-radius:22px;color:#8a8a90;font-size:11px}.phone-tools{display:flex;align-items:center;gap:8px;margin-top:14px}.phone-tools span:not(.phone-send){width:30px;height:30px;border-radius:50%;background:#f3f3f5}.phone-send{width:34px;height:34px;margin-left:auto;border-radius:50%;background:#171916;color:#fff;text-align:center;line-height:34px}.callout-list{display:grid;gap:12px}.callout-list div{padding:13px 15px;border-left:2px solid var(--accent);background:var(--surface);font-size:13px}.callout-list strong{display:block;margin-bottom:2px}
+    .state-pill{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:99px;background:var(--surface-2);color:var(--muted);font-size:11px}.state-pill::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent)}.flowline{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:18px 0}.flowline span{padding:7px 10px;border:1px solid var(--border);border-radius:9px;background:var(--surface);font-size:12px}.flowline b{color:var(--faint);font-weight:400}
+    .baseline{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.baseline span{padding:3px 7px;border-radius:6px;background:var(--surface-2);color:var(--muted);font:10px monospace}
+    .review-pin{padding:5px 9px;border:1px solid var(--border);border-radius:99px;background:transparent;color:var(--faint);font-size:10px;font-weight:650;cursor:pointer}.review-pin:hover,.review-pin.has-notes{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink)}
+    body.review-mode [data-reviewable]{outline:1px dashed color-mix(in srgb,var(--accent) 45%,transparent);outline-offset:4px;cursor:crosshair}body.review-mode [data-reviewable]:hover{outline:2px solid var(--accent)}
+    .annotation-drawer{display:none;position:fixed;z-index:80;top:0;right:0;width:min(var(--drawer),100vw);height:100vh;padding:22px;overflow:auto;border-left:1px solid var(--border);background:var(--surface);box-shadow:-20px 0 60px rgba(0,0,0,.15)}.annotation-drawer.is-open{display:block}.drawer-head{display:flex;align-items:center;gap:12px}.drawer-head h2{font-family:inherit;font-size:20px}.drawer-close{margin-left:auto}.drawer-actions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 18px}.field{display:grid;gap:6px;margin:13px 0}.field label{color:var(--muted);font-size:11px;font-weight:650}.field input,.field textarea,.field select{width:100%;padding:9px 10px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2);font-size:13px}.field textarea{min-height:132px;resize:vertical}.field-selection{min-height:48px;padding:9px 10px;border-radius:8px;background:var(--amber-soft);color:var(--amber);font-size:11px}.primary-button,.secondary-button,.danger-button{min-height:36px;padding:0 13px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:650}.primary-button{border:1px solid var(--accent);background:var(--accent);color:#fff}.secondary-button{border:1px solid var(--border);background:var(--surface)}.danger-button{border:1px solid var(--red);background:transparent;color:var(--red)}.notes-list{display:grid;gap:10px}.note{padding:12px;border:1px solid var(--border);border-radius:11px;background:var(--surface-2);font-size:12px}.note-head{display:flex;flex-wrap:wrap;gap:6px;color:var(--faint);font-size:10px}.note p{margin:5px 0}.note-actions{display:flex;gap:8px}.note-actions button{padding:0;border:0;background:transparent;color:var(--accent-ink);cursor:pointer}
+    .toast{position:fixed;z-index:100;left:50%;bottom:24px;padding:9px 14px;border-radius:99px;background:var(--code);color:var(--code-text);font-size:12px;opacity:0;transform:translate(-50%,20px);pointer-events:none;transition:.16s}.toast.is-visible{opacity:1;transform:translate(-50%,0)}.footer{margin-top:72px;padding-top:24px;border-top:1px solid var(--border);color:var(--faint);font-size:11px}
+    @media(max-width:1050px){:root{--sidebar:210px}main{padding:42px 36px 90px}.grid-4,.grid-3{grid-template-columns:repeat(2,minmax(0,1fr))}.anatomy{grid-template-columns:1fr}}
+    @media(max-width:820px){.topbar{padding:0 15px}.brand{min-width:auto}.top-meta{display:none}.toolbar-button .review-label{display:none}.layout{display:block}.sidebar{display:none}main{padding:26px 18px 76px}.hero{padding:34px 26px 30px}.grid-2,.grid-3,.grid-4{grid-template-columns:1fr}.annotation-drawer{width:100vw;border-left:0}}
+    @media(max-width:520px){body{font-size:14px}.brand>span:last-child{display:none}.section-head,.drawer-head{flex-wrap:wrap}.hero-lead{font-size:15px}.meta-strip{display:grid;gap:7px}.annotation-drawer{padding:17px}}
+    @media print{.topbar,.sidebar,.top-actions,.review-pin,.annotation-drawer,.toast{display:none!important}.layout{display:block}main{width:100%;max-width:none;padding:0}.hero,.card,.diagram-card,.table-wrap{box-shadow:none;break-inside:avoid}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{transition:none!important;animation:none!important}}
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">T</span><span>tinyai UI design</span></div>
+    <div class="top-meta">Legacy visual baseline · ZCode interaction model · v1.0</div>
+    <div class="top-actions">
+      <button class="icon-button" id="theme-toggle" type="button" aria-label="切换主题">◐</button>
+      <button class="toolbar-button" id="review-toggle" type="button" aria-pressed="false"><span aria-hidden="true">✎</span><span class="review-label">标注模式</span></button>
+      <button class="toolbar-button" id="open-review" type="button"><span aria-hidden="true">☰</span><span class="review-label">批注</span><span class="review-count" id="review-count">0</span></button>
+      <button class="toolbar-button" id="export-review" type="button"><span aria-hidden="true">⇩</span><span class="review-label">导出修订</span></button>
+      <button class="icon-button" id="print-button" type="button" aria-label="打印">⎙</button>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="文档目录">
+      <p class="sidebar-label">Design map</p>
+      <nav><ol class="toc">
+        <li><a href="#summary">设计摘要</a></li>
+        <li><a href="#principles">设计原则</a></li>
+        <li><a href="#baseline">视觉基线</a></li>
+        <li><a href="#anatomy">界面结构</a></li>
+        <li><a href="#turn-model">轮次渲染模型</a></li>
+        <li><a href="#work-history">过程折叠</a></li>
+        <li><a href="#reasoning">思考展示</a></li>
+        <li><a href="#tools">工具卡</a></li>
+        <li><a href="#groups">工具聚合</a></li>
+        <li><a href="#subagent">子 Agent</a></li>
+        <li><a href="#composer">Composer</a></li>
+        <li><a href="#queue">队列与引导</a></li>
+        <li><a href="#interactions">审批与接管</a></li>
+        <li><a href="#status">状态面板</a></li>
+        <li><a href="#sidepane">子会话与产物</a></li>
+        <li><a href="#settings">设置与历史</a></li>
+        <li><a href="#errors">空态与异常</a></li>
+        <li><a href="#responsive">响应式与无障碍</a></li>
+        <li><a href="#contracts">对象与类图</a></li>
+        <li><a href="#sequences">核心交互</a></li>
+        <li><a href="#mapping">实现映射</a></li>
+        <li><a href="#acceptance">验收标准</a></li>
+      </ol></nav>
+      <div class="review-summary"><strong>修订状态</strong><span>当前 0 条批注，自动保存在本浏览器。</span><br><button class="secondary-button" id="import-review" type="button">导入修订</button><input id="import-review-file" type="file" accept=".json,application/json" hidden></div>
+      <div class="sidebar-note">配套测试方案：<a href="tinyai-ui-testing-v1.html">tinyai UI Testing v1.0</a></div>
+    </aside>
+    <main>
+      <section class="hero" id="summary">
+        <div class="eyebrow"><span class="status-dot"></span>DETAILED UI DESIGN · v1.0</div>
+        <h1>老版 tinyai 的视觉，任务式 Agent 的信息层级</h1>
+        <p class="hero-lead">保留当前恢复的旧版样式和紧凑感，只吸收 ZCode 已被验证的交互模型：一轮任务由用户输入、可折叠工作过程、最新回答和尾随状态组成；工具、审批和子 Agent 使用语义化摘要，原始事实按需展开。</p>
+        <div class="meta-strip">
+          <span><strong>视觉基线</strong> 开发开始时 tinyai UI</span>
+          <span><strong>交互基线</strong> ZCode 3.17.1</span>
+          <span><strong>产品边界</strong> Chrome Side Panel</span>
+          <span><strong>状态</strong> 待评审</span>
+        </div>
+      </section>
+
+      <div class="callout">
+        <div><strong>唯一 UI 入口</strong><p>Side Panel 只有一套渲染代码。旧视觉是设计语言，不是第二套 Legacy Runtime，也不存在 UI 开关或双入口。</p></div>
+      </div>
+
+      <section id="principles">
+        <div class="section-head"><span class="section-no">01</span><h2>设计原则</h2></div>
+        <div class="grid-3">
+          <div class="card"><span class="tag core">单一事实</span><h3>Projection 驱动</h3><p>消息、任务、队列、审批、子 Agent 和后台资源都来自 Runtime Projection。UI 只维护草稿、展开、滚动、焦点和标签页。</p></div>
+          <div class="card"><span class="tag core">渐进披露</span><h3>结果优先</h3><p>最终回答始终可见；过程默认按轮次折叠。正常运行不打断阅读，异常和等待用户时强制展开相关上下文。</p></div>
+          <div class="card"><span class="tag core">语义呈现</span><h3>不展示原始协议</h3><p>工具按领域渲染摘要，JSON、命令输出和大图只在需要时展开，不把 Runtime 数据形态直接丢给用户。</p></div>
+          <div class="card"><span class="tag core">可恢复</span><h3>断线不改事实</h3><p>连接中断只影响当前 attachment。重连后以 snapshot 重建视图，不能把本地 UI 猜测覆盖到权威状态。</p></div>
+          <div class="card"><span class="tag core">紧凑</span><h3>默认低干扰</h3><p>保留旧版白底、轻分隔、圆形按钮和单列布局。避免常驻大面板、重复状态、彩色药丸和持续动画。</p></div>
+          <div class="card"><span class="tag core">可操作</span><h3>每个阻塞都有出路</h3><p>错误必须给出原因和恢复动作；审批、问答、接管和断连都要有明确主操作，不能只显示状态词。</p></div>
+        </div>
+      </section>
+
+      <section id="baseline">
+        <div class="section-head"><span class="section-no">02</span><h2>视觉基线</h2></div>
+        <div class="grid-2">
+          <div class="card"><h3>直接保留</h3><ul><li>白色页面、浅灰气泡和弱边框</li><li>左上圆形新建/历史，右上圆形设置</li><li>底部单输入壳、圆形发送按钮</li><li>紧凑消息列和无卡片正文</li><li>Settings/Connections/History 老版行布局</li></ul></div>
+          <div class="card"><h3>明确不采用</h3><ul><li>再引入 Leia 的蓝色品牌和 44px 顶栏</li><li>复制 ZCode 的桌面三栏和复杂 Header</li><li>默认深色主题</li><li>每个状态都显示彩色胶囊</li><li>把思考链全文常驻展开</li></ul></div>
+        </div>
+        <div class="callout warn"><div><strong>视觉回归的判定</strong><p>以开发开始时 420×900 的原始截图为基线。新增过程组件只能插入既有阅读流，不改变主输入区、顶栏和消息气泡的基础尺寸。</p></div></div>
+      </section>
+
+      <section id="anatomy">
+        <div class="section-head"><span class="section-no">03</span><h2>界面结构</h2></div>
+        <div class="anatomy">
+          <div class="phone" role="img" aria-label="tinyai 单栏 Side Panel 结构示意">
+            <div class="phone-bar"><span class="phone-dot"></span><span class="phone-dot"></span></div>
+            <div class="phone-body">
+              <div class="phone-user">检查这个页面并总结关键风险。</div>
+              <div class="phone-answer"><p>正在检查页面结构和关键操作。</p></div>
+              <div class="phone-work">⟳ 工作中 · 00:08</div>
+              <div class="phone-work">◌ Explore · 正在读取页面结构</div>
+              <div class="phone-work">◌ 子 Agent · general · 正在核对链接</div>
+              <div class="phone-answer"><p><strong>结论</strong><br>主要风险是提交按钮会触发外部跳转。</p></div>
+              <div class="phone-composer">给 tinyai 发消息，@ 选择标签页，/ 查看命令
+                <div class="phone-tools"><span></span><span></span><span></span><span>自动执行</span><span>deepseek-chat</span><i class="phone-send">↑</i></div>
+              </div>
+            </div>
+          </div>
+          <div class="callout-list">
+            <div><strong>消息区</strong>只负责用户输入、工作过程和最终回答。</div>
+            <div><strong>工作过程</strong>按轮次折叠，不把工具拆成永久卡片墙。</div>
+            <div><strong>底部 Dock</strong>承载输入、队列、审批、接管和错误。</div>
+            <div><strong>全页覆盖层</strong>承载 Settings、History、子会话和 Artifact。</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="turn-model">
+        <div class="section-head"><span class="section-no">04</span><h2>轮次渲染模型</h2></div>
+        <p class="lede">Protocol 的 rows 是扁平事实；UI 先构建 <code>TurnRenderUnit</code>，再渲染可见结构。</p>
+        <div class="flowline"><span>UserInput</span><b>→</b><span>WorkSegment[]</span><b>→</b><span>LatestAssistant</span><b>→</b><span>TailRows</span></div>
+        <div class="table-wrap"><table><thead><tr><th>对象</th><th>职责</th><th>不变量</th></tr></thead><tbody>
+          <tr><td><code>TurnRenderUnit</code></td><td>一轮用户任务的视觉边界</td><td>用户输入与对应过程不得跨轮拆散</td></tr>
+          <tr><td><code>WorkSegment</code></td><td>一次原始输入或 guided input 的工作段</td><td>每段独立统计时间与折叠状态</td></tr>
+          <tr><td><code>HistoryRow</code></td><td>reasoning、tool、subagent、compact 等过程行</td><td>只影响 UI 可见性，不复制协议事实</td></tr>
+          <tr><td><code>LatestAssistant</code></td><td>当前轮最新完整回答</td><td>始终位于折叠过程之外</td></tr>
+          <tr><td><code>TailRow</code></td><td>验证、fork notice、goal 状态等收尾行</td><td>位于回答之后，不藏进过程折叠</td></tr>
+        </tbody></table></div>
+      </section>
+
+      <section id="work-history">
+        <div class="section-head"><span class="section-no">05</span><h2>工作过程折叠</h2></div>
+        <div class="grid-4">
+          <div class="card"><span class="state-pill">运行中</span><h3>过程展开</h3><p>顶部不重复显示“工作中”。底部显示 13px 运行指示、稳定状态和计时。</p></div>
+          <div class="card"><span class="state-pill">正常完成</span><h3>默认折叠</h3><p>过程收为“已工作 N 秒”，最终回答完整保留在折叠区外。</p></div>
+          <div class="card"><span class="state-pill">异常</span><h3>强制展开</h3><p>失败、中断、拒绝或缺少最终回答时，用户必须看到上下文和恢复动作。</p></div>
+          <div class="card"><span class="state-pill">引导输入</span><h3>独立分段</h3><p>同一任务中的引导输入保留独立段、独立时间与独立折叠入口。</p></div>
+        </div>
+        <div class="callout"><div><strong>ZCode 3.17.1 最新行为</strong><p>整个 product turn 运行期间不显示顶部历史状态或分割线；整轮结束后才显示各段完成状态。TinyAI 直接采用这一降低重复信息的策略。</p></div></div>
+      </section>
+
+      <section id="reasoning">
+        <div class="section-head"><span class="section-no">06</span><h2>思考展示</h2></div>
+        <div class="grid-2">
+          <div class="card"><h3>允许展示</h3><ul><li>Provider 明确返回的 reasoning / thought 字段</li><li>模型自己生成的用户可见计划摘要</li><li>本地运行状态、工具阶段和等待原因</li></ul></div>
+          <div class="card"><h3>禁止展示</h3><ul><li>把隐藏 chain-of-thought 当作 UI 内容</li><li>伪造推理文本</li><li>把“Thinking”状态冒充实际 reasoning</li><li>默认把长推理全文展开</li></ul></div>
+        </div>
+        <p>设置名称为“显示思考过程”。新用户默认开启入口；每个 reasoning 块默认收起。若 Provider 不返回 reasoning，仅显示真实运行状态。轮次完成后保留思考入口，不自动删除历史。</p>
+      </section>
+
+      <section id="tools">
+        <div class="section-head"><span class="section-no">07</span><h2>工具卡设计</h2></div>
+        <p class="lede">外层统一，内容按 family 注册 Renderer。收起态必须能回答“做了什么、对象是什么、结果如何”。</p>
+        <div class="table-wrap"><table><thead><tr><th>Family</th><th>收起摘要</th><th>展开内容</th></tr></thead><tbody>
+          <tr><td>Explore</td><td>图标 · 查阅 · 当前查找/读取目标</td><td>read/snapshot/find/tab 列表等连续只读操作</td></tr>
+          <tr><td>Browser Action</td><td>浏览器动作 · 目标元素或 URL</td><td>参数、结果、截图、错误与重试</td></tr>
+          <tr><td>Terminal</td><td>终端 · 命令 · 状态</td><td>stdout/stderr、退出码、截断或 artifact</td></tr>
+          <tr><td>Changes</td><td>更改 · N files · +N -N</td><td>文件列表、inline diff、打开 Diff Viewer</td></tr>
+          <tr><td>SubAgent</td><td>Bot · Profile · 当前子活动</td><td>brief、最新子活动、结果摘要、打开 child session</td></tr>
+          <tr><td>Artifact</td><td>文件图标 · 名称 · 类型</td><td>预览、下载、源数据</td></tr>
+          <tr><td>Permission</td><td>风险图标 · 动作 · 等待审批</td><td>影响范围、规则、一次性/长期选项</td></tr>
+        </tbody></table></div>
+        <div class="callout"><div><strong>状态词规则</strong><p>运行中显示动作态；终态回到稳定类别词。成功状态不要额外显示“已完成”药丸；失败、拒绝、停止才显示状态。</p></div></div>
+      </section>
+
+      <section id="groups">
+        <div class="section-head"><span class="section-no">08</span><h2>连续工具聚合</h2></div>
+        <div class="grid-3">
+          <div class="card"><h3>Explore</h3><p>连续只读操作达到 2 个后聚合。最新子动作滚动显示；展开查看全序列。</p></div>
+          <div class="card"><h3>Changes</h3><p>连续写文件操作聚合为文件摘要。按路径去重并保留首次顺序。</p></div>
+          <div class="card"><h3>Terminal</h3><p>连续命令聚合，保留失败/停止计数；展开后逐条查看输出。</p></div>
+        </div>
+        <p>聚合只属于 UI view model。单条工具仍保留原始 identity、状态和 artifact；Visible reasoning、最终回答、审批和其他 family 会切断聚合段。</p>
+      </section>
+
+      <section id="subagent">
+        <div class="section-head"><span class="section-no">09</span><h2>子 Agent</h2></div>
+        <p class="lede">子 Agent 不使用固定 Researcher/Reviewer 白名单。任意 AgentProfile 都由 name、displayName、instructions、tools、permissions、execution 和可选颜色描述。</p>
+        <div class="grid-2">
+          <div class="card"><h3>父会话</h3><ul><li>一行 Bot · Profile · 当前摘要 · 状态</li><li>运行中自动展开，完成后自动收起</li><li>不镜像 child 的完整工具日志</li><li>点击 View 打开 child session</li></ul></div>
+          <div class="card"><h3>Child Session</h3><ul><li>只读完整会话与工具过程</li><li>独立 Runtime 事实，不复制父消息</li><li>支持 SendMessage、Stop、Resume</li><li>后台任务可从状态面板进入</li></ul></div>
+        </div>
+      </section>
+
+      <section id="composer">
+        <div class="section-head"><span class="section-no">10</span><h2>Composer</h2></div>
+        <div class="grid-2">
+          <div class="card"><h3>固定结构</h3><ul><li>输入框本体</li><li>@ 标签页</li><li>/ Skills 与命令</li><li>+ 附件与引用</li><li>模型、审批模式、发送/停止</li></ul></div>
+          <div class="card"><h3>压缩顺序</h3><ol><li>隐藏模型名，保留 Package 图标</li><li>隐藏审批文字，保留盾牌</li><li>隐藏次要技能入口到 / 菜单</li><li>保持输入、附件和发送按钮可用</li></ol></div>
+        </div>
+        <p>Composer 只在当前 <code>sessionId/draft scope</code> 内保存草稿。切换会话前先持久化旧 scope，再恢复新 scope；聚焦请求若跨 scope 则失效。</p>
+      </section>
+
+      <section id="queue">
+        <div class="section-head"><span class="section-no">11</span><h2>队列与引导</h2></div>
+        <div class="flowline"><span>输入</span><b>→</b><span>startNow / guide / queue</span><b>→</b><span>Runtime admission</span><b>→</b><span>Projection queue</span></div>
+        <ul><li>运行中普通输入由 Runtime 决定立即执行、引导当前轮或入队。</li><li>UI 不维护第二份 accepted queue，只显示 Projection 事实。</li><li>队列项支持立即发送、删除、排序；编辑等同于撤回后恢复草稿。</li><li>Guide 属于当前轮，不显示为可编辑队列项。</li></ul>
+      </section>
+
+      <section id="interactions">
+        <div class="section-head"><span class="section-no">12</span><h2>审批、问答与接管</h2></div>
+        <div class="grid-3">
+          <div class="card"><span class="tag risk">风险</span><h3>审批卡</h3><p>按工具 family 展示命令、diff、URL 或 Browser action。至少提供拒绝和允许；可按产品范围增加本次/站点/会话规则。</p></div>
+          <div class="card"><span class="tag warn">输入</span><h3>问答卡</h3><p>在底部 Dock 内显示单选/多选/自定义输入。等待用户时隐藏“正在工作”。</p></div>
+          <div class="card"><span class="tag warn">接管</span><h3>Handoff</h3><p>显示人工操作原因、继续与取消。继续前必须重新观察页面，不能假设操作成功。</p></div>
+        </div>
+        <div class="callout warn"><div><strong>表面隔离</strong><p>Settings 或 child session 打开时，底层 workspace 保持挂载但必须设置 <code>inert</code> 与 <code>aria-hidden</code>，避免后台审批抢焦点。</p></div></div>
+      </section>
+
+      <section id="status">
+        <div class="section-head"><span class="section-no">13</span><h2>紧凑状态面板</h2></div>
+        <p>状态入口默认一行，仅在存在内容时显示。优先级：运行中工作流 → 当前计划/Goal → Git Changes → 后台 Terminal/SubAgent。点击展开为分区摘要。</p>
+        <div class="table-wrap"><table><thead><tr><th>分区</th><th>内容</th><th>操作</th></tr></thead><tbody>
+          <tr><td>Plan / Todo</td><td>当前进度、待处理项</td><td>打开计划详情</td></tr>
+          <tr><td>Background</td><td>Terminal 与 SubAgent 运行计数</td><td>停止、打开 child session</td></tr>
+          <tr><td>Artifacts</td><td>当前任务产物</td><td>预览或下载</td></tr>
+        </tbody></table></div>
+      </section>
+
+      <section id="sidepane">
+        <div class="section-head"><span class="section-no">14</span><h2>子会话、Artifact 与 Browser</h2></div>
+        <p class="lede">TinyAI 的核心宽度通常低于 ZCode 桌面窗口，因此不做完整三栏常驻布局。</p>
+        <div class="grid-2">
+          <div class="card"><h3>窄屏 ≤ 520px</h3><p>子会话、Artifact、Plan 详情使用全页覆盖层；返回后恢复原滚动位置和打开来源。</p></div>
+          <div class="card"><h3>宽屏 &gt; 720px</h3><p>可使用右侧滑入面板，但主对话不被永久压缩；User 可主动关闭。</p></div>
+        </div>
+      </section>
+
+      <section id="settings">
+        <div class="section-head"><span class="section-no">15</span><h2>Settings 与 History</h2></div>
+        <ul><li>保持旧版全屏页面和列表节奏，不在未完成的新 Dashboard 上继续补丁。</li><li>分组：通用、模型、权限、Agent 能力、关于。</li><li>History 以任务标题、状态、更新时间和消息数展示；删除操作有确认。</li><li>模型配置错误必须直接引导到 Connections，不显示笼统的 runtime disconnect。</li></ul>
+      </section>
+
+      <section id="errors">
+        <div class="section-head"><span class="section-no">16</span><h2>空态、连接与错误</h2></div>
+        <div class="grid-2">
+          <div class="card"><h3>空态</h3><p>logo、品牌问候和三个任务建议。窄屏建议纵向排列，问题 chips 自动换行。</p></div>
+          <div class="card"><h3>连接状态</h3><p>初次断线显示“正在重连”；自动重连两次；失败后才显示重新加载扩展。无模型配置显示配置错误而非断连。</p></div>
+        </div>
+        <p>错误区固定在 Composer 上方，可关闭；模型 401/429/5xx 区分展示，并保留原任务和草稿。</p>
+      </section>
+
+      <section id="responsive">
+        <div class="section-head"><span class="section-no">17</span><h2>响应式、主题与无障碍</h2></div>
+        <div class="grid-4">
+          <div class="card"><h3>320px</h3><p>隐藏非关键标签和工具 secondary text。</p></div>
+          <div class="card"><h3>390–520px</h3><p>主目标宽度；单列、紧凑 Composer。</p></div>
+          <div class="card"><h3>736px</h3><p>可使用紧凑状态侧栏与更宽工具摘要。</p></div>
+          <div class="card"><h3>1024px+</h3><p>可选右侧侧面板；不改变会话事实。</p></div>
+        </div>
+        <ul><li>旧版默认浅色，同时完整支持浅/深/跟随系统。</li><li>所有可折叠行必须支持 Enter/Space，并提供 aria-expanded。</li><li>计时通过 aria-live 以低频状态播报，不逐 100ms 播报。</li><li><code>prefers-reduced-motion</code> 下关闭 shimmer、滚动和淡入。</li></ul>
+      </section>
+
+      <section id="contracts">
+        <div class="section-head"><span class="section-no">18</span><h2>核心对象与类图</h2></div>
+        <div class="diagram-card"><pre class="mermaid">
+classDiagram
+  class ConversationProjection {
+    +sessionId
+    +revision
+    +taskStatus
+    +rows
+    +children
+  }
+  class TurnRenderUnit {
+    +turnId
+    +userInput
+    +workSegments
+    +latestAssistant
+    +tailRows
+  }
+  class WorkSegment {
+    +segmentId
+    +workStatus
+    +historyRows
+    +assistantText
+  }
+  class UIToolItem {
+    +toolId
+    +family
+    +summary
+    +status
+    +details
+  }
+  class ComposerState {
+    +scope
+    +draft
+    +attachments
+    +model
+    +approval
+    +queue
+  }
+  class RendererRegistry {
+    +resolve(family)
+  }
+  class SidePaneState {
+    +tabs
+    +activeTab
+    +ownerScope
+  }
+  ConversationProjection --> TurnRenderUnit : derives
+  TurnRenderUnit *-- WorkSegment
+  WorkSegment *-- UIToolItem
+  RendererRegistry --> UIToolItem : renders
+  ConversationProjection --> ComposerState : availability
+  ConversationProjection --> SidePaneState : child/artifact refs
+        </pre><p class="diagram-caption">UI view model 与 Runtime 事实分层。</p></div>
+        <pre><code>interface TurnRenderUnit {
+  turnKey: string;
+  userInput: ConversationRow;
+  workSegments: WorkSegment[];
+  latestAssistant?: ConversationRow;
+  tailRows: ConversationRow[];
+}
+
+interface WorkSegment {
+  key: string;
+  rows: ConversationRow[];
+  workStatus?: { state: 'running' | 'completed' | 'interrupted'; durationMs?: number };
+  defaultOpen: boolean;
+}</code></pre>
+      </section>
+
+      <section id="sequences">
+        <div class="section-head"><span class="section-no">19</span><h2>核心交互时序</h2></div>
+        <div class="diagram-card"><pre class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant C as Composer
+  participant R as Runtime
+  participant P as Projection
+  participant V as UI
+  U->>C: submit text
+  C->>R: send_input(commandId)
+  R-->>C: ACK accepted
+  R-->>P: task/turn/tool facts
+  P-->>V: snapshot/delta
+  V->>V: derive TurnRenderUnit
+  V-->>U: running work + streaming answer
+  R-->>P: terminal facts
+  P-->>V: final delta
+  V-->>U: latest answer + collapsed history
+        </pre></div>
+        <div class="diagram-card"><pre class="mermaid">
+stateDiagram-v2
+  [*] --> Draft
+  Draft --> Running: send accepted
+  Running --> WaitingApproval: ask policy
+  WaitingApproval --> Running: approved
+  WaitingApproval --> Failed: denied/error
+  Running --> WaitingUser: handoff/A2U
+  WaitingUser --> Running: continue
+  WaitingUser --> Cancelled: cancel
+  Running --> Completed: final answer
+  Running --> Failed: error
+  Running --> Cancelled: stop
+  Completed --> [*]
+  Failed --> [*]
+  Cancelled --> [*]
+        </pre></div>
+      </section>
+
+      <section id="mapping">
+        <div class="section-head"><span class="section-no">20</span><h2>ZCode 借鉴映射</h2></div>
+        <div class="table-wrap"><table><thead><tr><th>编号</th><th>ZCode 行为</th><th>tinyai 采用</th><th>差异</th></tr></thead><tbody>
+          <tr><td>ZC-UI-01</td><td>TurnRenderUnit 派生</td><td>直接采用</td><td>不引入虚拟滚动首版</td></tr>
+          <tr><td>ZC-UI-02</td><td>运行中过程展开、完成后折叠</td><td>直接采用</td><td>底部计时更轻量</td></tr>
+          <tr><td>ZC-UI-03</td><td>Tool renderer registry</td><td>直接采用</td><td>Browser/Coding family 需自建</td></tr>
+          <tr><td>ZC-UI-04</td><td>Explore/Terminal/Changes 聚合</td><td>直接采用</td><td>增加浏览动作 family</td></tr>
+          <tr><td>ZC-UI-05</td><td>Reasoning 默认有入口、内容折叠</td><td>适配采用</td><td>只用 Provider 可见字段</td></tr>
+          <tr><td>ZC-UI-06</td><td>SubAgent 打开 child side pane</td><td>适配采用</td><td>窄屏全页覆盖</td></tr>
+          <tr><td>ZC-UI-07</td><td>队列来自 Projection</td><td>直接采用</td><td>保留当前 command 协议</td></tr>
+          <tr><td>ZC-UI-08</td><td>设置页副导航</td><td>弱化采用</td><td>窄屏继续单列页面</td></tr>
+        </tbody></table></div>
+      </section>
+
+      <section id="acceptance">
+        <div class="section-head"><span class="section-no">21</span><h2>验收标准</h2></div>
+        <div class="grid-2">
+          <div class="card"><h3>视觉</h3><ul><li>420×900 主界面与开发时基线一致</li><li>320/390 无横向溢出</li><li>Settings/History 返回恢复滚动位置</li><li>仅一套 UI 入口</li></ul></div>
+          <div class="card"><h3>过程</h3><ul><li>运行中过程展开，完成后折叠</li><li>失败/中断强制展开</li><li>回答与尾随状态不被折叠</li><li>引导输入独立分段</li></ul></div>
+          <div class="card"><h3>工具与审批</h3><ul><li>工具摘要不暴露原始 JSON</li><li>连续工具正确聚合</li><li>审批按 family 渲染</li><li>等待用户不显示工作中</li></ul></div>
+          <div class="card"><h3>恢复</h3><ul><li>断线自动重连</li><li>无配置显示真实配置错误</li><li>snapshot 重建不回放本地猜测</li><li>重新加载后任务事实一致</li></ul></div>
+        </div>
+        <div class="callout"><div><strong>配套测试</strong><p>具体用例、状态空间、截图门禁和 E2E 矩阵见 <a href="tinyai-ui-testing-v1.html">tinyai UI 测试方案 v1.0</a>。</p></div></div>
+      </section>
+
+      <footer class="footer">tinyai UI Detailed Design v1.0 · 2026-10-31 · Visual baseline: initial tinyai · Interaction baseline: ZCode 3.17.1</footer>
+    </main>
+  </div>
+  <aside class="annotation-drawer" id="annotation-drawer" role="dialog" aria-modal="false" aria-labelledby="drawer-title" aria-hidden="true">
+    <div class="drawer-head"><h2 id="drawer-title">修订批注</h2><button class="icon-button drawer-close" id="drawer-close" type="button" aria-label="关闭">×</button></div>
+    <p class="sidebar-note" style="margin-top:0">可选中文本后开启标注并点击章节。修订自动保存在本浏览器。</p>
+    <div class="field"><label>标注对象</label><div class="field-selection" id="note-target">尚未选择章节</div></div>
+    <div class="field"><label for="note-type">类型</label><select id="note-type"><option value="comment">修改建议</option><option value="must">必须修改</option><option value="decision">确认决策</option><option value="question">待确认问题</option></select></div>
+    <div class="field"><label for="note-text">修订内容</label><textarea id="note-text" placeholder="例如：运行期间底部计时与工具摘要需要同时可见，但不能出现两个 Thinking 状态。"></textarea></div>
+    <div class="drawer-actions"><button class="primary-button" id="save-note" type="button">保存批注</button><button class="secondary-button" id="new-note" type="button">清空</button><button class="secondary-button" id="export-review-2" type="button">导出 JSON</button></div>
+    <h3>当前批注</h3><div class="notes-list" id="notes-list"></div>
+    <div class="drawer-actions"><button class="danger-button" id="clear-notes" type="button">清空全部</button></div>
+  </aside>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11.6.0/dist/mermaid.min.js"></script>
+  <script>
+    (()=>{
+      const DOC_ID='tinyai-ui-design-v1',DOC_VERSION='1.0',KEY='tinyai-ui-design-review-v1';
+      const root=document.documentElement,drawer=document.getElementById('annotation-drawer'),targetEl=document.getElementById('note-target'),noteType=document.getElementById('note-type'),noteText=document.getElementById('note-text'),notesList=document.getElementById('notes-list'),countEl=document.getElementById('review-count'),toast=document.getElementById('toast');
+      let notes=[],activeTarget=null,editingId=null,reviewMode=false;
+      try{const value=JSON.parse(localStorage.getItem(KEY)||'[]');notes=Array.isArray(value)?value:[]}catch{}
+      const esc=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
+      const labels={comment:'修改建议',must:'必须修改',decision:'确认决策',question:'待确认'};
+      const toastMsg=message=>{toast.textContent=message;toast.classList.add('is-visible');clearTimeout(toastMsg.timer);toastMsg.timer=setTimeout(()=>toast.classList.remove('is-visible'),1800)};
+      const persist=()=>{localStorage.setItem(KEY,JSON.stringify(notes));renderNotes();toastMsg('批注已保存到本浏览器')};
+      const targetInfo=element=>{const block=element.closest('[data-reviewable]')||element.closest('section'),section=element.closest('section');return{id:block?.dataset.reviewable||section?.id||'document',title:block?.dataset.reviewTitle||block?.querySelector('h2,h3')?.textContent?.trim()||'文档',sectionId:section?.id||block?.id||''}};
+      const openDrawer=(element,existingId=null)=>{const existing=existingId?notes.find(note=>note.id===existingId):null,info=existing?{id:existing.targetId,title:existing.targetTitle,sectionId:existing.sectionId}:(element?targetInfo(element):activeTarget||{id:'document',title:'文档全局',sectionId:''});activeTarget=info;editingId=existingId;targetEl.innerHTML=`<strong>${esc(info.title)}</strong><br><span>${esc(info.id)}</span>${window.getSelection()?.toString().trim()?`<br><br>选中文本：${esc(window.getSelection().toString().trim().slice(0,320))}`:''}`;noteType.value=existing?.type||'comment';noteText.value=existing?.comment||'';drawer.classList.add('is-open');drawer.setAttribute('aria-hidden','false');renderNotes();setTimeout(()=>noteText.focus(),100)};
+      const closeDrawer=()=>{drawer.classList.remove('is-open');drawer.setAttribute('aria-hidden','true')};
+      const renderNotes=()=>{countEl.textContent=String(notes.length);const summary=document.querySelector('.review-summary');if(summary){summary.querySelector('strong').textContent=`修订状态 · ${notes.length} 条`;summary.querySelector('span').textContent='批注自动保存在本浏览器；开发前请导出 JSON。'}document.querySelectorAll('.review-pin').forEach(button=>{const count=notes.filter(note=>note.targetId===button.dataset.target).length;button.textContent=count?`批注 ${count}`:'批注';button.classList.toggle('has-notes',count>0)});notesList.innerHTML=notes.length?notes.slice().sort((a,b)=>b.updatedAt-a.updatedAt).map(note=>`<article class="note"><div class="note-head"><span>${esc(labels[note.type]||'修改建议')}</span><button type="button" data-jump="${esc(note.sectionId)}" style="border:0;background:transparent;color:inherit;cursor:pointer">${esc(note.targetTitle)}</button><span>${new Date(note.updatedAt).toLocaleString('zh-CN',{hour12:false})}</span></div>${note.selection?`<div class="sidebar-note" style="margin:4px 0 0">“${esc(note.selection)}”</div>`:''}<p>${esc(note.comment)}</p><div class="note-actions"><button type="button" data-edit="${esc(note.id)}">编辑</button><button type="button" data-delete="${esc(note.id)}">删除</button></div></article>`).join(''):'<div class="sidebar-note">还没有批注。</div>'};
+      const saveNote=()=>{const comment=noteText.value.trim();if(!comment){noteText.focus();toastMsg('请输入修订内容');return}const now=Date.now();if(editingId){const index=notes.findIndex(note=>note.id===editingId);if(index>=0)notes[index]={...notes[index],type:noteType.value,comment,updatedAt:now}}else notes.push({id:crypto.randomUUID?.()||String(now),targetId:activeTarget.id,targetTitle:activeTarget.title,sectionId:activeTarget.sectionId,selection:window.getSelection()?.toString().trim()||'',type:noteType.value,comment,createdAt:now,updatedAt:now,docVersion:DOC_VERSION});editingId=null;noteText.value='';persist()};
+      const exportReview=async()=>{const payload={schemaVersion:1,documentId:DOC_ID,documentVersion:DOC_VERSION,documentFile:'tinyai-ui-design-v1.html',exportedAt:new Date().toISOString(),annotations:notes},text=JSON.stringify(payload,null,2),name=`tinyai-ui-design-review-${new Date().toISOString().slice(0,10)}.json`;try{if(window.showSaveFilePicker){const handle=await window.showSaveFilePicker({suggestedName:name,types:[{description:'tinyai review JSON',accept:{'application/json':['.json']}}]}),writable=await handle.createWritable();await writable.write(text);await writable.close();toastMsg('修订包已保存');return}}catch(error){if(error?.name==='AbortError')return}const url=URL.createObjectURL(new Blob([text],{type:'application/json'})),anchor=document.createElement('a');anchor.href=url;anchor.download=name;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1500)};
+      const importReview=async file=>{if(!file)return;try{const data=JSON.parse(await file.text());if(!Array.isArray(data.annotations)||data.documentId!==DOC_ID)throw new Error('invalid');const byId=new Map(notes.map(note=>[note.id,note]));for(const note of data.annotations)if(note?.comment)byId.set(note.id,note);notes=[...byId.values()];persist()}catch{toastMsg('导入失败：修订文档不匹配')}};
+      document.querySelectorAll('section[id]').forEach(section=>{section.dataset.reviewable=section.id;section.dataset.reviewTitle=section.querySelector('h2')?.textContent?.trim()||section.id});
+      document.querySelectorAll('.section-head').forEach(head=>{const section=head.closest('[data-reviewable]');const button=document.createElement('button');button.type='button';button.className='review-pin';button.dataset.target=section.dataset.reviewable;button.textContent='批注';button.addEventListener('click',event=>{event.stopPropagation();openDrawer(section)});head.appendChild(button)});
+      document.getElementById('review-toggle').addEventListener('click',event=>{reviewMode=!reviewMode;document.body.classList.toggle('review-mode',reviewMode);event.currentTarget.classList.toggle('is-active',reviewMode);event.currentTarget.setAttribute('aria-pressed',String(reviewMode))});
+      document.getElementById('open-review').addEventListener('click',()=>openDrawer(document.querySelector('#summary')));
+      document.getElementById('drawer-close').addEventListener('click',closeDrawer);
+      document.getElementById('save-note').addEventListener('click',saveNote);
+      document.getElementById('new-note').addEventListener('click',()=>{editingId=null;noteText.value='';noteText.focus()});
+      document.getElementById('export-review').addEventListener('click',exportReview);
+      document.getElementById('export-review-2').addEventListener('click',exportReview);
+      document.getElementById('import-review').addEventListener('click',()=>document.getElementById('import-review-file').click());
+      document.getElementById('import-review-file').addEventListener('change',event=>importReview(event.target.files?.[0]));
+      document.getElementById('clear-notes').addEventListener('click',()=>{if(notes.length&&confirm('确定清空全部批注吗？')){notes=[];persist()}});
+      document.addEventListener('click',event=>{if(!reviewMode||event.target.closest('button,a,input,select,textarea,.mermaid'))return;const block=event.target.closest('[data-reviewable]');if(block)openDrawer(block)});
+      document.addEventListener('keydown',event=>{if(event.key==='Escape')closeDrawer()});
+      notesList.addEventListener('click',event=>{const edit=event.target.closest('[data-edit]'),remove=event.target.closest('[data-delete]'),jump=event.target.closest('[data-jump]');if(edit)openDrawer(null,edit.dataset.edit);if(remove&&confirm('删除这条批注吗？')){notes=notes.filter(note=>note.id!==remove.dataset.delete);persist()}if(jump)document.getElementById(jump.dataset.jump)?.scrollIntoView({behavior:'smooth'})});
+      document.getElementById('print-button').addEventListener('click',()=>window.print());
+      const themeToggle=document.getElementById('theme-toggle');root.dataset.theme=localStorage.getItem('tinyai-ui-design-theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');const syncTheme=()=>{themeToggle.textContent=root.dataset.theme==='dark'?'☀':'◐'};syncTheme();themeToggle.addEventListener('click',async()=>{root.dataset.theme=root.dataset.theme==='dark'?'light':'dark';localStorage.setItem('tinyai-ui-design-theme',root.dataset.theme);syncTheme();await renderMermaid()});
+      const sources=[...document.querySelectorAll('.mermaid')];sources.forEach(node=>node.dataset.source=node.textContent.trim());async function renderMermaid(){if(!window.mermaid)return;const css=getComputedStyle(root),vars={background:css.getPropertyValue('--surface').trim(),primaryColor:css.getPropertyValue('--surface-2').trim(),primaryTextColor:css.getPropertyValue('--text').trim(),primaryBorderColor:css.getPropertyValue('--border-strong').trim(),secondaryColor:css.getPropertyValue('--blue-soft').trim(),tertiaryColor:css.getPropertyValue('--accent-soft').trim(),lineColor:css.getPropertyValue('--muted').trim(),fontFamily:getComputedStyle(document.body).fontFamily,fontSize:'13px'};mermaid.initialize({startOnLoad:false,securityLevel:'loose',theme:'base',themeVariables:vars,flowchart:{curve:'basis',htmlLabels:true,padding:14},sequence:{useMaxWidth:true,wrap:true},class:{useMaxWidth:true},state:{useMaxWidth:true}});sources.forEach(node=>{node.removeAttribute('data-processed');node.textContent=node.dataset.source});await mermaid.run({nodes:sources})}
+      const tocLinks=[...document.querySelectorAll('.toc a')],sections=tocLinks.map(link=>document.querySelector(link.getAttribute('href'))).filter(Boolean),observer=new IntersectionObserver(entries=>{const visible=entries.filter(entry=>entry.isIntersecting).sort((a,b)=>b.intersectionRatio-a.intersectionRatio)[0];if(!visible)return;tocLinks.forEach(link=>link.classList.toggle('active',link.getAttribute('href')==='#'+visible.target.id))},{rootMargin:'-15% 0px -70% 0px'});sections.forEach(section=>observer.observe(section));renderNotes();renderMermaid();
+    })();
+  </script>
+</body>
+</html>
