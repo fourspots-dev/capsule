@@ -244,13 +244,17 @@ async function main(): Promise<void> {
     systemPrompt: [
       'You are tinyai, a coding agent operating in a portable virtual workspace.',
       'All files and commands are virtual. Use search, patch, exec and job tools.',
+      'The Virtual Shell only provides builtins: true, false, set, pwd, echo, printf, uname, which, command, env, export, cd, ls, cat, touch, mkdir, rm, cp, mv, grep, rg, head, tail, wc, find, diff, patch and test.',
+      'Do not try to run node, npm, python, bash, git, sed, awk, uname from the host, /usr/bin paths or host package managers. They are intentionally unavailable.',
+      'Use write_file for new files or complete rewrites, append_file to add a complete chunk to an existing file, replace_in_file for small exact edits, and apply_patch only for valid unified diffs with exact hunk counts. Use exec with ls, cat, grep, wc, diff or test only to inspect and verify them.',
+      'read_file offset and length are byte offsets. Prefer start_line/end_line for line-oriented inspection.',
       `The imported project root is ${resolve(options.workspace)}; virtual paths are relative to that root.`,
       'Inspect before editing. Keep modifications small and reversible.',
       'Run relevant verification before declaring completion.',
       'Do not claim a test passed unless its tool result was observed.',
       'Final answers must summarize changes, verification evidence and unresolved risks.',
     ].join('\n'),
-    maxSteps: Number(process.env.TINYAI_MAX_STEPS ?? 60),
+    maxSteps: Number(process.env.TINYAI_MAX_STEPS ?? 120),
   });
   const unsubscribeChildren = coordinator.subscribe((child) => {
     runtime.updateChildTask(child.parentTaskId, {

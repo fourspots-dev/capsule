@@ -240,7 +240,9 @@ function applyHunks(
       }
     }
     if (oldSeen !== hunk.oldCount || newSeen !== hunk.newCount) {
-      throw invalid('Patch hunk line counts do not match its header');
+      throw invalid(
+        `Patch hunk line counts do not match its header (old ${oldSeen}/${hunk.oldCount}, new ${newSeen}/${hunk.newCount})`
+      );
     }
   }
   output.push(...lines.slice(cursor));

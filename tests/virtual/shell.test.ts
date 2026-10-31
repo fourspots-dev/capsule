@@ -38,9 +38,24 @@ describe('VirtualShell', () => {
       exitCode: 0,
       stdout: '2:beta\n',
     });
+    expect(await shell.execute('grep -n beta words.txt')).toMatchObject({
+      exitCode: 0,
+      stdout: '2:beta\n',
+    });
     expect(await shell.execute('echo ignored | grep alpha')).toMatchObject({
       exitCode: 1,
       stdout: '',
+    });
+  });
+
+  it('accepts common read-only diff flags', async () => {
+    const vfs = new MemoryFileSystem();
+    const shell = new VirtualShell(vfs);
+    await vfs.write('before.txt', encoder.encode('old\n'));
+    await vfs.write('after.txt', encoder.encode('new\n'));
+    expect(await shell.execute('diff -u before.txt after.txt')).toMatchObject({
+      exitCode: 1,
+      stdout: expect.stringContaining('-old'),
     });
   });
 
@@ -126,5 +141,45 @@ describe('VirtualShell', () => {
     expect(await shell.execute('cat input.txt')).toMatchObject({
       stdout: 'virtual\n',
     });
+  });
+
+  it('supports virtual devices, capability discovery and inspection builtins', async () => {
+    const vfs = new MemoryFileSystem();
+    const shell = new VirtualShell(vfs);
+    expect(await shell.execute('printf "one\\ntwo\\n" > values.txt')).toMatchObject({
+      exitCode: 0,
+    });
+    expect(await shell.execute('echo hidden > /dev/null')).toMatchObject({
+      exitCode: 0,
+      stdout: '',
+    });
+    expect(await vfs.stat('dev/null')).toBeUndefined();
+    expect(await shell.execute('cat /dev/null')).toMatchObject({
+      exitCode: 0,
+      stdout: '',
+    });
+    expect(await shell.execute('which node echo')).toMatchObject({
+      exitCode: 1,
+      stdout: 'echo\n',
+    });
+    expect(await shell.execute('uname')).toMatchObject({
+      stdout: 'tinyai-virtual\n',
+    });
+    expect(await shell.execute('head -n 1 values.txt')).toMatchObject({
+      stdout: 'one\n',
+    });
+    expect(await shell.execute('tail -n 1 values.txt')).toMatchObject({
+      stdout: 'two\n',
+    });
+    expect(await shell.execute('wc -l values.txt')).toMatchObject({
+      stdout: '2 values.txt\n',
+    });
+    expect(await shell.execute('[ -f values.txt ]')).toMatchObject({
+      exitCode: 0,
+    });
+    expect(await shell.execute('touch empty.txt')).toMatchObject({
+      exitCode: 0,
+    });
+    expect(await vfs.stat('empty.txt')).toMatchObject({ size: 0 });
   });
 });

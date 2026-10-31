@@ -58,6 +58,15 @@ describe('virtual workspace agent tools', () => {
         output: { exitCode: 0, stdout: 'virtual-shell\n' },
       });
     });
+    expect(
+      await execute(executor, 'exec', {
+        command: 'echo',
+        args: ['command-args'],
+        cwd: 'src',
+      })
+    ).toMatchObject({
+      output: { exitCode: 0, stdout: 'command-args\n' },
+    });
   });
 
   it('exposes expected-version conflicts and background jobs', async () => {
@@ -87,6 +96,52 @@ describe('virtual workspace agent tools', () => {
         status: 'completed',
         stdout: 'async\n',
       }),
+    });
+  });
+
+  it('offers line-oriented reads and exact text replacement for reliable edits', async () => {
+    const { executor, workspace } = setup();
+    await execute(executor, 'write_file', {
+      path: 'src/player.js',
+      text: 'var a = 1;\nvar broken = true;\nvar c = 3;\n',
+    });
+    expect(
+      await execute(executor, 'read_file', {
+        path: 'src/player.js',
+        start_line: 2,
+        end_line: 2,
+      })
+    ).toMatchObject({
+      output: { text: 'var broken = true;' },
+    });
+    await execute(executor, 'replace_in_file', {
+      path: 'src/player.js',
+      old_text: 'var broken = true;',
+      new_text: 'var fixed = true;',
+    });
+    expect(new TextDecoder().decode(await workspace.fs.read('src/player.js'))).toBe(
+      'var a = 1;\nvar fixed = true;\nvar c = 3;\n'
+    );
+    await execute(executor, 'append_file', {
+      path: 'src/player.js',
+      text: 'var d = 4;\n',
+    });
+    expect(new TextDecoder().decode(await workspace.fs.read('src/player.js'))).toBe(
+      'var a = 1;\nvar fixed = true;\nvar c = 3;\nvar d = 4;\n'
+    );
+    await execute(executor, 'write_file', {
+      path: 'src/player.js',
+      text: 'same\nsame\n',
+    });
+    await expect(
+      execute(executor, 'replace_in_file', {
+        path: 'src/player.js',
+        old_text: 'same',
+        new_text: 'other',
+      })
+    ).resolves.toMatchObject({
+      status: 'failed',
+      error: { code: 'EDIT_TEXT_AMBIGUOUS' },
     });
   });
 });

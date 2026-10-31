@@ -130,7 +130,11 @@ export class VirtualShell {
         continue;
       }
       if (parsed.redirectIn) {
-        stdin = decode(await this.vfs.read(this.resolve(parsed.redirectIn), { signal }));
+        const redirectPath = this.resolve(parsed.redirectIn);
+        stdin =
+          redirectPath === 'dev/null'
+            ? ''
+            : decode(await this.vfs.read(redirectPath, { signal }));
       }
       let result: VirtualCommandResult;
       if (BUILTINS.has(parsed.args[0])) {
@@ -162,14 +166,16 @@ export class VirtualShell {
       exitCode = result.exitCode;
       if (parsed.redirectOut) {
         const redirectPath = this.resolve(parsed.redirectOut.path);
-        const previous = parsed.redirectOut.append
-          ? decode(await this.vfs.read(redirectPath, { signal }).catch(() => new Uint8Array()))
-          : '';
-        await this.vfs.write(
-          redirectPath,
-          encode(previous + result.stdout),
-          { signal }
-        );
+        if (redirectPath !== 'dev/null') {
+          const previous = parsed.redirectOut.append
+            ? decode(await this.vfs.read(redirectPath, { signal }).catch(() => new Uint8Array()))
+            : '';
+          await this.vfs.write(
+            redirectPath,
+            encode(previous + result.stdout),
+            { signal }
+          );
+        }
         stdout = '';
       }
       stdin = result.stdout;
@@ -192,8 +198,24 @@ export class VirtualShell {
     });
     if (command === 'true') return ok();
     if (command === 'false') return fail('', 1);
+    if (command === 'set') return ok();
     if (command === 'pwd') return ok(`${this.cwd || '.'}\n`);
     if (command === 'echo') return ok(`${args.join(' ')}\n`);
+    if (command === 'printf') return ok(decodeEscapes(args.join(' ')));
+    if (command === 'uname') return ok('tinyai-virtual\n');
+    if (command === 'which' || (command === 'command' && args[0] === '-v')) {
+      const names = command === 'which' ? args : args.slice(1);
+      const found = names.filter(
+        (name) =>
+          BUILTINS.has(name) ||
+          this.providers.some((provider) => provider.canExecute(name))
+      );
+      return {
+        exitCode: found.length === names.length ? 0 : 1,
+        stdout: found.map((name) => `${name}\n`).join(''),
+        stderr: '',
+      };
+    }
     if (command === 'env') {
       return ok(
         Object.entries(env)
@@ -225,6 +247,9 @@ export class VirtualShell {
     if (command === 'ls') {
       const recursive = args.includes('-R');
       const pathArg = args.find((item) => !item.startsWith('-')) ?? this.cwd;
+      const virtual = this.resolve(pathArg);
+      if (virtual === 'dev') return ok('null\n');
+      if (virtual === 'dev/null') return ok('null\n');
       const items = await this.vfs.list(pathArg, { recursive, signal });
       const prefix = normalizeVirtualPath(pathArg);
       return ok(
@@ -242,9 +267,20 @@ export class VirtualShell {
       if (!args.length) return ok(stdin);
       const output: string[] = [];
       for (const path of args) {
+        if (this.resolve(path) === 'dev/null') continue;
         output.push(decode(await this.vfs.read(this.resolve(path), { signal })));
       }
       return ok(output.join(''));
+    }
+    if (command === 'touch') {
+      for (const path of args) {
+        const resolved = this.resolve(path);
+        if (resolved === 'dev/null') continue;
+        if (!(await this.vfs.stat(resolved, signal))) {
+          await this.vfs.write(resolved, new Uint8Array(), { signal });
+        }
+      }
+      return ok();
     }
     if (command === 'mkdir') {
       const recursive = args.includes('-p');
@@ -258,6 +294,12 @@ export class VirtualShell {
       for (const path of paths) await this.vfs.remove(this.resolve(path), { recursive });
       return ok();
     }
+    if (command === 'rmdir') {
+      for (const path of args.filter((item) => !item.startsWith('-'))) {
+        await this.vfs.remove(this.resolve(path), { recursive: false });
+      }
+      return ok();
+    }
     if (command === 'cp' || command === 'mv') {
       if (args.length !== 2) return fail(`${command}: source and destination required`);
       const from = this.resolve(args[0]);
@@ -268,8 +310,17 @@ export class VirtualShell {
     }
     if (command === 'grep' || command === 'rg') {
       if (!args.length) return fail(`${command}: pattern required`);
-      const pattern = args[0];
-      const paths = args.slice(1);
+      let flagIndex = 0;
+      while (
+        flagIndex < args.length &&
+        args[flagIndex].startsWith('-') &&
+        args[flagIndex] !== '-'
+      ) {
+        flagIndex += 1;
+      }
+      const pattern = args[flagIndex];
+      if (!pattern) return fail(`${command}: pattern required`);
+      const paths = args.slice(flagIndex + 1);
       if (!paths.length && stdin) {
         const output = stdin
           .split('\n')
@@ -298,6 +349,58 @@ export class VirtualShell {
       }
       return { exitCode: output.length ? 0 : 1, stdout: output.length ? `${output.join('\n')}\n` : '', stderr: '' };
     }
+    if (command === 'head' || command === 'tail') {
+      const optionIndex = args.findIndex((item) => item === '-n');
+      const count =
+        optionIndex >= 0 && args[optionIndex + 1]
+          ? Math.max(0, Number(args[optionIndex + 1]))
+          : 10;
+      const paths = args.filter((item, index) =>
+        optionIndex >= 0
+          ? index !== optionIndex && index !== optionIndex + 1
+          : !item.startsWith('-')
+      );
+      const source = paths.length
+        ? (
+            await Promise.all(
+              paths.map(async (path) =>
+                this.resolve(path) === 'dev/null'
+                  ? ''
+                  : decode(await this.vfs.read(this.resolve(path), { signal }))
+              )
+            )
+          ).join('')
+        : stdin;
+      const lines = source.split('\n');
+      if (lines.at(-1) === '') lines.pop();
+      const selected =
+        command === 'head' ? lines.slice(0, count) : lines.slice(-count);
+      return ok(selected.length ? `${selected.join('\n')}\n` : '');
+    }
+    if (command === 'wc') {
+      const countLines = args.includes('-l');
+      const paths = args.filter((item) => !item.startsWith('-'));
+      const sources = paths.length
+        ? await Promise.all(
+            paths.map(async (path) => ({
+              path,
+              text:
+                this.resolve(path) === 'dev/null'
+                  ? ''
+                  : decode(await this.vfs.read(this.resolve(path), { signal })),
+            }))
+          )
+        : [{ path: '', text: stdin }];
+      return ok(
+        sources
+          .map(({ path, text }) => {
+            const lines = text ? text.split('\n').length - (text.endsWith('\n') ? 1 : 0) : 0;
+            const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+            return `${countLines ? lines : `${lines} ${words} ${encode(text).byteLength}`}${path ? ` ${path}` : ''}`;
+          })
+          .join('\n') + '\n'
+      );
+    }
     if (command === 'find') {
       const path = this.resolve(args[0] ?? '');
       return ok(
@@ -308,10 +411,11 @@ export class VirtualShell {
       );
     }
     if (command === 'diff') {
-      if (args.length !== 2) return fail('diff: two files required');
-      const before = await this.vfs.read(this.resolve(args[0]), { signal });
-      const after = await this.vfs.read(this.resolve(args[1]), { signal });
-      const result = unifiedDiff(before, after, `${args[0]} -> ${args[1]}`);
+      const paths = args.filter((item) => !item.startsWith('-'));
+      if (paths.length !== 2) return fail('diff: two files required');
+      const before = await this.vfs.read(this.resolve(paths[0]), { signal });
+      const after = await this.vfs.read(this.resolve(paths[1]), { signal });
+      const result = unifiedDiff(before, after, `${paths[0]} -> ${paths[1]}`);
       return {
         exitCode: result.patch ? 1 : 0,
         stdout: result.patch ?? (result.status === 'binary' ? 'Binary files differ\n' : ''),
@@ -334,10 +438,18 @@ export class VirtualShell {
         );
       }
     }
-    if (command === 'test') {
-      return args[0] === '-e' && args[1] && (await this.vfs.stat(this.resolve(args[1]), signal))
-        ? ok()
-        : fail('', 1);
+    if (command === 'test' || command === '[') {
+      const values = args[0] === '[' ? args.slice(0, -1) : args;
+      if (values[0] && values[1]) {
+        const target = this.resolve(values[1]);
+        if (target === 'dev/null' && ['-e', '-f'].includes(values[0])) return ok();
+        const info = await this.vfs.stat(target, signal);
+        if (values[0] === '-e' && info) return ok();
+        if (values[0] === '-f' && info?.kind === 'file') return ok();
+        if (values[0] === '-d' && info?.kind === 'directory') return ok();
+        if (values[0] === '=' && values[1] === values[2]) return ok();
+      }
+      return fail('', 1);
     }
     return fail(`${command}: builtin not implemented`, 127);
   }
@@ -351,23 +463,34 @@ export class VirtualShell {
 const BUILTINS = new Set([
   'true',
   'false',
+  'set',
   'pwd',
   'echo',
+  'printf',
+  'uname',
+  'which',
+  'command',
   'env',
   'export',
   'cd',
   'ls',
   'cat',
+  'touch',
   'mkdir',
   'rm',
+  'rmdir',
   'cp',
   'mv',
   'grep',
   'rg',
+  'head',
+  'tail',
+  'wc',
   'find',
   'diff',
   'patch',
   'test',
+  '[',
 ]);
 
 function parseCommand(
@@ -423,7 +546,14 @@ function tokenize(value: string): string[] {
       continue;
     }
     if (char === '\\' && quote !== "'") {
-      escaped = true;
+      if (
+        quote === '"' &&
+        !['$', '`', '"', '\\', '\n'].includes(value[index + 1] ?? '')
+      ) {
+        current += '\\';
+      } else {
+        escaped = true;
+      }
       continue;
     }
     if (quote) {
@@ -476,8 +606,15 @@ function splitOutsideQuotes(
       continue;
     }
     if (char === '\\' && quote !== "'") {
-      current += char;
-      escaped = true;
+      if (
+        quote === '"' &&
+        !['$', '`', '"', '\\', '\n'].includes(value[index + 1] ?? '')
+      ) {
+        current += '\\';
+      } else {
+        current += char;
+        escaped = true;
+      }
       continue;
     }
     if (quote) {
@@ -527,6 +664,19 @@ function decode(value: Uint8Array): string {
 
 function truncate(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max)}\n…(truncated)` : value;
+}
+
+function decodeEscapes(value: string): string {
+  return value.replace(
+    /\\(n|r|t|\\|x([0-9a-fA-F]{2}))/g,
+    (_match, token: string, hex?: string) => {
+      if (token === 'n') return '\n';
+      if (token === 'r') return '\r';
+      if (token === 't') return '\t';
+      if (token === '\\') return '\\';
+      return String.fromCharCode(Number.parseInt(hex!, 16));
+    }
+  );
 }
 
 function assertSupportedSyntax(value: string): void {
