@@ -538,4 +538,42 @@ describe('kernel extension E2E', () => {
     );
     expect(modelCalls).toBe(10);
   });
+
+  it('reports missing model configuration instead of dropping the runtime port', async () => {
+    let worker = context.serviceWorkers()[0];
+    if (!worker) worker = await context.waitForEvent('serviceworker');
+    const extensionId = new URL(worker.url()).host;
+    await worker.evaluate(async () => chrome.storage.local.clear());
+
+    const page = await context.newPage();
+    const pageErrors: string[] = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+    await page.goto(`chrome-extension://${extensionId}/sidepanel.html`);
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          const port = chrome.runtime.connect({ name: 'tinyai-runtime-v1' });
+          port.onMessage.addListener((message) => {
+            if (message.type === 'response' && message.requestId === 'reload-empty') {
+              port.disconnect();
+              if (message.ok) resolve();
+              else reject(new Error(message.error?.message ?? 'reload failed'));
+            }
+          });
+          port.postMessage({ type: 'reload_runtime', requestId: 'reload-empty' });
+        })
+    );
+    await page.reload();
+    await page.waitForTimeout(1_500);
+    const debugStatus = await page.evaluate(() => ({
+      hidden: document.querySelector<HTMLElement>('#kernel-status')?.hidden,
+      text: document.querySelector('#kernel-status')?.textContent ?? '',
+      body: document.body.innerText,
+    }));
+    expect(debugStatus.text).toContain('No model configuration was found');
+    const status = debugStatus.text;
+    expect(status).not.toContain('disconnected');
+    expect(pageErrors).toEqual([]);
+    await page.close();
+  });
 });

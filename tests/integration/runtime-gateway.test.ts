@@ -5,6 +5,7 @@ import {
   SequentialIdGenerator,
   ToolExecutor,
   WorkspaceRuntime,
+  AgentError,
 } from '../../src/core';
 import { PortApprovalBroker } from '../../src/runtime/approval-broker';
 import type { RuntimePort, RuntimeRequest, RuntimeResponse } from '../../src/runtime/protocol';
@@ -145,6 +146,28 @@ describe('RuntimeGateway', () => {
     });
     port.disconnect();
     await gateway.dispose();
+  });
+
+  it('turns startup failures into request errors without disconnecting the port', async () => {
+    const gateway = new RuntimeGateway(async () => {
+      throw new AgentError('MODEL_NOT_CONFIGURED', 'Configure a model');
+    });
+    const port = new FakePort();
+    gateway.connect(port);
+
+    port.send({ type: 'list_sessions', requestId: 'bootstrap-1' });
+    await until(() => port.sent.some((message) => message.type === 'response'));
+    expect(port.sent.find((message) => message.type === 'response')).toMatchObject({
+      type: 'response',
+      requestId: 'bootstrap-1',
+      ok: false,
+      error: {
+        code: 'MODEL_NOT_CONFIGURED',
+        message: 'Configure a model',
+      },
+    });
+
+    port.disconnect();
   });
 
   it('lists skills declared by extensions without exposing storage details', async () => {

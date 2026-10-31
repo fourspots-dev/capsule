@@ -526,6 +526,7 @@
     let error = "";
     let busy = false;
     let busyStartedAt = 0;
+    let reconnectAttempts = 0;
     const render = () => {
       const zh = pageConfig.language.startsWith("zh");
       const rows = document.querySelector("#kernel-rows");
@@ -598,6 +599,7 @@
       if (scroll) scroll.scrollTop = scroll.scrollHeight;
     };
     client.onProjection((_sessionId, next) => {
+      reconnectAttempts = 0;
       projection = next;
       const nextBusy = next.taskStatus === "running" || next.taskStatus === "queued" || next.taskStatus === "waiting";
       if (nextBusy && !busy) busyStartedAt = Date.now();
@@ -615,10 +617,30 @@
       render();
     });
     client.onDisconnect(() => {
-      error = "Kernel runtime disconnected";
       busy = false;
       busyStartedAt = 0;
+      error = pageConfig.language.startsWith("zh") ? "Kernel \u8FD0\u884C\u65F6\u8FDE\u63A5\u4E2D\u65AD\uFF0C\u6B63\u5728\u91CD\u8FDE\u2026" : "Kernel runtime disconnected. Reconnecting\u2026";
       render();
+      if (reconnectAttempts >= 2) {
+        error = pageConfig.language.startsWith("zh") ? "Kernel \u8FD0\u884C\u65F6\u8FDE\u63A5\u5931\u8D25\uFF0C\u8BF7\u91CD\u65B0\u52A0\u8F7D\u6269\u5C55\u3002" : "Kernel runtime connection failed. Reload the extension.";
+        render();
+        return;
+      }
+      reconnectAttempts += 1;
+      window.setTimeout(() => {
+        void client.projection(sessionId).then(async (next) => {
+          projection = next;
+          await client.subscribe(sessionId);
+          busy = next.taskStatus === "running" || next.taskStatus === "queued" || next.taskStatus === "waiting";
+          busyStartedAt = busy ? Date.now() : 0;
+          error = "";
+          reconnectAttempts = 0;
+          render();
+        }).catch((cause) => {
+          error = errorMessage(cause);
+          render();
+        });
+      }, reconnectAttempts * 250);
     });
     document.querySelector("#kernel-form")?.addEventListener("submit", (event) => {
       event.preventDefault();

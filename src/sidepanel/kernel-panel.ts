@@ -57,6 +57,7 @@ export async function initKernelUi(): Promise<void> {
   let error = '';
   let busy = false;
   let busyStartedAt = 0;
+  let reconnectAttempts = 0;
 
   const render = (): void => {
     const zh = pageConfig.language.startsWith('zh');
@@ -156,6 +157,7 @@ export async function initKernelUi(): Promise<void> {
   };
 
   client.onProjection((_sessionId, next) => {
+    reconnectAttempts = 0;
     projection = next;
     const nextBusy =
       next.taskStatus === 'running' ||
@@ -176,10 +178,40 @@ export async function initKernelUi(): Promise<void> {
     render();
   });
   client.onDisconnect(() => {
-    error = 'Kernel runtime disconnected';
     busy = false;
     busyStartedAt = 0;
+    error = pageConfig.language.startsWith('zh')
+      ? 'Kernel 运行时连接中断，正在重连…'
+      : 'Kernel runtime disconnected. Reconnecting…';
     render();
+    if (reconnectAttempts >= 2) {
+      error = pageConfig.language.startsWith('zh')
+        ? 'Kernel 运行时连接失败，请重新加载扩展。'
+        : 'Kernel runtime connection failed. Reload the extension.';
+      render();
+      return;
+    }
+    reconnectAttempts += 1;
+    window.setTimeout(() => {
+      void client
+        .projection(sessionId)
+        .then(async (next) => {
+          projection = next;
+          await client.subscribe(sessionId);
+          busy =
+            next.taskStatus === 'running' ||
+            next.taskStatus === 'queued' ||
+            next.taskStatus === 'waiting';
+          busyStartedAt = busy ? Date.now() : 0;
+          error = '';
+          reconnectAttempts = 0;
+          render();
+        })
+        .catch((cause) => {
+          error = errorMessage(cause);
+          render();
+        });
+    }, reconnectAttempts * 250);
   });
 
   document.querySelector('#kernel-form')?.addEventListener('submit', (event) => {

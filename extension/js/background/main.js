@@ -2769,7 +2769,8 @@
       };
       port.onMessage.addListener(onMessage);
       port.onDisconnect.addListener(onDisconnect);
-      void this.ensureRuntime().then((bundle) => bundle.approval?.attach(port));
+      void this.ensureRuntime().then((bundle) => bundle.approval?.attach(port)).catch(() => {
+      });
       return onDisconnect;
     }
     async dispose() {

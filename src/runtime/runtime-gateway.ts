@@ -50,7 +50,13 @@ export class RuntimeGateway {
     };
     port.onMessage.addListener(onMessage);
     port.onDisconnect.addListener(onDisconnect);
-    void this.ensureRuntime().then((bundle) => bundle.approval?.attach(port));
+    void this.ensureRuntime()
+      .then((bundle) => bundle.approval?.attach(port))
+      .catch(() => {
+        // Startup failures are reported by the request that triggered them. An eager
+        // failure here must not escape as an unhandled rejection and terminate the
+        // MV3 service worker before it can return a useful configuration error.
+      });
     return onDisconnect;
   }
 
