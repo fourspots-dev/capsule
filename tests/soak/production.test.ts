@@ -13,6 +13,10 @@ const intervalMs = Math.max(
   10,
   Number(process.env.TINYAI_SOAK_INTERVAL_MS ?? 1_000)
 );
+const maxCycles = Math.max(
+  0,
+  Number(process.env.TINYAI_SOAK_CYCLES ?? 0)
+);
 const soakTest = enabled ? it : it.skip;
 const encoder = new TextEncoder();
 
@@ -36,7 +40,10 @@ describe('production Soak', () => {
         tools: [],
       });
       let cycle = 0;
-      while (Date.now() - startedAt < durationMs) {
+      while (
+        Date.now() - startedAt < durationMs &&
+        (maxCycles === 0 || cycle < maxCycles)
+      ) {
         const revision = cycle % 100;
         await workspace.fs.write(
           'src/main.ts',
@@ -77,7 +84,7 @@ describe('production Soak', () => {
       const heapGrowth = process.memoryUsage().heapUsed - initialHeap;
       expect(heapGrowth).toBeLessThan(512 * 1024 * 1024);
       process.stdout.write(
-        `Soak completed: ${cycle} cycles in ${Date.now() - startedAt}ms (${intervalMs}ms interval), heap growth ${Math.round(heapGrowth / 1024 / 1024)}MB\n`
+        `Soak completed: ${cycle} cycles in ${Date.now() - startedAt}ms (${intervalMs}ms interval, max ${maxCycles || 'time'}), heap growth ${Math.round(heapGrowth / 1024 / 1024)}MB\n`
       );
       await workspace.jobs.dispose();
       await sessions.runtime.dispose();

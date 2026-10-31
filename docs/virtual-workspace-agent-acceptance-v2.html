@@ -34,7 +34,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <div class="card"><h3 class="ok">实现验收：通过</h3><p>P1–P7 都已有可执行实现、自动化测试和端到端证据；没有只存在于接口或文档中的阶段交付。</p></div>
 <div class="card"><h3>生产发布：有条件</h3><p>当前环境没有 <code>DEEPSEEK_API_KEY</code>，live smoke 被跳过；8 小时 Soak 已启动但尚未结束。1GB Workspace 的范围读取与内存上限验收已通过。</p></div>
 </div>
-<div class="rule">最新确定性结果：78 个常规测试文件通过、3 个 opt-in 文件跳过，共 282 个测试通过；短时 Soak 另行执行 60 秒并完成 587 个生产节奏循环，堆增长约 2MB；1GB 大文件 + 10,000 文件仓库在 1.8 秒内通过，RSS 增量约 29MB。Chrome E2E：5 个测试通过。</div>
+<div class="rule">最新确定性结果：78 个常规测试文件通过、3 个 opt-in 文件跳过，共 282 个测试通过；8 小时等效 Soak 完成 28,800 个循环，堆增长 261MB；1GB 大文件 + 10,000 文件仓库在 1.8 秒内通过，RSS 增量约 29MB。Chrome E2E：5 个测试通过。</div>
 </section>
 
 <section id="matrix">
@@ -158,15 +158,20 @@ npm run test:live
 
 npm run test:large:1gb
   1GB sparse file + 10,000 files in 1,805ms
-  RSS growth: 29MB</pre>
+  RSS growth: 29MB
+
+npm run test:soak:equivalent
+  28,800 cycles in 394s
+  heap growth: 261MB (&lt; 512MB)</pre>
 <p>另外执行了 <code>TINYAI_SOAK=1 TINYAI_SOAK_DURATION_MS=60000 TINYAI_SOAK_INTERVAL_MS=100</code>：60.05 秒内完成 587 个生产节奏循环，堆增长约 2MB，低于 512MB 有界门限。</p>
+<p><code>npm run test:soak:equivalent</code> 已完成 28,800 个完整工作循环，实际耗时 394 秒，堆增长 261MB，低于 512MB 门限；原始 8 小时墙钟进程仍独立运行。</p>
 </section>
 
 <section id="open">
 <h2>11. 未关闭的发布项</h2>
 <table><thead><tr><th>项目</th><th>当前状态</th><th>关闭条件</th></tr></thead><tbody>
 <tr><td>DeepSeek live smoke</td><td><span class="pill pending">PENDING</span> 当前环境无凭据</td><td>在 shell 中安全设置 <code>DEEPSEEK_API_KEY</code>，运行 <code>npm run test:live</code></td></tr>
-<tr><td>8 小时 Soak</td><td><span class="pill pending">RUNNING</span> 生产节奏 harness 正在运行，已有 60s / 587 循环通过</td><td>8h 进程正常退出并满足堆/状态/Job/Session 不变量</td></tr>
+<tr><td>8 小时 Soak</td><td><span class="pill pending">RUNNING</span> 等效 28,800 循环已通过；墙钟进程仍在运行</td><td>8h 进程正常退出并满足堆/状态/Job/Session 不变量</td></tr>
 <tr><td>1GB Workspace</td><td><span class="pill">PASSED</span> HostFileSystem 范围读取；RSS 增量低于 256MB</td><td>已关闭</td></tr>
 </tbody></table>
 <p>已提供 opt-in Soak harness：<code>npm run test:soak</code> 与 <code>npm run test:soak:8h</code>。8 小时配置默认每秒一个完整工作循环，监测 Workspace、VCS、Job、Session 和堆增长；本次仍未实际等待 8 小时结束。</p>

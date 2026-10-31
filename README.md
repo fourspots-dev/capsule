@@ -235,11 +235,14 @@ Long-running production soak is opt-in:
 ```bash
 npm run test:soak
 npm run test:soak:8h
+npm run test:soak:equivalent
 ```
 
 The 8-hour profile defaults to one workload cycle per second. For a shorter
 smoke run, set `TINYAI_SOAK_DURATION_MS` and optionally
-`TINYAI_SOAK_INTERVAL_MS`.
+`TINYAI_SOAK_INTERVAL_MS`. The equivalent profile runs the same 28,800 workload
+cycles with a shortened interval while the wall-clock profile remains available
+for release gates.
 
 Large-workspace acceptance uses the optional native `HostFileSystem` provider,
 which performs fenced byte-range reads instead of loading the whole project:
