@@ -279,7 +279,7 @@ describe('kernel extension E2E', () => {
                 label: 'E2E',
                 'base-url': modelUrl,
                 'api-key': 'e2e-key',
-                models: ['e2e-model'],
+                models: ['e2e-model', 'e2e-model-alt'],
               },
             ],
           },
@@ -365,6 +365,33 @@ describe('kernel extension E2E', () => {
     await page.waitForSelector('[data-page-action="connections"]');
     await page.click('[data-page-action="back"]');
     await page.waitForSelector('#kernel-page-layer', { state: 'detached' });
+    await page.click('#kernel-model');
+    await page.waitForSelector('#kernel-model-menu:not([hidden])');
+    expect(
+      await page
+        .locator('[data-kernel-model="e2e-model"]')
+        .getAttribute('aria-pressed')
+    ).toBe('true');
+    await page.click('[data-kernel-model="e2e-model-alt"]');
+    await page.waitForFunction(
+      () =>
+        document.querySelector('[data-kernel-model="e2e-model-alt"]')?.getAttribute('aria-pressed') ===
+          'true' &&
+        document.querySelector('#kernel-model-label')?.textContent === 'e2e-model-alt'
+    );
+    expect(
+      await page
+        .locator('[data-kernel-model="e2e-model-alt"] .wb-pop-check')
+        .count()
+    ).toBe(1);
+    expect(
+      await page.evaluate(async () => {
+        const stored = await chrome.storage.local.get('tinyai:v2:config');
+        return (stored['tinyai:v2:config'] as { model?: string }).model;
+      })
+    ).toBe('e2e-model-alt');
+    await page.screenshot({ path: resolve('docs/model-switched.png'), fullPage: false });
+    await page.locator('body').click({ position: { x: 8, y: 500 } });
     await page.screenshot({ path: resolve('docs/restored-empty.png'), fullPage: false });
     const disabledSend = await page.locator('#kernel-send').evaluate((element) => {
       const style = getComputedStyle(element);
@@ -407,6 +434,17 @@ describe('kernel extension E2E', () => {
     }
     expect(offscreenCount).toBeGreaterThan(0);
     await page.fill('#kernel-input', 'extension smoke');
+    const modelSwitchState = await page.evaluate(() => ({
+      sendDisabled: document.querySelector<HTMLButtonElement>('#kernel-send')?.disabled,
+      status: document.querySelector('#kernel-status')?.textContent ?? '',
+      error: document.querySelector<HTMLElement>('#kernel-status')?.dataset.error,
+      activated: document.documentElement.dataset.tinyaiActivated,
+      canSend: document.documentElement.dataset.tinyaiCanSend,
+      input: document.querySelector<HTMLTextAreaElement>('#kernel-input')?.value,
+    }));
+    if (modelSwitchState.sendDisabled) {
+      throw new Error(`Model switch did not restore input: ${JSON.stringify(modelSwitchState)}`);
+    }
     await page.click('#kernel-send');
     await page.waitForFunction(
       () => document.querySelector('#kernel-rows')?.textContent?.includes('E2E received: extension smoke'),

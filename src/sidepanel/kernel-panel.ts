@@ -102,6 +102,10 @@ export async function initKernelUi(): Promise<void> {
     const modelLabelNode = document.querySelector<HTMLElement>('#kernel-model-label');
     const input = document.querySelector<HTMLTextAreaElement>('#kernel-input');
     if (!rows || !status || !send || !stop || !input || !modeButton || !approvePlan || !compact || !attachmentList || !queue || !modelLabelNode) return;
+    document.documentElement.dataset.tinyaiActivated = String(sessionActivated);
+    document.documentElement.dataset.tinyaiCanSend = String(
+      projection?.availability.canSend ?? false
+    );
     modelLabelNode.textContent = modelLabel;
     status.innerHTML = `<span class="wb-run-spinner"></span><span class="wb-run-text">${escapeHtml(statusText(
       projection,
@@ -276,6 +280,16 @@ export async function initKernelUi(): Promise<void> {
     }
     await activateSession(() =>
       client.createTabSession(windowId!, activeTabId!)
+    );
+  }
+
+  async function reloadRuntimeForCurrentTab(): Promise<void> {
+    await client.reloadRuntime();
+    if (windowId === undefined || !activeTabId) {
+      throw new Error('No active browser tab is available');
+    }
+    await activateSession(() =>
+      client.resolveTabSession(windowId!, activeTabId!)
     );
   }
 
@@ -512,7 +526,7 @@ export async function initKernelUi(): Promise<void> {
       pageConfig.model = model;
       modelLabel = model;
       void writePageConfig()
-        .then(() => client.reloadRuntime())
+        .then(() => reloadRuntimeForCurrentTab())
         .then(() => renderPage())
         .catch((cause) => {
           pageError = errorMessage(cause);
@@ -1182,7 +1196,7 @@ export async function initKernelUi(): Promise<void> {
       pageConfig.model = connection.models[0];
     }
     await writePageConfig();
-    await client.reloadRuntime();
+    await reloadRuntimeForCurrentTab();
     pageView = 'settings';
     editingConnectionId = undefined;
     renderPage();
@@ -1248,6 +1262,18 @@ export async function initKernelUi(): Promise<void> {
       }>;
     };
     const connections = Array.isArray(config.connections) ? config.connections : [];
+    const selectedConnection =
+      typeof config.connection === 'string'
+        ? config.connection
+        : connections.find((connection) =>
+            (connection.models ?? []).map(String).includes(String(config.model ?? ''))
+          )?.id ?? connections[0]?.id;
+    const selectedModel =
+      typeof config.model === 'string' && config.model
+        ? config.model
+        : connections
+            .find((connection) => connection.id === selectedConnection)
+            ?.models?.map(String)[0] ?? '';
     const menu = document.querySelector<HTMLElement>('#kernel-model-menu');
     const commandMenu = document.querySelector<HTMLElement>('#kernel-command-menu');
     if (commandMenu) commandMenu.hidden = true;
@@ -1257,8 +1283,12 @@ export async function initKernelUi(): Promise<void> {
       return models.length
         ? [`<div class="wb-menu-heading">${escapeHtml(connection.label ?? connection.id ?? 'Model')}</div>${models
             .map(
-              (model) =>
-                `<button type="button" class="wb-pop-item${model === config.model ? ' selected' : ''}" data-kernel-model="${escapeHtml(model)}" data-kernel-connection="${escapeHtml(connection.id ?? '')}"><span class="wb-pop-copy"><span class="wb-pop-title">${escapeHtml(model)}</span></span>${model === config.model ? icons.check : ''}</button>`
+              (model) => {
+                const selected =
+                  model === selectedModel &&
+                  (connection.id ?? '') === (selectedConnection ?? '');
+                return `<button type="button" class="wb-pop-item${selected ? ' selected' : ''}" data-kernel-model="${escapeHtml(model)}" data-kernel-connection="${escapeHtml(connection.id ?? '')}" aria-pressed="${selected ? 'true' : 'false'}"><span class="wb-pop-copy"><span class="wb-pop-title">${escapeHtml(model)}</span></span>${selected ? icons.check : ''}</button>`;
+              }
             )
             .join('')}`]
         : [];
@@ -1275,6 +1305,20 @@ export async function initKernelUi(): Promise<void> {
 
   async function switchModel(connection: string, model: string): Promise<void> {
     if (!connection || !model) return;
+    if (pageConfig.connection === connection && pageConfig.model === model) {
+      await openModelMenu();
+      return;
+    }
+    const menu = document.querySelector<HTMLElement>('#kernel-model-menu');
+    if (menu) {
+      menu.querySelectorAll<HTMLButtonElement>('[data-kernel-model]').forEach((option) => {
+        option.disabled = true;
+      });
+      markModelOptionSelected(menu, connection, model);
+      modelLabel = model;
+      const label = document.querySelector<HTMLElement>('#kernel-model-label');
+      if (label) label.textContent = model;
+    }
     const stored = await chrome.storage.local.get(CONFIG_KEY);
     const config = (stored[CONFIG_KEY] ?? {}) as Record<string, unknown>;
     await chrome.storage.local.set({
@@ -1283,8 +1327,9 @@ export async function initKernelUi(): Promise<void> {
     pageConfig.connection = connection;
     pageConfig.model = model;
     modelLabel = model;
-    await client.reloadRuntime();
+    await reloadRuntimeForCurrentTab();
     render();
+    await openModelMenu();
   }
 
   async function openArtifact(artifactId: string): Promise<void> {
@@ -1711,6 +1756,22 @@ function toolLabel(name: string): string {
     exec: 'Run command',
   };
   return labels[name] ?? name.replace(/_/g, ' ');
+}
+
+function markModelOptionSelected(
+  menu: HTMLElement,
+  connection: string,
+  model: string
+): void {
+  menu.querySelectorAll<HTMLButtonElement>('[data-kernel-model]').forEach((option) => {
+    const selected =
+      option.dataset.kernelModel === model &&
+      (option.dataset.kernelConnection ?? '') === connection;
+    option.classList.toggle('selected', selected);
+    option.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    option.querySelector('.wb-pop-check')?.remove();
+    if (selected) option.insertAdjacentHTML('beforeend', icons.check);
+  });
 }
 
 function approvalSummary(name: string, input: unknown, zh: boolean): string {

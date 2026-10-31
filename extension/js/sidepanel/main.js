@@ -768,6 +768,10 @@
       const modelLabelNode = document.querySelector("#kernel-model-label");
       const input = document.querySelector("#kernel-input");
       if (!rows || !status || !send || !stop || !input || !modeButton || !approvePlan || !compact || !attachmentList || !queue || !modelLabelNode) return;
+      document.documentElement.dataset.tinyaiActivated = String(sessionActivated);
+      document.documentElement.dataset.tinyaiCanSend = String(
+        projection?.availability.canSend ?? false
+      );
       modelLabelNode.textContent = modelLabel;
       status.innerHTML = `<span class="wb-run-spinner"></span><span class="wb-run-text">${escapeHtml(statusText(
         projection,
@@ -894,6 +898,15 @@
       }
       await activateSession(
         () => client.createTabSession(windowId, activeTabId)
+      );
+    }
+    async function reloadRuntimeForCurrentTab() {
+      await client.reloadRuntime();
+      if (windowId === void 0 || !activeTabId) {
+        throw new Error("No active browser tab is available");
+      }
+      await activateSession(
+        () => client.resolveTabSession(windowId, activeTabId)
       );
     }
     client.onProjection((eventSessionId, next) => {
@@ -1099,7 +1112,7 @@
         pageConfig.connection = connection;
         pageConfig.model = model;
         modelLabel = model;
-        void writePageConfig().then(() => client.reloadRuntime()).then(() => renderPage()).catch((cause) => {
+        void writePageConfig().then(() => reloadRuntimeForCurrentTab()).then(() => renderPage()).catch((cause) => {
           pageError = errorMessage(cause);
           renderPage();
         });
@@ -1697,7 +1710,7 @@
         pageConfig.model = connection.models[0];
       }
       await writePageConfig();
-      await client.reloadRuntime();
+      await reloadRuntimeForCurrentTab();
       pageView = "settings";
       editingConnectionId = void 0;
       renderPage();
@@ -1739,6 +1752,10 @@
       const stored = await chrome.storage.local.get(CONFIG_KEY);
       const config = stored[CONFIG_KEY] ?? {};
       const connections = Array.isArray(config.connections) ? config.connections : [];
+      const selectedConnection = typeof config.connection === "string" ? config.connection : connections.find(
+        (connection) => (connection.models ?? []).map(String).includes(String(config.model ?? ""))
+      )?.id ?? connections[0]?.id;
+      const selectedModel = typeof config.model === "string" && config.model ? config.model : connections.find((connection) => connection.id === selectedConnection)?.models?.map(String)[0] ?? "";
       const menu = document.querySelector("#kernel-model-menu");
       const commandMenu = document.querySelector("#kernel-command-menu");
       if (commandMenu) commandMenu.hidden = true;
@@ -1746,7 +1763,10 @@
       const groups = connections.flatMap((connection) => {
         const models = Array.isArray(connection.models) ? connection.models.map(String) : [];
         return models.length ? [`<div class="wb-menu-heading">${escapeHtml(connection.label ?? connection.id ?? "Model")}</div>${models.map(
-          (model) => `<button type="button" class="wb-pop-item${model === config.model ? " selected" : ""}" data-kernel-model="${escapeHtml(model)}" data-kernel-connection="${escapeHtml(connection.id ?? "")}"><span class="wb-pop-copy"><span class="wb-pop-title">${escapeHtml(model)}</span></span>${model === config.model ? icons.check : ""}</button>`
+          (model) => {
+            const selected = model === selectedModel && (connection.id ?? "") === (selectedConnection ?? "");
+            return `<button type="button" class="wb-pop-item${selected ? " selected" : ""}" data-kernel-model="${escapeHtml(model)}" data-kernel-connection="${escapeHtml(connection.id ?? "")}" aria-pressed="${selected ? "true" : "false"}"><span class="wb-pop-copy"><span class="wb-pop-title">${escapeHtml(model)}</span></span>${selected ? icons.check : ""}</button>`;
+          }
         ).join("")}`] : [];
       });
       menu.innerHTML = groups.join("") || `<div class="wb-menu-empty">${zh ? "\u672A\u914D\u7F6E\u6A21\u578B" : "No model configured"}</div><button type="button" class="wb-pop-item" id="kernel-model-settings">${zh ? "\u6253\u5F00\u8BBE\u7F6E" : "Open settings"}</button>`;
@@ -1758,6 +1778,20 @@
     }
     async function switchModel(connection, model) {
       if (!connection || !model) return;
+      if (pageConfig.connection === connection && pageConfig.model === model) {
+        await openModelMenu();
+        return;
+      }
+      const menu = document.querySelector("#kernel-model-menu");
+      if (menu) {
+        menu.querySelectorAll("[data-kernel-model]").forEach((option) => {
+          option.disabled = true;
+        });
+        markModelOptionSelected(menu, connection, model);
+        modelLabel = model;
+        const label = document.querySelector("#kernel-model-label");
+        if (label) label.textContent = model;
+      }
       const stored = await chrome.storage.local.get(CONFIG_KEY);
       const config = stored[CONFIG_KEY] ?? {};
       await chrome.storage.local.set({
@@ -1766,8 +1800,9 @@
       pageConfig.connection = connection;
       pageConfig.model = model;
       modelLabel = model;
-      await client.reloadRuntime();
+      await reloadRuntimeForCurrentTab();
       render();
+      await openModelMenu();
     }
     async function openArtifact(artifactId) {
       const artifact = await client.readArtifact(artifactId);
@@ -2082,6 +2117,15 @@
       exec: "Run command"
     };
     return labels[name] ?? name.replace(/_/g, " ");
+  }
+  function markModelOptionSelected(menu, connection, model) {
+    menu.querySelectorAll("[data-kernel-model]").forEach((option) => {
+      const selected = option.dataset.kernelModel === model && (option.dataset.kernelConnection ?? "") === connection;
+      option.classList.toggle("selected", selected);
+      option.setAttribute("aria-pressed", selected ? "true" : "false");
+      option.querySelector(".wb-pop-check")?.remove();
+      if (selected) option.insertAdjacentHTML("beforeend", icons.check);
+    });
   }
   function approvalSummary(name, input, zh) {
     const values = input && typeof input === "object" && !Array.isArray(input) ? input : {};
