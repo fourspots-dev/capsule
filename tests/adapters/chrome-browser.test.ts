@@ -287,7 +287,7 @@ describe('ChromeBrowserProvider', () => {
     await expect(browser.evaluate('1', '1 + 1')).resolves.toBe(true);
   });
 
-  it('creates and owns a tab when no inspectable tab exists, then closes and detaches it', async () => {
+  it('does not create an implicit tab when no inspectable active tab exists', async () => {
     const tabs = fakeTabs([]);
     const debuggerApi = fakeDebugger();
     const browser = new ChromeBrowserProvider({
@@ -295,17 +295,11 @@ describe('ChromeBrowserProvider', () => {
       debugger: debuggerApi,
       clock: { now: () => 10, setTimeout: (callback) => callback() },
     });
-    const group = await browser.ensureTaskGroup('session_1');
-    expect(group).toMatchObject({ tabId: '99', ownedTabs: ['99'] });
-    await browser.snapshot('99');
-    const report = await browser.closeSessionTabs('session_1');
-    expect(report).toMatchObject({
-      detachedTabs: ['99'],
-      closedTabs: ['99'],
-      errors: [],
+    await expect(browser.ensureTaskGroup('session_1')).rejects.toMatchObject({
+      code: 'BROWSER_ACTIVE_TAB_UNAVAILABLE',
     });
-    expect(tabs.remove).toHaveBeenCalledWith(99);
-    expect(debuggerApi.detach).toHaveBeenCalledWith({ tabId: 99 });
+    expect(tabs.create).not.toHaveBeenCalled();
+    expect(debuggerApi.detach).not.toHaveBeenCalled();
   });
 
   it('captures screenshots and validates navigation URLs', async () => {

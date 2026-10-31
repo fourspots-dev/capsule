@@ -136,15 +136,16 @@
     async ensureTaskGroup(sessionId) {
       const existing = this.sessions.get(sessionId);
       if (existing) return this.groupRef(sessionId, existing);
-      let selected = (await this.listTabs()).find((tab) => tab.active);
-      let ownedTab;
+      const selected = (await this.listTabs()).find((tab) => tab.active);
       if (!selected) {
-        selected = await this.createTab("about:blank");
-        ownedTab = selected.id;
+        throw new AgentError(
+          "BROWSER_ACTIVE_TAB_UNAVAILABLE",
+          "No inspectable active Chrome tab is available"
+        );
       }
       const binding = {
         tabId: selected.id,
-        ownedTabs: new Set(ownedTab ? [ownedTab] : []),
+        ownedTabs: /* @__PURE__ */ new Set(),
         attached: /* @__PURE__ */ new Set()
       };
       if (selected.groupId !== void 0 && selected.groupId >= 0) {

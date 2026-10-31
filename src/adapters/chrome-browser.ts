@@ -220,15 +220,16 @@ export class ChromeBrowserProvider implements BrowserProvider {
     const existing = this.sessions.get(sessionId);
     if (existing) return this.groupRef(sessionId, existing);
 
-    let selected = (await this.listTabs()).find((tab) => tab.active);
-    let ownedTab: BrowserTabId | undefined;
+    const selected = (await this.listTabs()).find((tab) => tab.active);
     if (!selected) {
-      selected = await this.createTab('about:blank');
-      ownedTab = selected.id;
+      throw new AgentError(
+        'BROWSER_ACTIVE_TAB_UNAVAILABLE',
+        'No inspectable active Chrome tab is available'
+      );
     }
     const binding: SessionBinding = {
       tabId: selected.id,
-      ownedTabs: new Set(ownedTab ? [ownedTab] : []),
+      ownedTabs: new Set(),
       attached: new Set(),
     };
     if (selected.groupId !== undefined && selected.groupId >= 0) {
