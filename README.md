@@ -220,6 +220,13 @@ unset DEEPSEEK_API_KEY
 The V2 phase-by-phase acceptance matrix is documented in
 [V2 implementation acceptance](docs/virtual-workspace-agent-acceptance-v2.html).
 
+Long-running production soak is opt-in:
+
+```bash
+npm run test:soak
+npm run test:soak:8h
+```
+
 ## Compatibility migration
 
 On first startup, tinyai performs a one-time migration from the removed legacy runtime:

@@ -34,7 +34,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <div class="card"><h3 class="ok">实现验收：通过</h3><p>P1–P7 都已有可执行实现、自动化测试和端到端证据；没有只存在于接口或文档中的阶段交付。</p></div>
 <div class="card"><h3>生产发布：有条件</h3><p>当前环境没有 <code>DEEPSEEK_API_KEY</code>，live smoke 被跳过；未执行真实 8 小时 Soak 和 1GB 级仓库压力测试。</p></div>
 </div>
-<div class="rule">最新确定性结果：76 个测试文件通过、1 个 live 文件跳过；274 个测试通过、1 个 live 测试跳过。Chrome E2E：2 个文件、5 个测试通过。完整构建产出 Chrome 扩展、TUI、CLI、Remote Runner 和 allowlist proxy。</div>
+<div class="rule">最新确定性结果：76 个测试文件通过、2 个 opt-in 文件跳过；274 个测试通过、live 与 60s Soak 共 2 个测试跳过。短时 opt-in Soak 另行执行 10 秒并完成 24,516 个循环。Chrome E2E：2 个文件、5 个测试通过。完整构建产出 Chrome 扩展、TUI、CLI、Remote Runner 和 allowlist proxy。</div>
 </section>
 
 <section id="matrix">
@@ -133,8 +133,8 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <section id="commands">
 <h2>10. 验收命令与结果</h2>
 <pre>npm test
-  76 passed, 1 skipped
-  274 tests passed, 1 live test skipped
+  76 files passed, 2 opt-in files skipped
+  274 tests passed, live + soak skipped
 
 npm run typecheck
 npm run typecheck:tests
@@ -155,6 +155,7 @@ npm run build
 
 npm run test:live
   requires DEEPSEEK_API_KEY; current process environment is unset, therefore skipped</pre>
+<p>另外执行了 <code>TINYAI_SOAK=1 TINYAI_SOAK_DURATION_MS=10000</code>：10.03 秒内完成 24,516 个循环，堆增长约 188MB，低于 512MB 有界门限。</p>
 </section>
 
 <section id="open">
@@ -164,6 +165,7 @@ npm run test:live
 <tr><td>8 小时 Soak</td><td><span class="pill pending">NOT RUN</span> 已有 100 checkpoint / 50 job 有界测试</td><td>发布流水线执行 8h 多 Session、重启、Provider 故障与资源泄漏监测</td></tr>
 <tr><td>1GB Workspace</td><td><span class="pill pending">NOT RUN</span> 已有 10k 文件搜索测试</td><td>大仓库数据集运行内存、句柄、启动与搜索性能</td></tr>
 </tbody></table>
+<p>已提供 opt-in Soak harness：<code>npm run test:soak</code> 与 <code>npm run test:soak:8h</code>。它监测 Workspace、VCS、Job、Session 和堆增长，但本次仍未实际等待 8 小时结束。</p>
 <div class="rule">在这些外部/长时项关闭前，可以宣称“V2 七阶段实现验收完成”，但不能宣称“生产发布门禁全部通过”。</div>
 </section>
 </div>
