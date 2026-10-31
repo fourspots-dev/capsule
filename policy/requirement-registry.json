@@ -61,6 +61,42 @@
       "testDesign": "docs/engineering-versioning-and-traceability.html#verification",
       "acceptance": "Repository-level AGENTS.md makes requirement, version, commit, verification and release rules mandatory for every coding agent.",
       "legacyAliases": []
+    },
+    {
+      "id": "REQ-HOST-001",
+      "title": "Host capability ports and composable coding workspace",
+      "type": "feature",
+      "priority": "P0",
+      "status": "proposed",
+      "targetVersion": "0.3.0",
+      "design": "docs/host-capability-architecture-v1.html#requirements",
+      "testDesign": "docs/host-capability-testing-v1.html#trace",
+      "acceptance": "Host adapters expose probeable narrow ports and named application actions; profiles and capability graphs compose host-neutral coding tool packs; unavailable applicable actions degrade explicitly and cannot produce false completion evidence; no generic exec, Python, shell or binary runner is built in.",
+      "legacyAliases": ["FR-HOST-001", "FR-HOST-002", "FR-HOST-003", "FR-HOST-004", "FR-HOST-005", "FR-HOST-006", "FR-HOST-007", "FR-HOST-008", "FR-HOST-009", "FR-HOST-010", "FR-HOST-011", "FR-HOST-012", "FR-HOST-013", "FR-HOST-014"]
+    },
+    {
+      "id": "REQ-WORKSPACE-001",
+      "title": "Portable workspace capsule and cross-host continuity",
+      "type": "feature",
+      "priority": "P0",
+      "status": "proposed",
+      "targetVersion": "0.3.0",
+      "design": "docs/workspace-portability-design-v1.html#requirements",
+      "testDesign": "docs/workspace-portability-testing-v1.html#trace",
+      "acceptance": "A versioned, integrity-checked workspace capsule transfers project content, agent sessions and tasks, VCS/Git state, artifacts, evidence and environment requirements; import is staged and atomic, running resources are reconciled, host-sensitive state stays out of the agent namespace, and evidence is invalidated when the environment changes.",
+      "legacyAliases": ["FR-WORKSPACE-001", "FR-WORKSPACE-002", "FR-WORKSPACE-003", "FR-WORKSPACE-004", "FR-WORKSPACE-005", "FR-WORKSPACE-006", "FR-WORKSPACE-007", "FR-WORKSPACE-008", "FR-WORKSPACE-009", "FR-WORKSPACE-010", "FR-WORKSPACE-011", "FR-WORKSPACE-012"]
+    },
+    {
+      "id": "REQ-GIT-001",
+      "title": "Portable Git backend with Git-compatible repository format",
+      "type": "feature",
+      "priority": "P0",
+      "status": "proposed",
+      "targetVersion": "0.3.0",
+      "design": "docs/git-portable-backend-design-v1.html#requirements",
+      "testDesign": "docs/git-portable-backend-testing-v1.html#trace",
+      "acceptance": "PortableGitBackend is the default host-independent Git implementation and supports the common local Git subset over a workspace filesystem without a git binary; its objects, refs, HEAD and index interoperate with standard Git, while the CLI backend remains optional for advanced operations and conformance testing.",
+      "legacyAliases": ["FR-GIT-001", "FR-GIT-002", "FR-GIT-003", "FR-GIT-004", "FR-GIT-005", "FR-GIT-006", "FR-GIT-007", "FR-GIT-008", "FR-GIT-009", "FR-GIT-010"]
     }
   ]
 }

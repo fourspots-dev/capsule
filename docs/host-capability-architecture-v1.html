@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tinyai 宿主能力与 Coding Workspace 架构 V1</title>
+<style>
+:root{--bg:#f4f5f7;--paper:#fff;--text:#191a1e;--muted:#6f7179;--line:#e2e3e8;--accent:#5145d8;--accent-soft:#efedff;--ok:#137a4b;--warn:#986100;--danger:#b42318;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.72 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1240px;margin:auto;padding:36px 24px 100px}
+.hero{padding:40px;border-radius:27px;background:radial-gradient(circle at 88% 8%,#7dcfff 0,transparent 23%),linear-gradient(135deg,#10131b,#243359 58%,#3e4d99);color:#fff}.hero small{letter-spacing:.12em;opacity:.72}.hero h1{font-size:38px;line-height:1.18;margin:12px 0}.hero p{max-width:960px;margin:0;color:#e8edff}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}
+nav{position:sticky;top:0;z-index:5;display:flex;gap:14px;overflow:auto;margin:18px 0;padding:10px 14px;border:1px solid var(--line);border-radius:13px;background:#f4f5f7ed;backdrop-filter:blur(12px)}nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}
+section{margin:18px 0;padding:26px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:23px;margin:0 0 14px}h3{font-size:16px;margin:22px 0 8px}h4{font-size:14px;margin:18px 0 6px}p{color:#44454c}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafafa}.card h3,.card h4{margin:0 0 8px}.card p{margin:0}.card ul{margin:8px 0 0;padding-left:18px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafafa;color:var(--muted)}
+code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{padding:17px;overflow:auto;border-radius:12px;background:#11131a;color:#e6e8ef;font:12px/1.62 var(--mono);border:1px solid #282c3a}
+.rule{padding:13px 15px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#f5f3ff}.warn{border-color:var(--warn);background:#fff8e8}.danger{border-color:var(--danger);background:#fff1f0}
+.pill{display:inline-block;padding:1px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:11px;white-space:nowrap}.pill.ok{background:#eef8f2;color:var(--ok)}.pill.warn{background:#fff6e5;color:var(--warn)}
+.phase{display:flex;align-items:center;gap:11px;margin:18px 0 8px;padding:10px 12px;border:1px solid var(--line);border-radius:11px;background:#fafafa}.phase-no{display:grid;place-items:center;min-width:42px;height:28px;padding:0 8px;border-radius:7px;background:var(--accent-soft);color:var(--accent);font:700 12px/1 var(--mono)}
+.decision{padding:13px;border:1px solid #e2e3e8;border-radius:10px;background:#fff}.decision b{display:block;color:var(--accent);font-size:12px;margin-bottom:4px}
+.foot{color:var(--muted);font-size:12px}
+@media(max-width:850px){.grid3{grid-template-columns:1fr}}@media(max-width:700px){.grid{grid-template-columns:1fr}.hero h1{font-size:28px}.wrap{padding:20px 12px 70px}section{padding:20px}table{display:block;max-width:100%;overflow-x:auto}pre{max-width:100%}}
+@media print{nav{display:none}body{background:#fff}.hero{border-radius:0}.wrap{max-width:none;padding:0}section{break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+<small>REQ-HOST-001 / HOST CAPABILITY + CODING WORKSPACE / DESIGN V1</small>
+<h1>宿主能力与 Coding Workspace<br>统一架构设计</h1>
+<p>把文件、应用动作、Git、交互会话、网络与密钥拆成可探测、可组合、可替换的宿主端口；TUI、Chrome、CLI、Sandbox 和未来客户端通过同一套能力语义装配工具，而不是各自维护一套实现。通用 shell/Python/二进制执行不是基线能力。</p>
+<div class="chips"><span class="chip">Target 0.3.0</span><span class="chip">Capability Probe</span><span class="chip">Narrow Ports</span><span class="chip">ToolPack Composition</span><span class="chip">Portable Fallback</span><span class="chip">Host Neutral</span><span class="chip">Status: Review</span></div>
+</header>
+<nav><a href="#status">现状</a><a href="#requirements">需求</a><a href="#principles">原则</a><a href="#layers">分层</a><a href="#capabilities">能力模型</a><a href="#ports">端口</a><a href="#workspace-transfer-boundary">迁移边界</a><a href="#profiles">Profile</a><a href="#toolpacks">ToolPack</a><a href="#objects">对象</a><a href="#flows">交互</a><a href="#failure">失败降级</a><a href="#security">安全</a><a href="#migration">迁移</a><a href="#acceptance">验收</a></nav>
+
+<section id="status">
+<h2>1. 当前实现与问题</h2>
+<div class="grid">
+<div class="card"><h3>已有 HostBridge</h3><p>声明了 storage、workspace import/export、terminal、process、pty、network、clock、scheduler、crypto、clone 等能力；Memory/Node/Chrome 有部分实现。</p></div>
+<div class="card"><h3>文件系统未进入能力模型</h3><p>TUI host 模式通过独立的 <code>NodeHostFileSystem</code> 注入真实文件系统，但 <code>HostCapability</code> 没有 <code>filesystem</code>。</p></div>
+<div class="card"><h3>应用动作尚未建模</h3><p>TUI 的 <code>exec</code> 仍走 VirtualShell，Sandbox 则通过通用进程桥运行命令；两者都没有把应用提供的具名能力注册为可发现 Action。</p></div>
+<div class="card"><h3>Git/测试仍依赖底层执行</h3><p>Sandbox 可以通过通用 <code>exec</code> 运行 Git/测试，TUI 不能；GitToolPack、测试动作和证据语义还没有统一。</p></div>
+<div class="card"><h3>能力声明不等于可用</h3><p>目前 capability 只检查桥是否存在，没有探针、版本、降级原因或限制集合。</p></div>
+<div class="card"><h3>宿主知识可能泄漏</h3><p>不同组合根直接决定工具，缺少统一的 Capability Graph；未来客户端容易复制宿主判断。</p></div>
+</div>
+<div class="rule">本设计不要求所有宿主提供全部能力，而要求每个宿主准确声明、探测并组合自己真正支持的能力；缺失能力必须显式降级。</div>
+</section>
+
+<section id="requirements">
+<h2>2. 功能需求</h2>
+<table><thead><tr><th>ID</th><th>优先级</th><th>需求</th><th>验收</th></tr></thead><tbody>
+<tr><td><code>FR-HOST-001</code></td><td><span class="pill">P0</span></td><td>窄端口分层</td><td>Host 只提供基础端口；Patch/Search/Git/Test 由 ToolPack 组合。</td></tr>
+<tr><td><code>FR-HOST-002</code></td><td><span class="pill">P0</span></td><td>能力探测和版本</td><td>available/degraded/unavailable 有运行时 probe、版本、限制和诊断。</td></tr>
+<tr><td><code>FR-HOST-003</code></td><td><span class="pill">P0</span></td><td>FileSystemPort</td><td>WorkspacePath、read/stat/list/mkdir/write/rename/remove、根目录隔离、content hash、symlink/大小写语义与原子写。</td></tr>
+<tr><td><code>FR-HOST-004</code></td><td><span class="pill">P0</span></td><td>ActionProviderPort</td><td>应用注册具名动作、JSON Schema、effects、版本、Probe、超时、取消和结构化结果；不提供内置通用 exec。</td></tr>
+<tr><td><code>FR-HOST-005</code></td><td><span class="pill p2">P1</span></td><td>InteractiveActionPort</td><td>应用可注册交互动作及 open/read/write/resize/close；不作为通用 PTY 或完整终端基线。</td></tr>
+<tr><td><code>FR-HOST-006</code></td><td><span class="pill">P0</span></td><td>GitToolPack</td><td>PortableGitBackend 默认提供 common local Git 子集；CLI 为可选高级/互操作后端。</td></tr>
+<tr><td><code>FR-HOST-007</code></td><td><span class="pill">P0</span></td><td>TestEvidence</td><td>测试发现与报告/Verifier 可移植；真正测试执行只能来自应用注册的 ActionProvider，缺失时不可用。</td></tr>
+<tr><td><code>FR-HOST-008</code></td><td><span class="pill p2">P1</span></td><td>Search/Watch 端口</td><td>优先宿主加速搜索/监听，缺失时回退便携扫描/轮询。</td></tr>
+<tr><td><code>FR-HOST-009</code></td><td><span class="pill p2">P1</span></td><td>Network/Secret 端口</td><td>网络 allowlist、可流式请求、短时凭据；Secret/lease 不进入 Session、Capsule 或 Artifact。</td></tr>
+<tr><td><code>FR-HOST-010</code></td><td><span class="pill">P0</span></td><td>ToolPack 组合</td><td>根据 Capability Graph 注册基础 ToolPack 和应用动作；缺失能力隐藏工具或返回结构化不可用。</td></tr>
+<tr><td><code>FR-HOST-011</code></td><td><span class="pill">P0</span></td><td>Host Profiles</td><td>Portable、Local、Sandbox、Browser、Remote 预设有显式能力矩阵。</td></tr>
+<tr><td><code>FR-HOST-012</code></td><td><span class="pill">P0</span></td><td>降级与诊断</td><td>用户、Prompt、Trace 能知道执行/Git/测试为何不可用。</td></tr>
+<tr><td><code>FR-HOST-013</code></td><td><span class="pill p2">P1</span></td><td>Core 边界</td><td>Capability 和 ToolPack 不依赖 TUI/Chrome；Core 不读取平台字段分支，宿主绝对路径和 PID 不进入模型。</td></tr>
+<tr><td><code>FR-HOST-014</code></td><td><span class="pill">P0</span></td><td>兼容迁移</td><td>保留 VirtualShell/虚拟 VCS 回退；Host 只传输不透明 Capsule bytes，Workspace 连续性由 REQ-WORKSPACE-001 负责。</td></tr>
+</tbody></table>
+<h3>非目标</h3>
+<ul><li>不抽象所有操作系统 API，不实现通用虚拟机。</li><li>不要求浏览器宿主提供 Node 或 Bash。</li><li>不要求所有 Git 高级能力；以 common local Git 子集为基线。</li><li>不把 UI 布局、审批卡样式或 Chrome Tab 语义放进 Host Port。</li></ul>
+<div class="warn rule">本设计不内置通用 <code>exec</code>、Python、Node、Bash 或任意二进制运行器。嵌入应用需要什么能力，就注册对应的具名 Action；Agent 只看到经过声明的动作及其 JSON Schema。</div>
+</section>
+
+<section id="principles">
+<h2>3. 设计原则</h2>
+<div class="grid3">
+<div class="card"><h3>窄端口</h3><p>Host 只提供事实和副作用原语，不包含 Patch、Git merge、测试策略等 Agent 业务。</p></div>
+<div class="card"><h3>探测优先</h3><p>声明只是意图，Probe 结果才决定工具是否可用。</p></div>
+<div class="card"><h3>组合优先</h3><p>能力图谱生成 ToolPack，客户端类型不参与业务分支。</p></div>
+<div class="card"><h3>显式降级</h3><p>缺失执行能力时保留可用的文件/Patch，但明确禁用真实测试和 Git。</p></div>
+<div class="card"><h3>真实证据</h3><p>没有 ExecutionResult/TestReport/Projection 证据，不允许声称命令或测试成功。</p></div>
+<div class="card"><h3>可移植回退</h3><p>Memory/Virtual 实现必须存在，支撑浏览器、测试和离线环境。</p></div>
+</div>
+</section>
+
+<section id="layers">
+<h2>4. 分层架构</h2>
+<pre class="diagram">Client UI
+  TUI / Chrome Side Panel / CLI / Remote / Future Web
+                  ↓
+Runtime Composer
+  Profile Selection → Capability Graph → ToolPackSet
+                  ↓
+Workspace Services
+  Patch / Search / Git / Test / Artifact / Jobs / Subagent
+                  ↓
+Host Ports
+  Storage / FileSystem / Execution / PTY / Network / Secrets
+  Clock / Scheduler / Crypto / Clone / Terminal / Browser
+                  ↓
+Adapters
+  Memory / Node / Sandbox / Chrome / Remote</pre>
+<table><thead><tr><th>层</th><th>负责</th><th>不负责</th></tr></thead><tbody>
+<tr><td>Host Ports</td><td>资源访问、取消、能力探测、错误映射</td><td>Agent 任务状态、Prompt、工具选择</td></tr>
+<tr><td>Workspace Services</td><td>Patch、Search、Git、Test、Artifact 的组合语义</td><td>TUI/Chrome 渲染</td></tr>
+<tr><td>Runtime Composer</td><td>根据 Profile 和能力注册 ToolPack</td><td>具体 FS/进程 API</td></tr>
+<tr><td>Agent Core</td><td>模型循环、任务、上下文、审批、验证</td><td>宿主实现</td></tr>
+<tr><td>Client</td><td>输入、展示、客户端 UI 状态</td><td>权威能力判断</td></tr>
+</tbody></table>
+</section>
+
+<section id="capabilities">
+<h2>5. Capability 模型</h2>
+<pre>type CapabilityState = 'available' | 'degraded' | 'unavailable';
+
+interface CapabilityDescriptor {
+  id: string;
+  version: number;
+  state: CapabilityState;
+  limitations?: string[];
+  probe(): Promise&lt;CapabilityProbeResult&gt;;
+}
+
+interface CapabilityProbeResult {
+  state: CapabilityState;
+  reason?: string;
+  details?: JsonValue;
+  latencyMs?: number;
+}</pre>
+<h3>能力 ID</h3>
+<p><code>storage</code>、<code>filesystem</code>、<code>actions</code>、<code>interactiveActions</code>、<code>git</code>、<code>testEvidence</code>、<code>search</code>、<code>watch</code>、<code>network</code>、<code>secrets</code>、<code>terminal</code>、<code>browser</code>、<code>clock</code>、<code>scheduler</code>、<code>crypto</code>、<code>clone</code>。具体应用动作使用稳定子 ID，如 <code>actions:app.python.run-tests</code>。</p>
+<table><thead><tr><th>状态</th><th>示例</th><th>工具行为</th></tr></thead><tbody>
+<tr><td>available</td><td>FS + 应用动作 Probe 成功</td><td>注册基础 Workspace ToolPack 和声明过的具体动作</td></tr>
+<tr><td>degraded</td><td>FS 可写但没有应用测试动作</td><td>注册 read/write/patch；Git 使用 Portable 子集；不出现 run_tests</td></tr>
+<tr><td>unavailable</td><td>没有网络或秘密</td><td>不注册对应工具；Prompt 中明确不存在</td></tr>
+</tbody></table>
+<div class="warn rule">Capability Probe 必须实际调用端口的最小操作，不能只检查字段存在。应用动作 Probe 应验证 Provider 的 schema/health/version；git probe 使用 CLI 自检或 portable backend self-check。</div>
+</section>
+
+<section id="ports">
+<h2>6. 核心端口</h2>
+<h3>6.1 StoragePort / 基础端口</h3>
+<pre>interface StoragePort {
+  get(key: string): Promise&lt;unknown&gt;;
+  set(key: string, value: unknown): Promise&lt;void&gt;;
+  remove(key: string): Promise&lt;void&gt;;
+  list(prefix?: string): Promise&lt;string[]&gt;;
+}
+
+interface ClockPort { now(): number; setTimeout(...): unknown; clearTimeout(...): void; }
+interface CryptoPort { digest(algorithm: 'SHA-256', data: Uint8Array): Promise&lt;Uint8Array&gt;; randomBytes?(n: number): Uint8Array; }</pre>
+<h3>6.2 FileSystemPort</h3>
+<pre>interface FileSystemPort {
+  stat(path: string, signal?: AbortSignal): Promise&lt;FileInfo | undefined&gt;;
+  list(path: string, options?: ListOptions): Promise&lt;FileInfo[]&gt;;
+  read(path: string, options?: ReadOptions): Promise&lt;Uint8Array&gt;;
+  writeAtomic(path: string, data: Uint8Array, options?: WriteOptions): Promise&lt;FileInfo&gt;;
+  mkdir(path: string, options?: { recursive?: boolean }): Promise&lt;void&gt;;
+  rename(from: string, to: string): Promise&lt;void&gt;;
+  remove(path: string, options?: { recursive?: boolean }): Promise&lt;boolean&gt;;
+  watch?(path: string, listener: FileWatchListener): () =&gt; void;
+}</pre>
+<ul><li>所有路径为 Workspace 相对路径；Adapter 负责 realpath/根目录检查。</li><li><code>FileInfo</code> 包含 kind、size、mode、version/hash、modifiedAt、symlink metadata。</li><li>Patch 使用 expectedVersion/expectedHash；不支持版本时 Adapter 提供内容 hash。</li><li>大文件读取支持 offset/limit；写入默认原子。</li></ul>
+<h3>6.3 ActionProviderPort</h3>
+<pre>interface ActionProviderPort {
+  describe(): Promise&lt;HostActionDescriptor[]&gt;;
+  invoke(
+    actionId: string,
+    input: JsonValue,
+    context: ActionContext
+  ): Promise&lt;ActionResult&gt;;
+}
+
+interface HostActionDescriptor {
+  id: string;                    // app.python.run-tests
+  version: string;
+  title: string;
+  description: string;
+  inputSchema: JsonValue;
+  outputSchema?: JsonValue;
+  effects: Array&lt;'read' | 'write' | 'execute' | 'network'&gt;;
+  risk: 'read' | 'write' | 'dangerous';
+  limitations?: string[];
+  probe(): Promise&lt;CapabilityProbeResult&gt;;
+}</pre>
+<ul><li>每个动作拥有稳定命名空间和独立版本；冲突、Schema 不合法或 Probe 失败的动作不会注册。</li><li>Agent 看到的是具体动作工具，例如 <code>app_python_run_tests</code>，而不是通用 <code>exec</code>。</li><li>应用可以在内部实现 Python、Xcode、浏览器、云 API 或本地进程调用，但这些实现细节不进入 Core。</li><li>如需通用命令能力，宿主可显式注册 <code>local.exec.argv</code>；它是可选高风险动作，不是 tinyai 内置工具。</li><li>动作结果可以流式返回，也可以通过 Artifact 引用大输出。</li></ul>
+<h3>6.4 InteractiveActionPort</h3>
+<pre>interface InteractiveActionPort {
+  open(
+    actionId: string,
+    input: JsonValue,
+    context: ActionContext
+  ): Promise&lt;InteractiveSession&gt;;
+}</pre>
+<p>交互动作适用于应用需要长期会话的特定能力，例如调试器、终端或远程进程。它不是通用 PTY 基线；没有注册动作时对应工具不出现。</p>
+<h3>6.5 NetworkPort / SecretPort</h3>
+<pre>interface NetworkPort {
+  request(request: NetworkRequest): Promise&lt;NetworkResponse&gt;;
+  stream?(request: NetworkRequest): AsyncIterable&lt;Uint8Array&gt;;
+}
+
+interface SecretPort {
+  get(scope: SecretScope, name: string): Promise&lt;SecretLease&gt;;
+}</pre>
+<ul><li>Network 由 PolicyEngine 或 Adapter 强制 allowlist；模型 API 也应通过可替换 transport。</li><li>Secret 只允许按名称/scope 获取，不可 list，不可持久化，使用后撤销。</li></ul>
+</section>
+
+<section id="workspace-transfer-boundary">
+<h2>6.6 Workspace 迁移边界</h2>
+<p>本需求不定义 Capsule 内部语义，只定义 Host 与 Workspace Continuity 之间的窄连接。配套设计见 <a href="workspace-portability-design-v1.html#host-change">REQ-WORKSPACE-001</a>。</p>
+<pre>interface HostBlobTransferPort {
+  openImport?(): Promise&lt;ReadableBinary | undefined&gt;;
+  openExport?(meta: {
+    suggestedName: string;
+    contentLength?: number;
+  }): Promise&lt;WritableBinary&gt;;
+}</pre>
+<table><thead><tr><th>Host 契约</th><th>修正后的语义</th></tr></thead><tbody>
+<tr><td><code>workspace.import/export</code></td><td>仅表示不透明 Capsule bytes 的输入/输出；Host 不解析 Project、Session、Git 或 Artifact</td></tr>
+<tr><td><code>FileSystemPort</code></td><td>所有模型可见路径为 WorkspacePath；Adapter 提供 content hash、symlink/lstat 语义、case/Unicode probe，并以 barrier 支持一致读取</td></tr>
+<tr><td><code>ActionProviderPort</code></td><td>动作使用具名 ID 和 JSON Schema；Context 只含授权的 WorkspacePath/scope；不向模型暴露 PID、二进制路径或宿主环境</td></tr>
+<tr><td><code>Git/Test</code></td><td>结果路径使用 WorkspacePath；Git repository/index 与 TestReport 可被 Continuity Service 分区导出，证据绑定文件 hash 和环境指纹</td></tr>
+<tr><td><code>PTY/Network/Secret</code></td><td>均为 ephemeral 或不可转移能力；导出屏障负责终止/记录，导入后重新 Probe/获取</td></tr>
+<tr><td><code>HostDescriptor.platform</code></td><td>只供 Adapter 诊断，Core、Prompt、ToolPack 不据此分支</td></tr>
+</tbody></table>
+<div class="warn rule">Host 不提供“导出整个 Agent 状态”这样的高层方法。Capsule 的分区选择、引用闭包、状态对账、原子激活和环境证据失效由 Workspace Continuity Service 统一负责。</div>
+</section>
+
+<section id="profiles">
+<h2>7. Host Profiles</h2>
+<table><thead><tr><th>Profile</th><th>必需能力</th><th>可选能力</th><th>适用</th></tr></thead><tbody>
+<tr><td>Portable</td><td>memory storage、memory FS、virtual execution/VCS</td><td>Capsule bytes transport</td><td>浏览器、单测、回放</td></tr>
+<tr><td>Local Coding</td><td>persistent storage、Node FS、clock/scheduler</td><td>应用 Action、Git CLI、tests、交互动作、network、secrets、Capsule transport</td><td>TUI/CLI</td></tr>
+<tr><td>Sandbox Coding</td><td>Sandbox FS、checkpoint、release</td><td>应用 Action、Git、tests、交互动作、network、secrets、Capsule transport</td><td>Remote/Docker/Seatbelt</td></tr>
+<tr><td>Browser Agent</td><td>Chrome storage、browser provider</td><td>virtual FS/Patch、terminal、Capsule bytes transport</td><td>Chrome</td></tr>
+<tr><td>Remote Review</td><td>Session/Projection read</td><td>review/artifact export、Capsule bytes transport</td><td>Web/未来客户端</td></tr>
+</tbody></table>
+<div class="rule">Profile 是能力组合预设，不是客户端身份。一个 TUI 可以使用 Portable 或 Local Coding；一个 Web 客户端也可以连接 Sandbox Profile。</div>
+</section>
+
+<section id="toolpacks">
+<h2>8. 高层 ToolPack</h2>
+<table><thead><tr><th>ToolPack</th><th>依赖</th><th>核心行为</th></tr></thead><tbody>
+<tr><td>PatchToolPack</td><td>FileSystemPort</td><td>ContextPatch、事务、版本、unified diff</td></tr>
+<tr><td>SearchToolPack</td><td>SearchPort 或 FileSystemPort</td><td>文本/文件搜索、exclude、分页</td></tr>
+<tr><td>GitToolPack</td><td>GitBackend</td><td>status/diff/show/add/commit/branch/checkout 子集</td></tr>
+<tr><td>TestEvidence</td><td>TestDiscovery + ActionProvider</td><td>发现入口，调用应用注册的测试动作，生成结构化报告</td></tr>
+<tr><td>ArtifactToolPack</td><td>Storage/BlobStore</td><td>大输出、截图、测试报告</td></tr>
+<tr><td>JobToolPack</td><td>Portable Job 或应用 Action</td><td>后台任务、日志、取消与有限恢复</td></tr>
+<tr><td>SubagentToolPack</td><td>Workspace/Profile</td><td>通用 Profile 子任务、隔离与合并</td></tr>
+<tr><td>BrowserToolPack</td><td>BrowserProvider</td><td>页面快照、点击、frame、下载</td></tr>
+</tbody></table>
+<h3>8.1 Git 后端</h3>
+<pre>interface GitBackend {
+  kind: 'cli' | 'portable' | 'virtual';
+  status(workspace: WorkspaceRef, signal?: AbortSignal): Promise&lt;GitStatus&gt;;
+  diff(workspace: WorkspaceRef, spec: DiffSpec, signal?: AbortSignal): Promise&lt;GitDiff&gt;;
+  stage(workspace: WorkspaceRef, paths: string[], signal?: AbortSignal): Promise&lt;void&gt;;
+  commit(workspace: WorkspaceRef, input: CommitInput, signal?: AbortSignal): Promise&lt;GitCommit&gt;;
+  show(...): Promise&lt;GitObject&gt;;
+}</pre>
+<ul><li><code>PortableGitBackend</code> 是默认实现，直接读写 Git-compatible objects/refs/HEAD/index，不依赖 Git binary。</li><li><code>CliGitBackend</code> 仅作为显式注册的高级操作和 real-Git conformance oracle。</li><li>UI 看到的 Git 工具语义相同；无 Git binary 是正常 Portable Profile，不是降级错误。</li></ul>
+<p>详细契约见 <a href="git-portable-backend-design-v1.html#requirements">REQ-GIT-001</a>。</p>
+<h3>8.2 TestEvidence</h3>
+<pre>interface TestDiscovery {
+  discover(workspace: WorkspaceRef, signal?: AbortSignal): Promise&lt;TestPlan[]&gt;;
+}
+
+interface TestRunner {
+  run(plan: TestPlan, signal?: AbortSignal): Promise&lt;TestReport&gt;;
+}</pre>
+<p>默认没有通用 TestRunner。应用可以注册 <code>app.*.run_tests</code> 动作，返回标准 TestReport；Core 负责校验 actionId、版本、文件 hash、environment fingerprint 和报告。没有测试动作时不可用，不能返回伪通过。</p>
+</section>
+
+<section id="objects">
+<h2>9. 核心对象与类关系</h2>
+<pre>+--------------------------+
+| HostCapabilityRegistry   |
+| probeAll(): Capability[] |
++------------+-------------+
+             |
+             v
+      +------+-------+        +------------------+
+      | HostProfile  |------->| ToolPackComposer |
+      +------+-------+        +---------+--------+
+             |                          |
+   +---------+---------+                v
+   |                   |          +-------------+
+FileSystemPort ActionProvider    | ToolPackSet |
+   |                   |          +------+------+
+   +---------+---------+                 |
+             |                          v
+      WorkspaceService            Agent ToolRegistry
+             |
+   +---------+---------+
+   |         |         |
+Patch      Git      App actions
+   |         |           |
+FS port   GitBackend  Provider + Discovery</pre>
+<table><thead><tr><th>对象</th><th>职责</th><th>禁止</th></tr></thead><tbody>
+<tr><td>HostCapabilityRegistry</td><td>声明、探测、版本和健康诊断</td><td>业务决策</td></tr>
+<tr><td>HostProfile</td><td>选择必需/可选能力组合</td><td>直接访问文件或进程</td></tr>
+<tr><td>ToolPackComposer</td><td>按能力注册统一 ToolPackSet</td><td>依赖客户端类型</td></tr>
+<tr><td>WorkspaceService</td><td>把端口能力组合成 Coding 操作</td><td>UI 布局</td></tr>
+<tr><td>GitBackend/TestEvidence</td><td>领域语义与应用动作差异隔离</td><td>写 Session 状态</td></tr>
+<tr><td>Provider Adapter</td><td>把 Node/Sandbox/Chrome API 映射为 Port</td><td>复制上层业务</td></tr>
+</tbody></table>
+</section>
+
+<section id="flows">
+<h2>10. 核心交互</h2>
+<h3>10.1 启动与能力组合</h3>
+<pre>Composer.start(profile)
+  → registry.declare(adapter capabilities)
+  → registry.probeAll()
+  → profile.resolve(report)
+  → composer.register(required/optional ToolPacks)
+  → Runtime.setCapabilityReport(report)
+  → UI.show enabled / degraded / unavailable</pre>
+<h3>10.2 文件修改与验证</h3>
+<pre>Model → read_file
+      → apply_patch(expectedVersion)
+      → FileSystemPort.writeAtomic
+      → generated unified diff
+      → TestDiscovery
+      → ActionProvider.invoke(app.*.run_tests)
+      → TestReport → Verifier → completed</pre>
+<h3>10.3 Git 状态与提交</h3>
+<pre>Model → GitToolPack.status
+      → GitBackend.status
+      → GitStatus
+Model → stage/commit (policy approval)
+      → GitBackend
+      → Event + diff evidence</pre>
+<h3>10.4 能力缺失</h3>
+<pre>Application test action unavailable
+  → run_tests not registered
+  → PortableGitBackend remains available
+  → Git CLI backend is optional and may be absent
+  → Prompt & UI show missing action/toolchain
+  → completion guard rejects unverified write claims</pre>
+</section>
+
+<section id="failure">
+<h2>11. 失败、取消与降级</h2>
+<table><thead><tr><th>场景</th><th>行为</th></tr></thead><tbody>
+<tr><td>Probe 失败</td><td>Capability 标记 unavailable/degraded，禁止对应 ToolPack，记录诊断</td></tr>
+<tr><td>动作超时</td><td>AbortSignal → Provider.cancel → 应用回收内部资源 → ACTION_TIMEOUT</td></tr>
+<tr><td>输出超限</td><td>保留尾部/摘要，完整输出进入 Artifact，工具结果标记 truncated</td></tr>
+<tr><td>文件版本变化</td><td>Patch 返回 PATCH_STALE_FILE，要求重读，不覆盖</td></tr>
+<tr><td>Git binary 缺失</td><td>降级 Portable Git 或明确禁用 Git 写操作</td></tr>
+<tr><td>应用动作失败</td><td>保留结构化错误/退出状态，不标记 completed</td></tr>
+<tr><td>Session 取消</td><td>取消模型、应用动作、交互会话、网络、Git 和子 Agent</td></tr>
+<tr><td>宿主断开</td><td>Session 保留最后确认状态；恢复前重新 probe 能力</td></tr>
+</tbody></table>
+<div class="danger rule">禁止把“文件已写”当成“项目可运行”，也不允许在没有应用测试动作返回的 TestReport 时由模型自行宣布测试通过。</div>
+</section>
+
+<section id="security">
+<h2>12. 安全边界</h2>
+<div class="grid">
+<div class="card"><h3>路径</h3><p>FileSystemPort 必须限制 Workspace root；realpath、symlink 和 rename target 均需检查。</p></div>
+<div class="card"><h3>动作</h3><p>使用具名 actionId 和 JSON Schema；不内置 raw shell。宿主自行注册通用命令动作时必须声明高风险和完整执行限制。</p></div>
+<div class="card"><h3>网络</h3><p>默认拒绝；通过 allowlist proxy 或 Host NetworkPolicy；DNS/IP rebinding 防护。</p></div>
+<div class="card"><h3>秘密</h3><p>SecretLease 短时有效，不进入 Prompt、Session、日志和 Artifact。</p></div>
+<div class="card"><h3>审批</h3><p>按能力、路径、命令、网络和写入范围评估，不只按工具名。</p></div>
+<div class="card"><h3>应用动作</h3><p>稳定 actionId、输入/输出 Schema、effects、timeout、取消和版本；底层进程由应用自行收口。</p></div>
+</div>
+</section>
+
+<section id="migration">
+<h2>13. 分阶段实施</h2>
+<div class="phase"><div class="phase-no">M1</div><div><h3>能力模型与端口骨架</h3></div></div>
+<ul><li>新增 CapabilityRegistry、probe、版本、限制与诊断。</li><li>正式定义 FileSystemPort、ActionProviderPort；保持现有接口适配。</li><li>建立 Portable Profile 与契约测试。</li></ul>
+<div class="phase"><div class="phase-no">M2</div><div><h3>TUI Local Coding</h3></div></div>
+<ul><li>启用 Node FS 和 Portable Workspace 工具。</li><li>增加应用 Action Provider；测试、构建或本地命令由嵌入应用按需注册。</li><li>实现 PortableGitBackend 作为默认 Git，CLI 仅可选注册。</li><li>保留 virtual profile 作为 fallback。</li></ul>
+<div class="phase"><div class="phase-no">M3</div><div><h3>ToolPack 统一</h3></div></div>
+<ul><li>Patch/Search/Git/Test 全部由 Capability Graph 注册。</li><li>Sandbox、TUI、Chrome 使用同一 ToolPack 描述。</li><li>UI/Prompt 显示 degraded reason。</li></ul>
+<div class="phase"><div class="phase-no">M4</div><div><h3>PTY、Secret、Network</h3></div></div>
+<ul><li>PTY session 生命周期和取消。</li><li>SecretLease 与网络 allowlist。</li><li>Soak、恶意命令和网络故障测试。</li></ul>
+<div class="phase"><div class="phase-no">M5</div><div><h3>跨端与未来客户端</h3></div></div>
+<ul><li>Remote/Web 使用 Headless Profile。</li><li>Capability report 进入 client protocol。</li><li>完成端无关工具可见性和审阅。</li></ul>
+</section>
+
+<section id="acceptance">
+<h2>14. 确认项与完成定义</h2>
+<div class="grid">
+<div class="decision"><b>DECISION-01</b><p>是否接受“Host 提供原始端口，Git/Test 通过 ToolPack 组合”的分层？</p></div>
+<div class="decision"><b>DECISION-02</b><p>是否接受 TUI 默认 Local Coding，并保留 Portable Virtual 作为显式 fallback？</p></div>
+<div class="decision"><b>DECISION-03</b><p>PortableGitBackend 是否作为默认 Git 实现，CLI 仅作为可选高级后端？</p></div>
+<div class="decision"><b>DECISION-04</b><p>是否接受应用注册具名 Action 作为基线，不内置通用 exec/Python/Bash？</p></div>
+</div>
+<table><thead><tr><th>维度</th><th>完成标准</th></tr></thead><tbody>
+<tr><td>能力</td><td>所有 capability 有 probe、版本、状态、限制和诊断。</td></tr>
+<tr><td>文件</td><td>FileSystemPort 契约在 Memory/Node/Sandbox/Chrome 适配器通过。</td></tr>
+<tr><td>应用动作</td><td>宿主注册的动作可发现、可调用、可取消、可诊断；通用 exec 不是默认工具。</td></tr>
+<tr><td>Git/Test</td><td>PortableGitBackend 无需 CLI；测试执行必须来自应用 Action；不支持项明确诊断。</td></tr>
+<tr><td>隔离</td><td>Core 不出现 Chrome/Node/TUI 分支；Capability Graph 驱动工具。</td></tr>
+<tr><td>安全</td><td>路径、命令、网络、秘密和审批边界有测试证据。</td></tr>
+<tr><td>恢复</td><td>宿主断开、重连、取消和 Session 恢复不丢状态。</td></tr>
+<tr><td>验证</td><td>相关测试全部通过并满足 <code>REQ-HOST-001</code> 注册表状态。</td></tr>
+</tbody></table>
+<div class="rule">最终目标不是“所有宿主功能一样多”，而是“能力差异被准确描述，工具组合可预测，缺失能力不会伪装为成功”。Workspace 能否跨宿主继续由独立 Capsule 层定义，Host 只负责准确执行和传输。</div>
+<p><a href="host-capability-testing-v1.html#trace">查看配套测试方案 →</a></p>
+<p><a href="workspace-portability-design-v1.html">查看 REQ-WORKSPACE-001 →</a></p>
+<p class="foot">需求：REQ-HOST-001 · 目标版本：0.3.0 · 状态：Proposed / Review · 设计版本：1.0 · 本文未声称功能已实现</p>
+</section>
+</div>
+</body>
+</html>

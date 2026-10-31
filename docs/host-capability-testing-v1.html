@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tinyai 宿主能力与 Coding Workspace 测试设计 V1</title>
+<style>
+:root{--bg:#f4f5f7;--paper:#fff;--text:#191a1e;--muted:#6f7179;--line:#e2e3e8;--accent:#5145d8;--accent-soft:#efedff;--ok:#137a4b;--ok-soft:#eef8f2;--warn:#986100;--warn-soft:#fff8e8;--danger:#b42318;--danger-soft:#fff1f0;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.72 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1240px;margin:auto;padding:36px 24px 100px}
+.hero{padding:40px;border-radius:27px;background:radial-gradient(circle at 88% 8%,#78d5ca 0,transparent 24%),linear-gradient(135deg,#101722,#173c44 58%,#315f6f);color:#fff}.hero small{letter-spacing:.12em;opacity:.72}.hero h1{font-size:38px;line-height:1.18;margin:12px 0}.hero p{max-width:960px;margin:0;color:#e7f5f3}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}
+nav{position:sticky;top:0;z-index:5;display:flex;gap:14px;overflow:auto;margin:18px 0;padding:10px 14px;border:1px solid var(--line);border-radius:13px;background:#f4f5f7ed;backdrop-filter:blur(12px)}nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}
+section{margin:18px 0;padding:26px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:23px;margin:0 0 14px}h3{font-size:16px;margin:22px 0 8px}h4{font-size:14px;margin:18px 0 6px}p{color:#44454c}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafafa}.card h3,.card h4{margin:0 0 8px}.card p{margin:0}.card ul{margin:8px 0 0;padding-left:18px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafafa;color:var(--muted);font-weight:600}
+code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{padding:17px;overflow:auto;border-radius:12px;background:#10161b;color:#e9f5f3;font:12px/1.62 var(--mono);border:1px solid #293b40}
+.rule{padding:13px 15px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#f5f3ff}.warn{border-color:var(--warn);background:var(--warn-soft)}.danger{border-color:var(--danger);background:var(--danger-soft)}.ok{border-color:var(--ok);background:var(--ok-soft)}
+.pill,.tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;white-space:nowrap}.pill{background:var(--accent-soft);color:var(--accent)}.tag{background:var(--ok-soft);color:var(--ok)}.tag.contract{background:var(--accent-soft);color:var(--accent)}.tag.unit{background:#edf5ff;color:#1c5d99}.tag.risk{background:var(--warn-soft);color:var(--warn)}.tag.security,.tag.blocker{background:var(--danger-soft);color:var(--danger)}.tag.e2e{background:#eaf7ef;color:var(--ok)}
+.phase{display:flex;align-items:center;gap:11px;margin:18px 0 8px;padding:10px 12px;border:1px solid var(--line);border-radius:11px;background:#fafafa}.phase-no{display:grid;place-items:center;min-width:42px;height:28px;padding:0 8px;border-radius:7px;background:var(--accent-soft);color:var(--accent);font:700 12px/1 var(--mono)}
+.metric{font:700 22px/1.1 var(--mono);color:var(--accent);margin-bottom:5px}.foot{color:var(--muted);font-size:12px}
+@media(max-width:850px){.grid3{grid-template-columns:1fr}}@media(max-width:700px){.grid{grid-template-columns:1fr}.hero h1{font-size:28px}.wrap{padding:20px 12px 70px}section{padding:20px}table{display:block;max-width:100%;overflow-x:auto}pre{max-width:100%}}
+@media print{nav{display:none}body{background:#fff}.hero{border-radius:0}.wrap{max-width:none;padding:0}section{break-inside:avoid}.tag,.pill{border:1px solid #bbb}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+<small>REQ-HOST-001 / HOST CAPABILITY + CODING WORKSPACE / TEST DESIGN V1</small>
+<h1>宿主能力与 Coding Workspace<br>测试方案</h1>
+<p>验证宿主能力声明、运行时探测、应用动作注册、ToolPack 组合、Git/Test 回退与跨宿主一致性。核心判据不是接口“长得一样”，而是在能力缺失、故障、并发和恢复时仍然不误报、不越界、不伪装成功。通用 exec/Python/Bash 不是基线能力。</p>
+<div class="chips"><span class="chip">Target 0.3.0</span><span class="chip">Contract First</span><span class="chip">Host Parity</span><span class="chip">Fault Injection</span><span class="chip">Real E2E</span><span class="chip">Status: Draft for Review</span></div>
+</header>
+<nav>
+<a href="#strategy">策略</a><a href="#scope">范围</a><a href="#levels">层级</a><a href="#trace">追踪矩阵</a><a href="#fixtures">测试夹具</a><a href="#ports">端口契约</a><a href="#capabilities">能力探测</a><a href="#composition">工具组合</a><a href="#integrations">宿主集成</a><a href="#execution">执行与 Git/Test</a><a href="#security">安全故障</a><a href="#parity">跨宿主</a><a href="#transfer-boundary">迁移边界</a><a href="#state">状态空间</a><a href="#gates">证据与门禁</a><a href="#phases">阶段验收</a>
+</nav>
+
+<section id="strategy">
+<h2>1. 测试策略与风险模型</h2>
+<div class="grid">
+<div class="card">
+<h3>要证明的核心事实</h3>
+<ul>
+<li>能力只有在 Probe 成功后才会进入可用工具集。</li>
+<li>缺失能力会显式降级，不会生成“看起来能运行”的工具。</li>
+<li>文件、进程、Git、测试和安全边界在真实宿主上成立。</li>
+<li>同一 ToolPack 在不同宿主保持相同协议和结果语义。</li>
+<li>取消、超时、宿主断连和故障恢复不会留下孤儿资源。</li>
+</ul>
+</div>
+<div class="card">
+<h3>最高风险失效</h3>
+<ul>
+<li>只检查字段存在，把不可执行能力标成 available。</li>
+<li>文件已写入但项目未运行，模型却宣布任务完成。</li>
+<li>symlink、cwd、环境变量或 raw shell 绕出 Workspace。</li>
+<li>取消只停父进程，孙进程和 PTY 仍在运行。</li>
+<li>TUI、Chrome、Sandbox 各自解释同名工具，产生行为漂移。</li>
+<li>Secret、完整命令环境或大输出进入 Session/日志/Artifact。</li>
+</ul>
+</div>
+</div>
+<h3>测试原则</h3>
+<div class="grid3">
+<div class="card"><h3>契约先于实现</h3><p>Memory、Node、Sandbox、Chrome Adapter 运行同一套端口契约，不靠阅读代码确认一致性。</p></div>
+<div class="card"><h3>真实性分级</h3><p>纯逻辑使用确定性 Double；执行、Git、测试、PTY 和 Chrome 用真实依赖完成独立 E2E。</p></div>
+<div class="card"><h3>反误报完成</h3><p>没有 ExecutionResult 或 TestReport 时，完成门禁必须失败，不能以模型文本替代证据。</p></div>
+</div>
+<div class="danger rule"><b>P0 零容忍：</b>能力假可用、Workspace 逃逸、测试假通过、Secret 泄漏、孤儿进程、Core 依赖具体客户端。任一出现即阻止发布，不能以“已知限制”带入 0.3.0。</div>
+</section>
+
+<section id="scope">
+<h2>2. 被测系统与边界</h2>
+<pre>Host Adapter
+  Memory / Node / Sandbox / Chrome / Remote
+              ↓
+Port Contract
+  FileSystem / Execution / PTY / Search / Network / Secret
+              ↓
+Capability Registry
+  declare → probe → report → invalidate
+              ↓
+ToolPack Composer
+  required / optional dependencies
+              ↓
+Coding ToolPacks
+  Patch / Search / Git / Test / Artifact / Jobs
+              ↓
+Agent Runtime
+  model loop / approval / verifier / task state</pre>
+<table><thead><tr><th>在范围内</th><th>不在本次实现范围</th></tr></thead><tbody>
+<tr><td>统一能力 ID、Probe、状态、诊断和重新探测</td><td>通用虚拟机或全部 OS API 抽象</td></tr>
+<tr><td>FileSystemPort、ActionProviderPort 和可选交互动作</td><td>完整的远程桌面、通用进程执行或交互式 GUI 自动化</td></tr>
+<tr><td>Patch/Search/Git/Test ToolPack 组合</td><td>Git 全量子命令兼容</td></tr>
+<tr><td>TUI Local Coding、Sandbox、Chrome、Portable 行为</td><td>iOS 客户端和跨平台二进制矩阵</td></tr>
+<tr><td>路径、命令、网络、Secret、取消和恢复边界</td><td>只以 Mock 结果判断生产可用性</td></tr>
+</tbody></table>
+<div class="rule">真实 LLM 测试验证模型是否正确使用工具和表达失败；它不能替代 Port、状态机、进程清理或安全测试。没有模型参与也必须能证明宿主能力基础设施正确。</div>
+</section>
+
+<section id="levels">
+<h2>3. 测试层级</h2>
+<table><thead><tr><th>层级</th><th>范围</th><th>运行环境</th><th>主要判据</th></tr></thead><tbody>
+<tr><td><span class="tag contract">L0 Contract</span></td><td>每个 Port 的规范行为、错误和取消</td><td>Memory + 真实 Adapter</td><td>相同输入/事件得到相同语义；所有 Adapter 通过同一套 suite</td></tr>
+<tr><td><span class="tag unit">L1 Unit</span></td><td>Capability Registry、Profile、Composer、错误映射</td><td>确定性 Harness</td><td>状态、优先级、降级原因和工具集合准确</td></tr>
+<tr><td><span class="tag risk">L2 Property/State</span></td><td>能力变化、断连、取消、重试、交错事件</td><td>fast-check + 有界模型</td><td>不变量不被随机事件序列破坏</td></tr>
+<tr><td><span class="tag">L3 Integration</span></td><td>Runtime + ToolPack + Verifier + Persistence</td><td>Memory/Node/Sandbox</td><td>业务闭环、失败闭环、恢复闭环</td></tr>
+<tr><td><span class="tag e2e">L4 Host E2E</span></td><td>TUI、应用 Action、Git、测试报告</td><td>macOS 本机临时 Workspace</td><td>动作可发现/取消；文件副作用和证据可核对</td></tr>
+<tr><td><span class="tag e2e">L5 Browser E2E</span></td><td>Chrome Extension、Runtime、无 Node 能力</td><td>真实 Chrome</td><td>正确禁用/回退，不泄漏宿主假设</td></tr>
+<tr><td><span class="tag risk">L6 Fault/Security</span></td><td>恶意路径、网络、Secret、磁盘、断连</td><td>真实 Adapter + Fault Proxy</td><td>拒绝或安全降级；无越界和泄漏</td></tr>
+<tr><td><span class="tag e2e">L7 Soak/Benchmark</span></td><td>长期运行、大仓库、大输出、重复探测</td><td>受控 Node 环境</td><td>资源有界、性能稳定、没有假完成</td></tr>
+</tbody></table>
+</section>
+
+<section id="trace">
+<h2>4. 需求追踪矩阵</h2>
+<table><thead><tr><th>需求</th><th>核心用例</th><th>发布级别</th><th>通过条件</th></tr></thead><tbody>
+<tr><td><code>FR-HOST-001</code> 窄端口分层</td><td>HOST-001..009、020..022、050</td><td>P0</td><td>Host 只暴露端口；Patch/Git/Test 由 ToolPack 实现；Core 无宿主分支</td></tr>
+<tr><td><code>FR-HOST-002</code> 能力探测和版本</td><td>HOST-010..015、044</td><td>P0</td><td>声明、Probe、状态、版本、限制和诊断一致；失败能力不可用</td></tr>
+<tr><td><code>FR-HOST-003</code> FileSystemPort</td><td>HOST-001..004、029、040、067..069</td><td>P0</td><td>WorkspacePath、路径隔离、原子写、content hash、symlink/大小写语义和标准文件操作全部通过</td></tr>
+<tr><td><code>FR-HOST-004</code> ActionProviderPort</td><td>HOST-005..007、023..027、039、070..071</td><td>P0</td><td>具名动作的 Schema、版本、Probe、调用、超时和取消可验证；不存在内置通用 exec</td></tr>
+<tr><td><code>FR-HOST-005</code> InteractiveActionPort</td><td>HOST-008、028、051</td><td>P1</td><td>应用注册的交互动作生命周期正确；没有动作时不暴露通用 PTY</td></tr>
+<tr><td><code>FR-HOST-006</code> GitToolPack</td><td>HOST-030..034、047、053</td><td>P0</td><td>CLI/Portable 后端通过共同契约；无 Git 时显式回退或禁用</td></tr>
+<tr><td><code>FR-HOST-007</code> TestEvidence</td><td>HOST-035..039、045</td><td>P0</td><td>发现可移植；执行来自命名的应用测试动作；没有真实报告不能通过验证</td></tr>
+<tr><td><code>FR-HOST-008</code> Search/Watch</td><td>HOST-009、017、041</td><td>P1</td><td>宿主加速不可用时回退便携搜索/轮询，语义相同</td></tr>
+<tr><td><code>FR-HOST-009</code> Network/Secret</td><td>HOST-016、042、048、049、072</td><td>P1</td><td>默认拒绝、allowlist、可取消；SecretLease 不进入 Session/Capsule/Artifact</td></tr>
+<tr><td><code>FR-HOST-010</code> ToolPack 组合</td><td>HOST-018..022、028、038</td><td>P0</td><td>能力图谱决定工具和 Prompt；缺失工具不会被模型误调用</td></tr>
+<tr><td><code>FR-HOST-011</code> Host Profiles</td><td>HOST-010、018、023..029、046、052</td><td>P0</td><td>Portable/Local/Sandbox/Browser/Remote 预设与能力矩阵一致</td></tr>
+<tr><td><code>FR-HOST-012</code> 降级与诊断</td><td>HOST-012..015、021、038、048</td><td>P0</td><td>UI、Prompt、Trace 均能解释 unavailable/degraded 原因</td></tr>
+<tr><td><code>FR-HOST-013</code> Core 边界</td><td>HOST-018、020、022、046、050、052</td><td>P1</td><td>Core/Capability 不依赖 TUI、Chrome、Node 类型；客户端只选择 Profile</td></tr>
+<tr><td><code>FR-HOST-014</code> 兼容迁移</td><td>HOST-017、023..026、043、044、046、052</td><td>P0</td><td>VirtualShell/虚拟 VCS 保留为 fallback，现有 Session 与工具名可迁移</td></tr>
+</tbody></table>
+</section>
+
+<section id="fixtures">
+<h2>5. 测试夹具与确定性控制</h2>
+<div class="grid">
+<div class="card">
+<h3><code>MemoryHostFixture</code></h3>
+<ul><li>内存 FS、Storage、Clock、Scheduler、Crypto、Clone。</li><li>可注入 probe 成功、抛错、超时和晚到结果。</li><li>记录声明、探测、工具注册和取消调用顺序。</li></ul>
+</div>
+<div class="card">
+<h3><code>NodeHostFixture</code></h3>
+<ul><li>每个用例创建独立临时项目根和状态根。</li><li>使用真实 Node FS、短生命周期 Node 子进程。</li><li>测试结束核对文件、FD、timer 和子进程无残留。</li></ul>
+</div>
+<div class="card">
+<h3><code>GitWorkspaceFixture</code></h3>
+<ul><li>干净仓库、脏仓库、untracked、branch、rename、binary。</li><li>可通过 PATH 隔离模拟 Git binary 缺失。</li><li>Portable 生成结果可由真实 Git 读取/检查。</li></ul>
+</div>
+<div class="card">
+<h3><code>FaultAdapter</code></h3>
+<ul><li>在任意 Port 调用前执行 throw/delay/hang/corrupt/partial-write。</li><li>支持断连后 reconnect 与能力变化。</li><li>故障命中必须带有能力 ID 和请求关联 ID。</li></ul>
+</div>
+<div class="card">
+<h3><code>ChromeHostFixture</code></h3>
+<ul><li>无 Node/Execution 的真实浏览器宿主 Profile。</li><li>覆盖 storage、browser provider、reload 和 tab 消失。</li><li>不由 Core 直接读取 Chrome API。</li></ul>
+</div>
+<div class="card">
+<h3><code>EvidenceRecorder</code></h3>
+<ul><li>记录 capability report、ToolPackSet、命令、退出码、TestReport、Artifact 引用。</li><li>失败用例保留最小诊断，不保存 Secret 或完整受限环境。</li><li>供跨宿主比较和提交 Test-Evidence。</li></ul>
+</div>
+</div>
+<div class="warn rule">所有真实执行用例使用唯一临时目录和随机端口；禁止依赖用户已有仓库、Git 全局配置、固定工作目录或系统安装版本。必须显式设置测试所需的 PATH、HOME/XDG 状态和 Git author。</div>
+</section>
+
+<section id="ports">
+<h2>6. Port 契约测试</h2>
+<p>每个 Adapter 必须通过共享 suite。Adapter 可为能力缺失选择不实现某个端口，但不能“实现后悄悄改变语义”。</p>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>级别</th></tr></thead><tbody>
+<tr><td>HOST-001</td><td>FileSystem stat/list/read 基础语义</td><td>relative path、目录项、size/kind/mtime/hash 一致；不可读路径返回结构化错误</td><td><span class="tag contract">Contract</span></td></tr>
+<tr><td>HOST-002</td><td>大文件 offset/limit、AbortSignal</td><td>分页稳定、哈希可复核；取消后停止读取且不返回伪成功</td><td><span class="tag contract">Contract</span></td></tr>
+<tr><td>HOST-003</td><td>writeAtomic 与 expectedVersion/hash</td><td>成功写入完整文件；并发版本变化返回 stale，不覆盖新内容；崩溃点不产生半文件</td><td><span class="tag risk">Fault</span></td></tr>
+<tr><td>HOST-004</td><td>absolute path、<code>..</code>、symlink、rename target 越界</td><td>在任何副作用前拒绝；错误不泄漏宿主绝对根路径</td><td><span class="tag security">Security</span></td></tr>
+<tr><td>HOST-005</td><td>应用动作 describe/invoke 契约</td><td>稳定 ID、JSON Schema、effects、版本和结构化结果一致；未注册动作不会出现</td><td><span class="tag contract">Contract</span></td></tr>
+<tr><td>HOST-006</td><td>动作 timeout/Abort/outputLimit</td><td>取消传到 Provider；内部资源回收；错误含 actionId/request id</td><td><span class="tag risk">Fault</span></td></tr>
+<tr><td>HOST-007</td><td>动作不存在、版本不匹配、Schema 错误</td><td>返回稳定动作协议错误；不自动回退到通用 shell</td><td><span class="tag contract">Contract</span></td></tr>
+<tr><td>HOST-008</td><td>PTY open/write/read/resize/close</td><td>会话 ID 稳定；尺寸事件生效；重复 close 幂等；close 后读写明确失败</td><td><span class="tag contract">Contract</span></td></tr>
+<tr><td>HOST-009</td><td>Search/Watch 加速实现与 fallback</td><td>exclude、分页、取消、文件变更事件语义一致；watch 不支持时声明限制而非假装监听</td><td><span class="tag contract">Contract</span></td></tr>
+<tr><td>HOST-016</td><td>Network request/stream 与 SecretLease</td><td>响应状态/headers/上限正确；lease 可使用、过期/撤销后拒绝；name scope 隔离</td><td><span class="tag contract">Contract</span></td></tr>
+</tbody></table>
+</section>
+
+<section id="capabilities">
+<h2>7. Capability Probe 测试</h2>
+<pre>declared
+   │ probe success
+   ▼
+available ── partial failure ──→ degraded
+   │                               │
+   └──── fatal failure ───────────→ unavailable
+                 ▲                     │
+                 └── reconnect / probe ┘</pre>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>级别</th></tr></thead><tbody>
+<tr><td>HOST-010</td><td>声明存在但桥未实现</td><td>报告 unavailable 并包含 <code>PROBE_NOT_IMPLEMENTED</code>；不注册依赖工具</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>HOST-011</td><td>Probe 抛错、超时、返回未知状态</td><td>没有默认成功；超时取消；报告稳定降级原因，不缓存异常结果作为永久真相</td><td><span class="tag risk">Fault</span></td></tr>
+<tr><td>HOST-012</td><td>部分能力正常、部分失败</td><td>例如 FS 可用但 execution 超时，则 FS/Patch 可用、exec/tests 不可用，整体为 degraded</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>HOST-013</td><td>版本、limitations、latency、details</td><td>CapabilityDescriptor 与 ProbeResult 合并后字段稳定；UI/Prompt/Trace 使用同一诊断</td><td><span class="tag contract">Contract</span></td></tr>
+<tr><td>HOST-014</td><td>宿主断开、重连、配置改变</td><td>旧 generation 结果不能覆盖新结果；重连后重新 Probe；工具集合重新计算</td><td><span class="tag risk">State</span></td></tr>
+<tr><td>HOST-015</td><td>Probe 重复执行和并发执行</td><td>最小操作无业务副作用；并发 Probe 合并或按 generation 去重；延迟可控</td><td><span class="tag unit">Property</span></td></tr>
+<tr><td>HOST-044</td><td>运行中能力失效</td><td>下一次依赖调用失败后能力转 degraded/unavailable；已产生副作用保留证据，不自动重放危险操作</td><td><span class="tag risk">Fault</span></td></tr>
+</tbody></table>
+<div class="danger rule">Probe 不能用“对象字段存在”代替实际最小调用。Execution probe 必须启动一个无副作用短进程；Git probe 必须验证 CLI 或 portable self-check；Secret probe 不得读取真实秘密，只能验证 broker 和 lease 机制。</div>
+</section>
+
+<section id="composition">
+<h2>8. ToolPack 组合测试</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>级别</th></tr></thead><tbody>
+<tr><td>HOST-017</td><td>无 Execution，但 FileSystem 可用</td><td>注册 read/list/patch/search；不注册 exec/test-command；Git 只注册 portable 支持子集</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>HOST-018</td><td>Profile required/optional 解析</td><td>required 不满足时启动失败或选择明确 fallback；optional 缺失只产生 degraded</td><td><span class="tag contract">Contract</span></td></tr>
+<tr><td>HOST-019</td><td>缺失能力对 UI/Prompt/ToolRegistry 的一致性</td><td>三处工具集合和不可用原因完全一致；不可调用工具不会出现在 Schema</td><td><span class="tag contract">Contract</span></td></tr>
+<tr><td>HOST-020</td><td>重复 capability/tool 名称和注册顺序</td><td>确定性去重或配置错误；最终 ToolPackSet 顺序可复现</td><td><span class="tag unit">Property</span></td></tr>
+<tr><td>HOST-021</td><td>unknown capability 向前兼容</td><td>保留诊断但不激活未知工具；旧 Core 不崩溃</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>HOST-022</td><td>Core 边界扫描</td><td>Core/Capability/ToolPack 不引用 TUI、Chrome、Node 专属类型或 UA 判断</td><td><span class="tag security">Boundary</span></td></tr>
+<tr><td>HOST-038</td><td>Git CLI 不可用</td><td>PortableGitBackend 仍提供 common subset；CLI 缺失不产生 degraded 或隐藏 Git 工具</td><td><span class="tag risk">Integration</span></td></tr>
+<tr><td>HOST-045</td><td>TestDiscovery 或 TestRunner 缺失</td><td>不注册真实测试工具；保留手动验证说明；Verifier 不接受“测试通过”</td><td><span class="tag risk">Integration</span></td></tr>
+</tbody></table>
+<h3>组合快照</h3>
+<pre>Portable:
+  fs=memory  execution=virtual  git=virtual  tests=virtual-fallback
+Local:
+  fs=node    execution=process  git=cli|portable  tests=execution
+Sandbox:
+  fs=sandbox execution=sandbox  git=cli|portable  tests=execution
+Browser:
+  fs=virtual execution=unavailable git=portable-limited tests=unavailable
+Remote Review:
+  fs=read-only execution=unavailable git=read-only tests=unavailable</pre>
+</section>
+
+<section id="integrations">
+<h2>9. Host Profile 集成测试</h2>
+<table><thead><tr><th>ID</th><th>宿主/场景</th><th>预期</th><th>级别</th></tr></thead><tbody>
+<tr><td>HOST-023</td><td>Portable Profile 完整闭环</td><td>Memory FS + Virtual Execution/Patcher/VCS 可读写、Patch、查看 Diff 和恢复；无真实依赖</td><td><span class="tag">Integration</span></td></tr>
+<tr><td>HOST-024</td><td>TUI Local Coding 文件路径</td><td>读取/写入真实临时项目，路径与外部 Node 工具看到的结果一致</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>HOST-025</td><td>TUI Local Coding 应用动作路径</td><td>应用注册的测试/构建动作可发现并调用；不要求内置通用 Node exec</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>HOST-026</td><td>Sandbox Profile</td><td>Sandbox FS/execution/checkpoint/restore/release 与 Local 使用相同 Coding ToolPack 语义</td><td><span class="tag risk">Integration</span></td></tr>
+<tr><td>HOST-027</td><td>Chrome Profile 无 Node/Execution</td><td>不展示/不提示可执行真实命令；virtual FS/Patch 与 Browser ToolPack 可用；诊断明确</td><td><span class="tag e2e">Chrome E2E</span></td></tr>
+<tr><td>HOST-028</td><td>Remote/Headless Review Profile</td><td>只读 Session/Artifact 审阅；不能因缺失 FS 而泄漏任何本地路径或工具</td><td><span class="tag">Integration</span></td></tr>
+<tr><td>HOST-029</td><td>TUI 显式切换 Portable fallback</td><td>切换后工具能力和提示同步更新；旧执行会话终止；不混用 Node/Virtual 结果</td><td><span class="tag risk">E2E</span></td></tr>
+<tr><td>HOST-046</td><td>同一 Profile 由不同客户端启动</td><td>TUI/CLI/Headless 选择同一 Profile 得到语义相同工具集，无客户端类型分支</td><td><span class="tag contract">Parity</span></td></tr>
+<tr><td>HOST-052</td><td>Profile 迁移与恢复</td><td>旧 Session 保留历史；新 generation 使用重新探测能力；不把旧工具授权带入新宿主</td><td><span class="tag risk">State</span></td></tr>
+</tbody></table>
+</section>
+
+<section id="execution">
+<h2>10. 应用动作、Git 与测试 E2E</h2>
+<h3>10.1 ActionProviderPort</h3>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>级别</th></tr></thead><tbody>
+<tr><td>HOST-030</td><td>应用动作成功、失败和结构化输出</td><td>ActionId、版本、耗时和 request id 完整；错误不会升级成宿主崩溃</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>HOST-031</td><td>动作取消与内部资源回收</td><td>Abort、timeout、窗口关闭都到达 Provider；若动作包装进程，必须终止其进程树</td><td><span class="tag security">E2E</span></td></tr>
+<tr><td>HOST-032</td><td>大输出和二进制输出</td><td>模型得到有界摘要/尾部；Artifact 可完整读取；二进制不误当 UTF-8 文本</td><td><span class="tag risk">E2E</span></td></tr>
+<tr><td>HOST-033</td><td>动作边界与 WorkspacePath</td><td>Action Context 只含授权 scope/WorkspacePath；不默认继承宿主 Secret 或 env</td><td><span class="tag security">Security</span></td></tr>
+<tr><td>HOST-034</td><td>重复 idempotencyKey</td><td>Provider 只执行一次或返回明确缓存/拒绝；危险动作不因重试重复产生副作用</td><td><span class="tag risk">Integration</span></td></tr>
+</tbody></table>
+
+<h3>10.2 GitToolPack</h3>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>级别</th></tr></thead><tbody>
+<tr><td>HOST-035</td><td>CLI/Portable 共同契约：status/diff/stage/commit/show</td><td>相同仓库状态返回语义一致的路径、状态、Diff 和提交摘要</td><td><span class="tag contract">Contract</span></td></tr>
+<tr><td>HOST-036</td><td>clean/dirty/untracked/staged/branch/rename/binary</td><td>GitStatus 分类准确；不把 ignored/untracked 混淆；用户名与错误不泄漏</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>HOST-037</td><td>Portable 产物由真实 Git 读取</td><td>索引/对象/引用可被常用 Git status/log/show 检查；失败时明确报告不兼容项</td><td><span class="tag risk">E2E</span></td></tr>
+<tr><td>HOST-047</td><td>Git 冲突、detached HEAD、hook 失败</td><td>返回结构化错误；不自动强制覆盖；保留原始输出 Artifact</td><td><span class="tag risk">Fault</span></td></tr>
+<tr><td>HOST-053</td><td>CLI 与 Portable 能力 limitations</td><td>只激活两端共同支持的子集；UI/Prompt 准确说明缺失操作</td><td><span class="tag contract">Parity</span></td></tr>
+</tbody></table>
+
+<h3>10.3 TestEvidence</h3>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>级别</th></tr></thead><tbody>
+<tr><td>HOST-039</td><td>应用测试动作与 TestReport</td><td>发现逻辑入口；命名动作返回 pass/fail/skip、actionId、版本和环境证据</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>HOST-040</td><td>测试失败、动作超时、报告无效</td><td>分别映射为 test_failed/action_timeout/report_invalid；从不进入 completed</td><td><span class="tag risk">E2E</span></td></tr>
+<tr><td>HOST-041</td><td>未发现测试入口</td><td>返回 structured not_found；允许请求用户或执行确定的替代验证，但不伪造 TestReport</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>HOST-042</td><td>测试环境需要网络或 Secret</td><td>能力缺失时提前拒绝并保留原因，不产生“测试通过”的空报告</td><td><span class="tag security">Security</span></td></tr>
+<tr><td>HOST-043</td><td>Patch 后运行测试再修复</td><td>Verifier 关联 patch version、CommandResult、TestReport 和最终 Diff，形成完整证据链</td><td><span class="tag e2e">E2E</span></td></tr>
+</tbody></table>
+</section>
+
+<section id="security">
+<h2>11. 安全、故障与恢复</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>级别</th></tr></thead><tbody>
+<tr><td>HOST-048</td><td>网络默认拒绝、redirect、DNS rebinding</td><td>请求和重定向目标均检查 allowlist/解析 IP；越界失败可诊断；取消生效</td><td><span class="tag security">Security</span></td></tr>
+<tr><td>HOST-049</td><td>Secret 出现在命令、stderr、错误、Session、Trace、Artifact</td><td>只以 lease 引用传递；持久化和投影前脱敏；测试断言任何记录中无明文</td><td><span class="tag security">Security</span></td></tr>
+<tr><td>HOST-050</td><td>不存在隐式通用命令回退</td><td>未注册动作时不能退化成 exec/Python/Bash；宿主显式注册的通用命令动作必须单独标注高风险</td><td><span class="tag security">Security</span></td></tr>
+<tr><td>HOST-051</td><td>取消在所有资源上的传播</td><td>模型、execution、PTY、network、Git、tests、subagent 均收到取消；重复取消幂等</td><td><span class="tag risk">Fault</span></td></tr>
+<tr><td>HOST-054</td><td>磁盘满、权限变化、文件被删除</td><td>操作明确失败，Patch 不部分提交；可恢复到重新读取/重试状态</td><td><span class="tag risk">Fault</span></td></tr>
+<tr><td>HOST-055</td><td>宿主断连与重连</td><td>未确认结果标记 unknown，不自动重放危险请求；重新 Probe 后工具集重新组合</td><td><span class="tag risk">State</span></td></tr>
+<tr><td>HOST-056</td><td>进程/worker 崩溃恢复</td><td>Session 最后确认状态保留；孤儿进程被清理或显式可追踪</td><td><span class="tag risk">Fault</span></td></tr>
+<tr><td>HOST-057</td><td>审批范围变化</td><td>基于路径、命令、网络、写入范围重新判断；旧批准不扩大到新能力或新 generation</td><td><span class="tag security">Security</span></td></tr>
+</tbody></table>
+<div class="danger rule">安全用例必须在真实 Adapter 上至少执行一次。只测一个 Boolean policy 函数不足以证明 symlink/realpath、重定向、环境继承、进程树或 Secret 持久化边界正确。</div>
+</section>
+
+<section id="transfer-boundary">
+<h2>11.1 Host 与 Workspace Capsule 的边界测试</h2>
+<p>Capsule 语义测试见 <a href="workspace-portability-testing-v1.html#trace">REQ-WORKSPACE-001 测试方案</a>。本节只验证 Host 是否提供正确的窄原语。</p>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>级别</th></tr></thead><tbody>
+<tr><td>HOST-067</td><td>FileSystem content hash 与一致读取</td><td>导出 barrier 内同一路径的 hash 与字节稳定；读取过程中无静默混合版本</td><td><span class="tag contract">Contract</span></td></tr>
+<tr><td>HOST-068</td><td>symlink/lstat 与越界 target</td><td>可枚举 symlink metadata；不会隐式跟随或静默跳过；越界明确拒绝</td><td><span class="tag security">Security</span></td></tr>
+<tr><td>HOST-069</td><td>case/Unicode path policy probe</td><td>Adapter 报告大小写、Unicode 和 WorkspacePath 可表示性限制</td><td><span class="tag contract">Contract</span></td></tr>
+<tr><td>HOST-070</td><td>Execution 的 WorkspacePath cwd</td><td><code>cwd=packages/app</code> 映射到 root 内；绝对路径、盘符和逃逸被拒绝</td><td><span class="tag security">Security</span></td></tr>
+<tr><td>HOST-071</td><td>env allowlist 与 environment fingerprint</td><td>不会继承父进程全部秘密；同一环境稳定生成指纹，工具链变化后指纹改变</td><td><span class="tag risk">Integration</span></td></tr>
+<tr><td>HOST-072</td><td>Host transport 仅处理不透明 Capsule bytes</td><td>可流式导入/导出但不解析或改写 bytes；中断产生传输错误</td><td><span class="tag contract">Contract</span></td></tr>
+<tr><td>HOST-073</td><td>Host 不按 platform 暴露 Core 分支</td><td>Core/Prompt/ToolPack 不读取 descriptor.platform；只消费 capability/limitation</td><td><span class="tag security">Boundary</span></td></tr>
+</tbody></table>
+<div class="warn rule">Host 测试不能替代 Capsule round-trip。反过来，Memory Capsule 测试也不能证明 Node、Sandbox 或 Chrome 的传输、路径和执行语义正确。</div>
+</section>
+
+<section id="parity">
+<h2>12. 跨宿主语义一致性与差异</h2>
+<table><thead><tr><th>ID</th><th>对比对象</th><th>必须相同</th><th>允许不同</th></tr></thead><tbody>
+<tr><td>HOST-058</td><td>TUI Local ↔ Sandbox</td><td>Tool 名、Schema、Patch 协议、Git/Test 结果对象、错误码</td><td>底层 IO、耗时、可用子能力和诊断</td></tr>
+<tr><td>HOST-059</td><td>Portable ↔ Local</td><td>Patch/Search/虚拟回归行为与能力降级规则</td><td>真实命令、PTY、网络和持久化实现</td></tr>
+<tr><td>HOST-060</td><td>Chrome ↔ 其他宿主</td><td>Capability Report 解释和 ToolPack 选择规则</td><td>Browser ToolPack、可用工具数量、UI 呈现</td></tr>
+<tr><td>HOST-061</td><td>同一输入的跨宿主 Golden</td><td>规范化后的 CapabilityReport 与 ToolPackSet 快照一致</td><td>时间、路径、版本号等显式字段</td></tr>
+</tbody></table>
+<p>Parity 不是“所有宿主都支持全部工具”，而是“相同的 Capability Graph 在所有宿主产生相同决策；有差异时必须可解释”。</p>
+</section>
+
+<section id="state">
+<h2>13. 状态空间与属性测试</h2>
+<pre>有界模型：
+  hosts ≤ 2
+  capability sets ≤ 3: filesystem | execution | git/tests
+  probe outcomes = success | timeout | throw | late-success
+  connection states = connected | disconnected | reconnecting
+  operations = write | execute | test | cancel | reconnect
+  event sequences ≤ 8
+
+不变量：
+  available(capability) ⇒ 对应 Port 探测成功
+  tools ⊆ dependencies(available capabilities)
+  completed(write task) ⇒ has ExecutionResult/TestReport or explicit manual verification
+  cancelled(request) ⇒ no owned process/pty/network remains
+  reconnect ⇒ only latest generation capability report is active
+  stale probe cannot downgrade/upgrade a newer generation</pre>
+<div class="grid">
+<div class="card"><h3>Property Tests</h3><ul><li>随机能力组合产生合法 ToolPackSet。</li><li>取消顺序随机时最终资源状态幂等。</li><li>任意 Probe 事件交错不产生假 available。</li><li>Adapter 的路径函数在随机相对路径下不越界。</li></ul></div>
+<div class="card"><h3>Mutation Targets</h3><ul><li>移除 probe 调用。</li><li>把 execution 缺失当 optional 成功。</li><li>对称链接检查使用 lexical path。</li><li>取消只杀父进程。</li><li>无 TestReport 时放行 completed。</li></ul></div>
+</div>
+<div class="warn rule">TLA+ 或等价有界模型用于能力和 generation 状态机，不强行证明 OS/Chrome 行为。模型发现的每个反例必须转为确定性 Vitest 回归。</div>
+</section>
+
+<section id="performance">
+<h2>14. 性能与耐久性</h2>
+<table><thead><tr><th>ID</th><th>压力</th><th>观测</th><th>目标</th></tr></thead><tbody>
+<tr><td>HOST-062</td><td>启动 Probe 正常宿主</td><td>probe duration、工具组装时间</td><td>目标 p95 ≤ 2s；超时必须有界并可诊断（实现后校准）</td></tr>
+<tr><td>HOST-063</td><td>10k 文件搜索与分页读取</td><td>latency、内存、取消时间</td><td>内存有界；取消后 IO 及时停止；结果稳定</td></tr>
+<tr><td>HOST-064</td><td>1MB/100MB 输出与 Artifact</td><td>摘要大小、磁盘、读取延迟</td><td>模型上下文严格有界；完整证据可定位</td></tr>
+<tr><td>HOST-065</td><td>1 小时重复 Probe/执行/断连</td><td>FD、timer、进程、内存、日志增长</td><td>无线性泄漏；失败请求全部有终态</td></tr>
+<tr><td>HOST-066</td><td>8 小时 Soak</td><td>同上 + Session 恢复</td><td>无孤儿资源、无假完成、恢复稳定</td></tr>
+</tbody></table>
+<p>性能数值是首轮目标，实施 M1 后应以 macOS 实机基准固化门禁，不能只记录一次人工结果。</p>
+</section>
+
+<section id="gates">
+<h2>15. 测试证据与发布门禁</h2>
+<div class="grid3">
+<div class="card"><div class="metric">0</div><h3>能力假可用</h3><p>声明、Probe、工具注册和调用结果之间不得出现假成功。</p></div>
+<div class="card"><div class="metric">0</div><h3>越界与泄漏</h3><p>路径逃逸、Secret 明文、外来 env 和越权网络请求。</p></div>
+<div class="card"><div class="metric">0</div><h3>孤儿资源</h3><p>取消、超时、关闭、崩溃后仍存活的进程/PTY/timer/FD。</p></div>
+</div>
+<table><thead><tr><th>门禁</th><th>命令/证据</th><th>阻塞条件</th></tr></thead><tbody>
+<tr><td>静态与确定性</td><td><code>npm run requirements:check</code>、<code>npm run typecheck</code>、<code>npm run typecheck:tests</code>、<code>npm run check:boundaries</code></td><td>任一 Error；设计/测试链接失效</td></tr>
+<tr><td>回归</td><td><code>npm test</code></td><td>任一 P0 失败；跳过无理由</td></tr>
+<tr><td>Port 契约</td><td>新增 Host Contract suite，输出 Adapter × Contract 矩阵</td><td>任一声明支持 Adapter 未通过共同语义</td></tr>
+<tr><td>真实宿主 E2E</td><td><code>npm run test:e2e</code>，增加 Portable Git/Application Action suite</td><td>FS/Action/Portable Git/TestReport 任一闭环失败</td></tr>
+<tr><td>浏览器兼容</td><td>真实 Chrome Extension E2E</td><td>Chrome 误报 Execution、Core 读取 Chrome API 或 UI 漂移</td></tr>
+<tr><td>安全故障</td><td>路径、动作取消、网络、Secret、断连故障套件</td><td>任一安全用例失败</td></tr>
+<tr><td>真实模型</td><td><code>npm run test:live</code>，使用固定小仓库任务</td><td>工具协议无法完成；模型被允许伪造测试通过</td></tr>
+<tr><td>耐久性</td><td><code>npm run test:soak</code>、大工作区 profile</td><td>资源泄漏、假完成、未终止请求</td></tr>
+<tr><td>构建</td><td><code>npm run build</code></td><td>任一入口构建失败</td></tr>
+</tbody></table>
+<h3>测试证据格式</h3>
+<pre>{
+  "requirement": "REQ-HOST-001",
+  "commit": "&lt;sha&gt;",
+  "profile": "local-coding | portable | sandbox | chrome",
+  "capabilityReport": "artifact://...",
+  "toolPackSet": ["patch", "search", "git", "test"],
+  "commands": [{ "name": "npm run check", "exitCode": 0 }],
+  "e2e": ["HOST-024", "HOST-025", "HOST-039", "HOST-043"],
+  "security": ["HOST-004", "HOST-031", "HOST-048", "HOST-049"],
+  "result": "passed"
+}</pre>
+<div class="rule">提交信息中的 <code>Test-Evidence</code> 必须是实际执行过的命令或可定位 Artifact；不能用“tests pass”文字替代。</div>
+</section>
+
+<section id="phases">
+<h2>16. 分阶段验收</h2>
+<div class="phase"><div class="phase-no">M1</div><div><h3>能力模型与端口骨架</h3></div></div>
+<ul><li>通过：HOST-001..016、HOST-018..022、HOST-044、HOST-050、HOST-055、HOST-058..061、HOST-067..073。</li><li>证据：Port Contract 矩阵、Capability 状态机属性测试、Memory Adapter 与迁移边界全通过。</li><li>不得进入 M2：字段存在即 available、Probe 超时未处理、Core 出现客户端分支、Host transport 解释 Capsule。</li></ul>
+<div class="phase"><div class="phase-no">M2</div><div><h3>TUI Local Coding</h3></div></div>
+<ul><li>通过：HOST-024、025、029..034、037..043、054、056、062..064。</li><li>证据：真实临时项目、应用注册的测试/构建动作、Patch→Test→Repair 闭环和取消核对。</li><li>不得进入 M3：缺少应用动作却暴露通用 exec、无 TestReport 仍能 completed、Action 绕过授权 context。</li></ul>
+<div class="phase"><div class="phase-no">M3</div><div><h3>ToolPack 统一</h3></div></div>
+<ul><li>通过：HOST-017、019、023、026..028、035..046、053、057..061。</li><li>证据：TUI/Sandbox/Chrome 的 CapabilityReport、ToolPackSet Golden 与语义一致结果。</li><li>不得进入 M4：同工具出现多套 Parser/Result 类型或 Chrome/Node 特例。</li></ul>
+<div class="phase"><div class="phase-no">M4</div><div><h3>PTY、Secret、Network</h3></div></div>
+<ul><li>通过：HOST-008、016、028、042、048..052、057、065..066。</li><li>证据：PTY 生命周期、网络 redirect/DNS 边界、Secret 不落盘、长时资源曲线。</li><li>不得进入 M5：Secret 明文进入记录、PTY 关闭泄漏、网络默认放行。</li></ul>
+<div class="phase"><div class="phase-no">M5</div><div><h3>跨端与未来客户端</h3></div></div>
+<ul><li>通过：HOST-022、023、027、028、046、052、058..061，以及全部 P0 回归。</li><li>证据：跨客户端 Profile 一致性、Remote/Headless 只读边界、完整发布报告。</li><li>发布条件：<code>REQ-HOST-001</code> 为 verified，<code>npm run check</code>、E2E、安全、真实 Git/Test 与构建均有证据。</li></ul>
+</section>
+
+<section id="acceptance">
+<h2>17. 完成定义与待确认</h2>
+<table><thead><tr><th>维度</th><th>可观测完成标准</th></tr></thead><tbody>
+<tr><td>能力真实性</td><td>所有可用能力都有实际 Probe 证据；故障后正确降级。</td></tr>
+<tr><td>工具组合</td><td>ToolRegistry、Prompt、UI 与 Capability Graph 一致。</td></tr>
+<tr><td>应用能力</td><td>宿主注册的具体动作可发现、可取消并获得结构化证据；通用 exec 不是默认能力。</td></tr>
+<tr><td>可移植性</td><td>Portable/Browser/Sandbox 通过相同契约，差异有显式 limitations。</td></tr>
+<tr><td>安全性</td><td>路径、命令、环境、网络与 Secret 测试全部通过。</td></tr>
+<tr><td>可信完成</td><td>没有执行/测试证据时无法声称任务运行成功。</td></tr>
+<tr><td>恢复</td><td>断连、重连、取消、崩溃后状态和资源可收敛。</td></tr>
+<tr><td>回归</td><td>现有 <code>npm run check</code> 与真实 E2E 全通过。</td></tr>
+</tbody></table>
+<div class="grid">
+<div class="card"><h3>确认 01</h3><p>是否接受窄端口 + ToolPack 分层，Host 不包含 Patch/Git/Test 业务语义？</p></div>
+<div class="card"><h3>确认 02</h3><p>TUI 是否默认 Local Coding，Portable/Virtual 仅作为显式 fallback？</p></div>
+<div class="card"><h3>确认 03</h3><p>PortableGitBackend 是否为默认 Git，CLI 只作为可选高级/互操作后端？</p></div>
+<div class="card"><h3>确认 04</h3><p>Execution 是否以 command+args 为主，raw shell 单列高风险能力？</p></div>
+</div>
+<p><a href="host-capability-architecture-v1.html">← 返回宿主能力与 Coding Workspace 设计</a></p>
+<p><a href="workspace-portability-testing-v1.html">查看 REQ-WORKSPACE-001 测试方案 →</a></p>
+<p class="foot">需求：REQ-HOST-001 · 目标版本：0.3.0 · 状态：Proposed / Review · 测试设计版本：1.0 · 本文未声称功能已实现</p>
+</section>
+</div>
+</body>
+</html>

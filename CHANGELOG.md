@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Planned
+
+- `REQ-HOST-001`: proposed host capability ports, runtime probes, composable
+  workspace tool packs, profile-driven degradation and matching test design.
+- `REQ-WORKSPACE-001`: proposed portable workspace capsule for cross-host
+  session, project, repository, artifact, evidence and environment continuity.
+- `REQ-HOST-001`: clarify WorkspacePath, transport, environment fingerprint and
+  ephemeral-resource boundaries required by the workspace capsule.
+- `REQ-HOST-001`: replace the generic execution baseline with declarative,
+  probeable application Action Providers; test/build/browser capabilities are
+  registered only by the embedding application.
+- `REQ-GIT-001`: proposed a default pure-TypeScript PortableGitBackend with a
+  common local Git subset and Git-compatible objects, refs, HEAD and index;
+  the CLI backend remains optional.
+
 ## 0.2.1
 
 ### Documentation

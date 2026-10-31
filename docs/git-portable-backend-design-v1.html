@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tinyai PortableGitBackend 设计 V1</title>
+<style>
+:root{--bg:#f4f5f7;--paper:#fff;--text:#191a1e;--muted:#6f7179;--line:#e2e3e8;--accent:#9a4d00;--accent-soft:#fff0e3;--ok:#137a4b;--ok-soft:#eef8f2;--warn:#986100;--warn-soft:#fff8e8;--danger:#b42318;--danger-soft:#fff1f0;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.72 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1240px;margin:auto;padding:36px 24px 100px}
+.hero{padding:40px;border-radius:27px;background:radial-gradient(circle at 88% 8%,#ffd59a 0,transparent 24%),linear-gradient(135deg,#19140f,#412716 58%,#874a20);color:#fff}.hero small{letter-spacing:.12em;opacity:.72}.hero h1{font-size:38px;line-height:1.18;margin:12px 0}.hero p{max-width:980px;margin:0;color:#fff2df}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}
+nav{position:sticky;top:0;z-index:5;display:flex;gap:14px;overflow:auto;margin:18px 0;padding:10px 14px;border:1px solid var(--line);border-radius:13px;background:#f4f5f7ed;backdrop-filter:blur(12px)}nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}
+section{margin:18px 0;padding:26px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:23px;margin:0 0 14px}h3{font-size:16px;margin:22px 0 8px}p{color:#44454c}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafafa}.card h3{margin:0 0 8px}.card p{margin:0}.card ul{margin:8px 0 0;padding-left:18px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafafa;color:var(--muted);font-weight:600}
+code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{padding:17px;overflow:auto;border-radius:12px;background:#17130f;color:#fff3e5;font:12px/1.62 var(--mono);border:1px solid #463225}
+.rule{padding:13px 15px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#fff3e8}.warn{border-color:var(--warn);background:var(--warn-soft)}.danger{border-color:var(--danger);background:var(--danger-soft)}
+.pill,.tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;white-space:nowrap}.pill{background:var(--accent-soft);color:var(--accent)}.tag{background:var(--ok-soft);color:var(--ok)}.tag.p0{background:var(--danger-soft);color:var(--danger)}.tag.p1{background:var(--warn-soft);color:var(--warn)}.tag.none{background:#fff0ef;color:var(--danger)}
+.phase{display:flex;align-items:center;gap:11px;margin:18px 0 8px;padding:10px 12px;border:1px solid var(--line);border-radius:11px;background:#fafafa}.phase-no{display:grid;place-items:center;min-width:42px;height:28px;padding:0 8px;border-radius:7px;background:var(--accent-soft);color:var(--accent);font:700 12px/1 var(--mono)}.foot{color:var(--muted);font-size:12px}
+@media(max-width:850px){.grid3{grid-template-columns:1fr}}@media(max-width:700px){.grid{grid-template-columns:1fr}.hero h1{font-size:28px}.wrap{padding:20px 12px 70px}section{padding:20px}table{display:block;max-width:100%;overflow-x:auto}pre{max-width:100%}}
+@media print{nav{display:none}body{background:#fff}.hero{border-radius:0}.wrap{max-width:none;padding:0}section{break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+<small>REQ-GIT-001 / PORTABLE GIT / DESIGN V1</small>
+<h1>PortableGitBackend<br>纯 TS 常用 Git 语义与格式兼容</h1>
+<p>PortableGitBackend 是 tinyai 的默认 Git 后端，建立在 WorkspaceFileSystem 之上，不要求宿主安装 git。它实现 Agent 必需的常用本地 Git 子集，并读写 Git-compatible objects、refs、index 和 HEAD；CLI 后端仅作为可选加速与高级兼容性校验。</p>
+<div class="chips"><span class="chip">Target 0.3.0</span><span class="chip">Portable First</span><span class="chip">Git-compatible Format</span><span class="chip">No Native Dependency</span><span class="chip">Status: Proposed / Review</span></div>
+</header>
+<nav><a href="#goal">目标</a><a href="#scope">范围</a><a href="#requirements">需求</a><a href="#architecture">架构</a><a href="#objects">对象</a><a href="#format">文件格式</a><a href="#commands">命令</a><a href="#status">Status/Index</a><a href="#safety">安全与并发</a><a href="#cli">CLI定位</a><a href="#capsule">Workspace迁移</a><a href="#compat">兼容策略</a><a href="#phases">阶段</a><a href="#acceptance">验收</a></nav>
+
+<section id="goal">
+<h2>1. 目标与定位</h2>
+<div class="grid">
+<div class="card"><h3>默认后端</h3><ul><li>Browser、iOS、Node、Sandbox 都默认使用 PortableGitBackend。</li><li>Agent 的工具 Schema 和行为不随宿主改变。</li><li>宿主没有 git binary 是正常状态，不是降级错误。</li></ul></div>
+<div class="card"><h3>CLI 定位</h3><ul><li>可选后端，不是运行前提。</li><li>用于高级命令、真实 Git 兼容性校验和性能对照。</li><li>CLI 不可用时不得影响常用本地 Git 子集。</li></ul></div>
+</div>
+<div class="rule">PortableGitBackend 不追求实现全部 Git，而是让 Agent 完成“查看状态、比较、暂存、提交、查看历史、切分支”等常用本地工作，并保证生成结果能被标准 Git 读取。</div>
+</section>
+
+<section id="scope">
+<h2>2. 范围与边界</h2>
+<table><thead><tr><th>核心支持</th><th>明确不支持或后续支持</th></tr></thead><tbody>
+<tr><td>SHA-1 repository</td><td>SHA-256 object format v1 不支持，必须显式拒绝</td></tr>
+<tr><td>blob/tree/commit/tag objects</td><td>签名校验、签名生成不进入 v1</td></tr>
+<tr><td>loose objects 读写</td><td>packfile 写回不要求；读取常见 pack v2</td></tr>
+<tr><td>HEAD、loose refs、packed-refs</td><td>reflog 不作为权威状态；可保留但 v1 不依赖</td></tr>
+<tr><td>Git Index v2 写入，v2-v4 读取</td><td>Index 扩展不认识的必须拒绝或降级，不静默丢 flags</td></tr>
+<tr><td>status/add/commit/log/show/diff/branch/checkout/rev-parse</td><td>merge/rebase/cherry-pick/bisect/worktree</td></tr>
+<tr><td>单仓工作区</td><td>linked worktree、嵌套仓库、submodule 递归</td></tr>
+<tr><td>普通 worktree、untracked/staged/unstaged</td><td>hooks、smudge/clean filters、自动 LFS 下载</td></tr>
+<tr><td>text/binary、rename、mode hint</td><td>ACL/owner/xattr 跨平台语义</td></tr>
+</tbody></table>
+<div class="warn rule">不支持的能力必须返回稳定的 <code>GIT_UNSUPPORTED</code>/limitations，不允许偷偷调用 CLI、拒绝后仍部分修改 index，或返回与真实状态不一致的成功。</div>
+</section>
+
+<section id="requirements">
+<h2>3. 功能需求</h2>
+<table><thead><tr><th>ID</th><th>级别</th><th>需求</th><th>验收</th></tr></thead><tbody>
+<tr><td><code>FR-GIT-001</code></td><td><span class="tag p0">P0</span></td><td>统一 GitBackend</td><td>Portable/CLI 共享稳定的领域接口，Agent 不感知后端</td></tr>
+<tr><td><code>FR-GIT-002</code></td><td><span class="tag p0">P0</span></td><td>Git-compatible repository format</td><td>对象、refs、HEAD、index 可被标准 Git 读取，Portable 可读取常见现有仓库</td></tr>
+<tr><td><code>FR-GIT-003</code></td><td><span class="tag p0">P0</span></td><td>本地常用命令子集</td><td>init/status/add/commit/log/show/diff/branch/checkout/rev-parse 行为稳定</td></tr>
+<tr><td><code>FR-GIT-004</code></td><td><span class="tag p0">P0</span></td><td>Index 与工作树语义</td><td>staged/unstaged/untracked/ignored、binary/rename 状态准确</td></tr>
+<tr><td><code>FR-GIT-005</code></td><td><span class="tag p0">P0</span></td><td>Portable 默认与 CLI 可选</td><td>没有 git binary 时完整支持 common subset；CLI 不改变工具协议</td></tr>
+<tr><td><code>FR-GIT-006</code></td><td><span class="tag p0">P0</span></td><td>无宿主依赖</td><td>Core 不引用 <code>node:*</code>、<code>child_process</code>、原生扩展或 git binary</td></tr>
+<tr><td><code>FR-GIT-007</code></td><td><span class="tag p0">P0</span></td><td>WorkspacePath</td><td>路径、refs、cwd 和结果不泄漏宿主绝对路径/盘符</td></tr>
+<tr><td><code>FR-GIT-008</code></td><td><span class="tag p0">P0</span></td><td>Repository 迁移</td><td>objects/index/refs/HEAD 可进入 Capsule 并在新宿主恢复</td></tr>
+<tr><td><code>FR-GIT-009</code></td><td><span class="tag p0">P0</span></td><td>安全</td><td>不执行 hooks/filter/远端凭据；pack/index/object 非法时 fail closed</td></tr>
+<tr><td><code>FR-GIT-010</code></td><td><span class="tag p1">P1</span></td><td>可诊断 limitations</td><td>不支持的对象格式、index 扩展、pack delta、submodule/LFS 明确报告</td></tr>
+</tbody></table>
+</section>
+
+<section id="architecture">
+<h2>4. 架构</h2>
+<pre>GitToolPack
+  |
+  +-- status / diff / log / show / add / commit / branch / checkout
+  |
+GitBackend
+  +-- PortableGitBackend      default
+  |    +-- GitObjectStore
+  |    +-- GitRefStore
+  |    +-- GitIndex
+  |    +-- GitIgnoreMatcher
+  |    +-- GitDiffEngine
+  +-- CliGitBackend           optional
+       +-- host application action / process adapter
+  |
+WorkspaceFileSystem
+  +-- .git/objects | refs | HEAD | index</pre>
+<table><thead><tr><th>模块</th><th>职责</th><th>禁止</th></tr></thead><tbody>
+<tr><td>GitToolPack</td><td>Tool Schema、风险、结果和错误</td><td>解析底层对象格式</td></tr>
+<tr><td>PortableGitBackend</td><td>常用命令语义</td><td>调用 host git 或执行 hooks</td></tr>
+<tr><td>ObjectStore</td><td>object encoding/decoding、hash 校验、loose/pack 读取</td><td>修改 working tree</td></tr>
+<tr><td>RefStore</td><td>HEAD、refs、packed-refs</td><td>写 Session 状态</td></tr>
+<tr><td>GitIndex</td><td>staged entries、排序、路径和 mode</td><td>使用 mtime 代替内容 hash</td></tr>
+<tr><td>DiffEngine</td><td>tree/index/worktree 比较</td><td>自动改变换行或二进制</td></tr>
+<tr><td>CliGitBackend</td><td>可选高级后端/Conformance oracle</td><td>成为 Portable 的必要依赖</td></tr>
+</tbody></table>
+</section>
+
+<section id="objects">
+<h2>5. 领域对象</h2>
+<pre>interface GitBackend {
+  init(ctx, options?): Promise&lt;GitRepositoryInfo&gt;;
+  status(ctx, options?): Promise&lt;GitStatus&gt;;
+  add(ctx, paths, options?): Promise&lt;void&gt;;
+  commit(ctx, input): Promise&lt;GitCommitResult&gt;;
+  log(ctx, options?): Promise&lt;GitCommitInfo[]&gt;;
+  show(ctx, rev): Promise&lt;GitShowResult&gt;;
+  diff(ctx, spec): Promise&lt;GitDiff&gt;;
+  branch(ctx, input?): Promise&lt;GitBranchResult&gt;;
+  checkout(ctx, input): Promise&lt;GitCheckoutResult&gt;;
+  revParse(ctx, rev): Promise&lt;GitObjectId&gt;;
+}</pre>
+<table><thead><tr><th>对象</th><th>关键字段</th></tr></thead><tbody>
+<tr><td><code>GitObjectId</code></td><td>algorithm=sha1、40 字符 hex；不接受任意长度</td></tr>
+<tr><td><code>GitTreeEntry</code></td><td>mode、name、oid；只允许受支持文件/symlink/gitlink mode</td></tr>
+<tr><td><code>GitCommitInfo</code></td><td>oid、tree、parents、author、committer、message</td></tr>
+<tr><td><code>GitStatus</code></td><td>HEAD/branch、staged、unstaged、untracked、ignored、conflicted</td></tr>
+<tr><td><code>GitIndexEntry</code></td><td>path、oid、mode、stage、flags、stat hint</td></tr>
+<tr><td><code>GitDiff</code></td><td>base/head、files、binary、rename、truncated、patch artifact ref</td></tr>
+</tbody></table>
+</section>
+
+<section id="format">
+<h2>6. Git-compatible 文件格式</h2>
+<pre>.git/
+  HEAD
+  refs/heads/*
+  refs/tags/*
+  packed-refs
+  objects/ab/cdef...
+  objects/pack/*.idx
+  objects/pack/*.pack
+  index
+  config.sanitized
+  .gitignore
+  .gitattributes</pre>
+<h3>Object</h3>
+<ul><li>对象头为 <code>&lt;type&gt; &lt;size&gt;\0&lt;content&gt;</code>，SHA-1 OID，loose object 使用 zlib。</li><li>读取 pack v2 常见 object 与 OFS_DELTA/REF_DELTA；写入 loose objects，标准 Git 可直接读取。</li><li>对象解码后必须重新计算 OID；不允许自定义对象格式冒充 Git。</li></ul>
+<h3>Refs 与 Index</h3>
+<ul><li>支持 HEAD、loose refs、packed-refs；ref 使用 staging + rename 写入。</li><li>Index 读取 v2/v3/v4，写入 canonical v2；保持 path 字节、mode、OID、stage 与 flags。</li><li>stat cache 是可刷新 hint，正确性以 OID 和 worktree content hash 为准。</li></ul>
+<div class="warn rule">Git-compatible 不等于复用宿主 Git。Portable 必须自己解析和写入这些格式；CLI 只用于外部互操作验证。</div>
+</section>
+
+<section id="commands">
+<h2>7. 命令语义</h2>
+<table><thead><tr><th>命令</th><th>v1 行为</th><th>关键边界</th></tr></thead><tbody>
+<tr><td><code>init</code></td><td>创建 HEAD、objects、refs；默认 branch 可配置</td><td>已有 repo 不覆盖；不执行 template/hooks</td></tr>
+<tr><td><code>status</code></td><td>比较 HEAD tree、Index、worktree 和 ignore</td><td>区分 staged/unstaged/untracked/ignored</td></tr>
+<tr><td><code>add</code></td><td>写 blob、tree 所需 objects，更新 index</td><td>不自动 resolve conflict；路径必须 WorkspacePath</td></tr>
+<tr><td><code>commit</code></td><td>根据 index 生成 tree/commit，移动 HEAD/ref</td><td>message 必填；空 commit 默认拒绝；不执行 hooks</td></tr>
+<tr><td><code>log</code></td><td>从 HEAD/ref 遍历 parents；支持 max count</td><td>不依赖 reflog；不可达历史不伪造</td></tr>
+<tr><td><code>show</code></td><td>commit/tree/blob/tag 的结构化内容</td><td>大内容 Artifact 化</td></tr>
+<tr><td><code>diff</code></td><td>worktree/index/HEAD/commit 比较</td><td>二进制、rename、截断显式</td></tr>
+<tr><td><code>branch</code></td><td>list/create/delete safe branch</td><td>当前分支删除拒绝</td></tr>
+<tr><td><code>checkout</code></td><td>切 branch/commit，更新 worktree/index</td><td>有覆盖风险时拒绝；不做 merge</td></tr>
+<tr><td><code>rev-parse</code></td><td>HEAD、branch、短 OID、tag 解析</td><td>歧义明确失败</td></tr>
+</tbody></table>
+</section>
+
+<section id="status">
+<h2>8. Status、Index 与 Ignore</h2>
+<pre>HEAD tree
+  | compare oid
+  v
+Git Index -- compare oid/content hash --> Working Tree
+  |                                           |
+  +-- staged                                  +-- unstaged
+  +-- untracked/ignored via .gitignore        +-- deleted
+
+Result:
+  staged[] | unstaged[] | untracked[] | ignored[] | conflicted[]</pre>
+<ul><li>不依赖 Index stat cache 判定内容变化；必要时读取文件并计算 blob OID。</li><li>忽略规则支持常见 `.gitignore` 语法和目录规则；无法解析的 pattern 明确提示。</li><li>文件换行保持字节；Portable 不自动应用 <code>core.autocrlf</code>、smudge/clean filter。</li><li>rename 默认通过 diff 检测，不改变工作树文件。</li></ul>
+</section>
+
+<section id="safety">
+<h2>9. 安全、并发与原子性</h2>
+<div class="grid">
+<div class="card"><h3>锁</h3><p>Index/ref 写入使用 Workspace 内 lock + staging + rename；超时和崩溃后可清理。</p></div>
+<div class="card"><h3>Hooks</h3><p>不执行任何 hook、filter、external diff 或 textconv，避免 Capsule 成为代码执行入口。</p></div>
+<div class="card"><h3>对象校验</h3><p>解码后重新计算 OID，拒绝 hash 不符、循环 delta、越界长度和过大对象。</p></div>
+<div class="card"><h3>Checkout</h3><p>覆盖未保存修改时拒绝；先完成可验证 staging，再原子替换 worktree/index。</p></div>
+<div class="card"><h3>路径</h3><p>Tree/index path 必须是 WorkspacePath；拒绝绝对路径、盘符、NUL、重复规范化路径。</p></div>
+<div class="card"><h3>凭据</h3><p>v1 不实现 remote push/pull；config 中 URL 凭据必须移除或拒绝导入。</p></div>
+</div>
+</section>
+
+<section id="cli">
+<h2>10. CLI 后端定位</h2>
+<table><thead><tr><th>场景</th><th>Portable</th><th>CLI</th></tr></thead><tbody>
+<tr><td>Browser/iOS</td><td>默认且唯一</td><td>不可用，不影响 common subset</td></tr>
+<tr><td>Node/Sandbox</td><td>默认</td><td>应用显式注册后可用</td></tr>
+<tr><td>Conformance</td><td>被测实现</td><td>参考 oracle</td></tr>
+<tr><td>高级命令</td><td>返回 unsupported</td><td>可选注册独立工具</td></tr>
+<tr><td>仓库修复</td><td>常用操作</td><td>必要时用于 fsck/fix</td></tr>
+</tbody></table>
+<p>不允许 CliGitBackend 出现在 Agent Prompt 中改变同一工具语义。后端选择属于 Runtime 配置和能力报告，模型继续调用 <code>git_status</code> 等统一工具。</p>
+</section>
+
+<section id="capsule">
+<h2>11. Workspace Capsule 集成</h2>
+<p>Repository 分区保存 Git-compatible 核心状态，而不是只保存现有 <code>SnapshotVcs</code> revision。</p>
+<pre>repository/
+  manifest.json
+  HEAD
+  refs/
+  packed-refs?
+  objects/
+  index
+  config.sanitized.json
+  limitations.json</pre>
+<table><thead><tr><th>导出</th><th>导入</th></tr></thead><tbody>
+<tr><td>停止 Git 操作，等待 lock 退出，flush 工作树</td><td>先校验 objects/index/refs，再进入 staging</td></tr>
+<tr><td>保存 worktree 字节、Index、refs/HEAD、loose/pack objects</td><td>恢复 repository，直接写 worktree 字节，不运行 checkout filter</td></tr>
+<tr><td>排除 hooks、不可达临时对象和敏感 config</td><td>执行 Portable fsck/status，Capsule 激活前确认状态</td></tr>
+</tbody></table>
+</section>
+
+<section id="compat">
+<h2>12. 兼容策略</h2>
+<table><thead><tr><th>输入/状态</th><th>行为</th></tr></thead><tbody>
+<tr><td>SHA-1 单根 repo</td><td>完整支持 common subset</td></tr>
+<tr><td>SHA-256 repo</td><td>GIT_OBJECT_FORMAT_UNSUPPORTED</td></tr>
+<tr><td>未知必要 Index extension</td><td>拒绝写入并保留原状</td></tr>
+<tr><td>pack v2 常见 delta</td><td>读取；不支持 delta 类型明确失败</td></tr>
+<tr><td>submodule</td><td>保留 gitlink 和 .gitmodules；不递归下载</td></tr>
+<tr><td>LFS pointer</td><td>保留 pointer；不自动 hydrate，missing object warning</td></tr>
+<tr><td>linked worktree/nested repo</td><td>v1 返回 unsupported，不冒充主仓库</td></tr>
+<tr><td>hooks/filter/textconv</td><td>永不执行</td></tr>
+</tbody></table>
+</section>
+
+<section id="phases">
+<h2>13. 实施阶段</h2>
+<div class="phase"><div class="phase-no">G1</div><div><h3>对象、refs 与只读仓库</h3></div></div>
+<ul><li>SHA-1、loose object、tree/commit/tag 解析、HEAD/refs。</li><li>读取真实 clean repo 并完成 log/show/diff。</li></ul>
+<div class="phase"><div class="phase-no">G2</div><div><h3>Index 与 status</h3></div></div>
+<ul><li>Index v2/v3/v4 读取，canonical v2 写入。</li><li>staged/unstaged/untracked/ignored、binary/rename。</li></ul>
+<div class="phase"><div class="phase-no">G3</div><div><h3>写操作</h3></div></div>
+<ul><li>init/add/commit/branch/checkout/rev-parse。</li><li>真实 Git 验证所有生成文件。</li></ul>
+<div class="phase"><div class="phase-no">G4</div><div><h3>Pack 与 Capsule</h3></div></div>
+<ul><li>pack v2/common delta 读取。</li><li>repository partition 导出导入与 Portable fsck。</li></ul>
+<div class="phase"><div class="phase-no">G5</div><div><h3>CLI parity 与扩展</h3></div></div>
+<ul><li>CLI 对照测试、limitations、未来 SHA-256/高级能力评估。</li></ul>
+</section>
+
+<section id="acceptance">
+<h2>14. 确认项与完成定义</h2>
+<div class="grid">
+<div class="card"><h3>DECISION-01</h3><p>PortableGitBackend 是 Browser/iOS/Node/Sandbox 的默认 Git 后端。</p></div>
+<div class="card"><h3>DECISION-02</h3><p>实现 common local Git 子集，不追求完整远端、merge/rebase/submodule 递归。</p></div>
+<div class="card"><h3>DECISION-03</h3><p>写入 Git-compatible loose objects、refs、HEAD 和 Index v2，真实 Git 可读取。</p></div>
+<div class="card"><h3>DECISION-04</h3><p>CLI 后端仅可选，用于高级操作、性能和兼容性对照。</p></div>
+</div>
+<table><thead><tr><th>维度</th><th>完成标准</th></tr></thead><tbody>
+<tr><td>无宿主依赖</td><td>Browser/iOS JS 环境无 git/node process 仍通过 common subset 测试</td></tr>
+<tr><td>格式</td><td>标准 Git 可读取 Portable 生成的 objects/refs/index</td></tr>
+<tr><td>读取兼容</td><td>Portable 可读取常见真实 clean/dirty Git repo</td></tr>
+<tr><td>语义</td><td>status/diff/log/show/add/commit/branch/checkout 通过 CLI oracle</td></tr>
+<tr><td>安全</td><td>不执行 hooks/filter/远端凭据；恶意 pack/index fail closed</td></tr>
+<tr><td>迁移</td><td>repository partition 在同一 Capsule 中可恢复</td></tr>
+<tr><td>诊断</td><td>所有不支持项有稳定 limitations，不静默降级</td></tr>
+</tbody></table>
+<p><a href="git-portable-backend-testing-v1.html#trace">查看 PortableGitBackend 测试方案 →</a></p>
+<p><a href="workspace-portability-design-v1.html#capsule">查看 Workspace Capsule 集成 →</a></p>
+<p class="foot">需求：REQ-GIT-001 · 依赖：REQ-HOST-001、REQ-WORKSPACE-001 · 目标版本：0.3.0 · 状态：Proposed / Review · 设计版本：1.0 · 本文未声称功能已实现</p>
+</section>
+</div>
+</body>
+</html>

@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tinyai Portable Workspace Capsule 与跨宿主连续性设计 V1</title>
+<style>
+:root{--bg:#f4f5f7;--paper:#fff;--text:#191a1e;--muted:#6f7179;--line:#e2e3e8;--accent:#0c6a63;--accent-soft:#e8f6f3;--ok:#137a4b;--ok-soft:#eef8f2;--warn:#986100;--warn-soft:#fff8e8;--danger:#b42318;--danger-soft:#fff1f0;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.72 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1240px;margin:auto;padding:36px 24px 100px}
+.hero{padding:40px;border-radius:27px;background:radial-gradient(circle at 88% 8%,#b4f0d8 0,transparent 24%),linear-gradient(135deg,#0d1919,#123b3b 58%,#176f65);color:#fff}.hero small{letter-spacing:.12em;opacity:.72}.hero h1{font-size:38px;line-height:1.18;margin:12px 0}.hero p{max-width:980px;margin:0;color:#e8f8f3}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}
+nav{position:sticky;top:0;z-index:5;display:flex;gap:14px;overflow:auto;margin:18px 0;padding:10px 14px;border:1px solid var(--line);border-radius:13px;background:#f4f5f7ed;backdrop-filter:blur(12px)}nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}
+section{margin:18px 0;padding:26px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:23px;margin:0 0 14px}h3{font-size:16px;margin:22px 0 8px}h4{font-size:14px;margin:18px 0 6px}p{color:#44454c}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafafa}.card h3,.card h4{margin:0 0 8px}.card p{margin:0}.card ul{margin:8px 0 0;padding-left:18px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafafa;color:var(--muted);font-weight:600}
+code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{padding:17px;overflow:auto;border-radius:12px;background:#101716;color:#eaf7f3;font:12px/1.62 var(--mono);border:1px solid #29403d}
+.rule{padding:13px 15px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#eef8f6}.warn{border-color:var(--warn);background:var(--warn-soft)}.danger{border-color:var(--danger);background:var(--danger-soft)}
+.pill,.tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;white-space:nowrap}.pill{background:var(--accent-soft);color:var(--accent)}.tag{background:var(--ok-soft);color:var(--ok)}.tag.p0{background:var(--danger-soft);color:var(--danger)}.tag.p1{background:var(--warn-soft);color:var(--warn)}.tag.none{background:#fff0ef;color:var(--danger)}
+.phase{display:flex;align-items:center;gap:11px;margin:18px 0 8px;padding:10px 12px;border:1px solid var(--line);border-radius:11px;background:#fafafa}.phase-no{display:grid;place-items:center;min-width:42px;height:28px;padding:0 8px;border-radius:7px;background:var(--accent-soft);color:var(--accent);font:700 12px/1 var(--mono)}.foot{color:var(--muted);font-size:12px}
+@media(max-width:850px){.grid3{grid-template-columns:1fr}}@media(max-width:700px){.grid{grid-template-columns:1fr}.hero h1{font-size:28px}.wrap{padding:20px 12px 70px}section{padding:20px}table{display:block;max-width:100%;overflow-x:auto}pre{max-width:100%}}
+@media print{nav{display:none}body{background:#fff}.hero{border-radius:0}.wrap{max-width:none;padding:0}section{break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+<small>REQ-WORKSPACE-001 / PORTABLE WORKSPACE CAPSULE / DESIGN V1</small>
+<h1>Portable Workspace Capsule<br>与跨宿主连续性设计</h1>
+<p>把项目内容、Agent 会话、任务、版本历史、Artifact、验证证据和应用动作要求封装为一致、可校验、可迁移的 Workspace Capsule。宿主只负责传输字节和提供命名能力；工作区语义、导入编排和恢复对账始终属于 tinyai。</p>
+<div class="chips"><span class="chip">Target 0.3.0</span><span class="chip">Capsule v1</span><span class="chip">Atomic Import</span><span class="chip">Resume Reconciliation</span><span class="chip">Environment Drift</span><span class="chip">Status: Proposed / Review</span></div>
+</header>
+<nav><a href="#goal">目标</a><a href="#gap">差距</a><a href="#requirements">需求</a><a href="#principles">原则</a><a href="#architecture">架构</a><a href="#capsule">Capsule</a><a href="#state">状态矩阵</a><a href="#paths">路径</a><a href="#objects">对象</a><a href="#export">导出</a><a href="#import">导入</a><a href="#resume">恢复</a><a href="#environment">环境</a><a href="#security">安全</a><a href="#compat">兼容</a><a href="#host-change">Host修正</a><a href="#acceptance">验收</a></nav>
+
+<section id="goal">
+<h2>1. 目标与语义</h2>
+<p>目标是在宿主机 A 导出一个 tinyai Workspace，在宿主机 B 导入后继续同一 Workspace、Session 和 Task 上下文，不丢失已确认文件、对话、任务、版本历史、证据与可恢复 Artifact。</p>
+<div class="grid">
+<div class="card"><h3>“无缝继续”包括</h3><ul><li>相同稳定 Workspace ID 与 Session ID。</li><li>项目字节、Git 状态、会话树和 TaskGraph 完整迁移。</li><li>历史证据可审阅，当前能力和失效证据明确标示。</li><li>导入后 Agent 可立即从最后安全边界继续。</li><li>Host 能力不同会显式降级，不产生隐式行为变化。</li></ul></div>
+<div class="card"><h3>“无缝继续”不包括</h3><ul><li>迁移操作系统内存中的运行进程、PTY、网络连接或 lease。</li><li>让 macOS、Linux、Windows 上的任意构建/测试结果必然相同。</li><li>迁移明文 Secret、浏览器登录态或其他不可转移凭据。</li><li>迁移宿主机绝对路径、用户目录、设备 PID 或 socket。</li><li>把 Chrome Tab ID、终端尺寸等客户端 UI 状态当作 Core 真相。</li></ul></div>
+</div>
+<div class="rule">迁移单位是 <b>Workspace Capsule</b>，不是散落的 storage key，也不是一个只有项目文件的 ZIP。Capsule 必须能够独立表达“这个 Workspace 在导出边界上是什么状态”。</div>
+</section>
+
+<section id="gap">
+<h2>2. 当前实现与缺口</h2>
+<table><thead><tr><th>领域</th><th>已有基础</th><th>缺口</th></tr></thead><tbody>
+<tr><td>项目文件</td><td><code>WorkspaceBundle</code> 与虚拟文件系统</td><td>只含文件/目录；无 Capsule manifest、分区和完整性根</td></tr>
+<tr><td>Session</td><td><code>SessionSnapshot</code> 已是 JSON</td><td>没有统一导出导入编排；运行中 Task 无跨宿主对账规则</td></tr>
+<tr><td>VCS</td><td><code>SnapshotVcs</code>、快照和对象</td><td>Bundle 只有 revision 字符串，未携带 snapshot/object 数据</td></tr>
+<tr><td>Git</td><td>Sandbox 可运行 Git</td><td>Node 项目导入跳过 <code>.git</code>，工作树/index/history 未形成迁移契约</td></tr>
+<tr><td>Artifact</td><td>ArtifactStore 接口</td><td>CLI 内存化、TUI 未完整持久化，Session 引用可能悬空</td></tr>
+<tr><td>进程与 Job</td><td>Job 历史可持久化</td><td>运行中进程不可迁移；无导出屏障和 interrupted 对账</td></tr>
+<tr><td>路径</td><td>虚拟路径统一为 <code>/</code></td><td>无 NFC、大小写冲突、Windows 保留名和盘符拒绝规则</td></tr>
+<tr><td>环境证据</td><td>Test/Command 有结果</td><td>结果没有 environment fingerprint，换宿主后仍可能被误当当前验证</td></tr>
+<tr><td>客户端</td><td>TUI/Chrome 各自有 UI 状态</td><td>未明确 Core 状态与客户端 bindings 的可选分离</td></tr>
+</tbody></table>
+</section>
+
+<section id="requirements">
+<h2>3. 功能需求</h2>
+<table><thead><tr><th>ID</th><th>级别</th><th>需求</th><th>验收</th></tr></thead><tbody>
+<tr><td><code>FR-WORKSPACE-001</code></td><td><span class="tag p0">P0</span></td><td>Capsule 格式与完整性</td><td>稳定 manifest、schema、分区、SHA-256 校验和版本迁移入口存在</td></tr>
+<tr><td><code>FR-WORKSPACE-002</code></td><td><span class="tag p0">P0</span></td><td>一致导出屏障</td><td>导出期间无新写入；应用动作、交互会话、网络和子 Agent 按策略终止或封存</td></tr>
+<tr><td><code>FR-WORKSPACE-003</code></td><td><span class="tag p0">P0</span></td><td>项目树迁移</td><td>文件字节、目录、可表示 symlink、mode hint 和路径兼容诊断明确；无静默丢失</td></tr>
+<tr><td><code>FR-WORKSPACE-004</code></td><td><span class="tag p0">P0</span></td><td>Agent 状态迁移</td><td>SessionSnapshot、父子 Session、TaskGraph、active leaf 与审批计划可恢复</td></tr>
+<tr><td><code>FR-WORKSPACE-005</code></td><td><span class="tag p0">P0</span></td><td>VCS/Git 迁移</td><td>Portable VCS 对象与可选 Git repository/index 状态可完整恢复，否则显式降级</td></tr>
+<tr><td><code>FR-WORKSPACE-006</code></td><td><span class="tag p0">P0</span></td><td>Artifact 与证据</td><td>引用和内容同步迁移；每条执行证据绑定文件 hash 与环境指纹</td></tr>
+<tr><td><code>FR-WORKSPACE-007</code></td><td><span class="tag p0">P0</span></td><td>staging 与原子导入</td><td>先校验、迁移、提权能力再激活；失败不污染现有 Workspace</td></tr>
+<tr><td><code>FR-WORKSPACE-008</code></td><td><span class="tag p0">P0</span></td><td>恢复对账</td><td>运行中操作转为 interrupted/unknown；旧批准失效；重新 Probe 后才激活工具</td></tr>
+<tr><td><code>FR-WORKSPACE-009</code></td><td><span class="tag p0">P0</span></td><td>Agent 可见命名空间</td><td>Prompt、Session、ToolResult 只含 WorkspacePath 和不透明资源引用</td></tr>
+<tr><td><code>FR-WORKSPACE-010</code></td><td><span class="tag p1">P1</span></td><td>客户端状态分离</td><td>TUI/Chrome 绑定可选；缺失时只影响展示，不影响 Agent 继续</td></tr>
+<tr><td><code>FR-WORKSPACE-011</code></td><td><span class="tag p0">P0</span></td><td>敏感信息边界</td><td>Secret、lease、环境凭据和不可转移认证信息不进入 Capsule</td></tr>
+<tr><td><code>FR-WORKSPACE-012</code></td><td><span class="tag p0">P0</span></td><td>跨平台扩展性</td><td>路径与命令契约不依赖 macOS；Linux/Windows 只需新 Adapter 和平台验证</td></tr>
+</tbody></table>
+</section>
+
+<section id="principles">
+<h2>4. 设计原则</h2>
+<div class="grid3">
+<div class="card"><h3>一个一致性单位</h3><p>项目、会话、VCS、Artifact 和环境要求共享同一个 generation，不能各自导出后拼装成不一致状态。</p></div>
+<div class="card"><h3>文件字节优先</h3><p>代码是权威内容。mtime、mode、Git index 等元数据用于行为恢复，但不能替代文件 hash。</p></div>
+<div class="card"><h3>安全边界恢复</h3><p>跨宿主恢复不是进程复制，而是在已终止的最后一个安全边界恢复逻辑任务。</p></div>
+<div class="card"><h3>导入先验证</h3><p>任何写入现有 Workspace 之前完成 schema、hash、路径、版本、空间和能力检查。</p></div>
+<div class="card"><h3>环境差异可见</h3><p>旧证据保留但按 compatibility 标记 current/stale/invalid，模型不能把 stale 当当前测试通过。</p></div>
+<div class="card"><h3>客户端状态次级</h3><p>Tab、面板、光标和 TUI 选择不参与 Agent 正确性，也不能阻止核心恢复。</p></div>
+</div>
+</section>
+
+<section id="architecture">
+<h2>5. 分层架构</h2>
+<pre>Agent Core
+  WorkspacePath / SessionId / TaskId / LogicalCommand
+                         ↓
+Workspace Continuity Service
+  CapsuleBuilder
+  TransferBarrier
+  CapsuleValidator + Migrator
+  ImportCoordinator
+  RecoveryReconciler
+                         ↓
+Portable Workspace Capsule
+  Manifest | Project | Repository | AgentState
+  Artifacts | Evidence | Environment | ClientState?
+                         ↓
+Host Data Ports
+  FileSystem | App Actions | Portable Git | Storage
+                         ↓
+Host Transport Port
+  Bytes / stream / picker / remote object store
+                         ↓
+Node | Sandbox | Chrome | Future Linux/Windows</pre>
+<table><thead><tr><th>层</th><th>负责</th><th>禁止</th></tr></thead><tbody>
+<tr><td>Workspace Continuity</td><td>Capsule 语义、一致性、迁移、恢复</td><td>直接调用 Node/Chrome API</td></tr>
+<tr><td>Capsule Partitions</td><td>各领域状态的导出、校验、导入</td><td>写 Agent Turn 状态</td></tr>
+<tr><td>Host Ports</td><td>FS、Execution、Git、Test 和能力探测</td><td>理解 Session/Capsule 语义</td></tr>
+<tr><td>Host Transport</td><td>读写不透明 capsule bytes</td><td>解释项目、Git 或 Session</td></tr>
+<tr><td>Client</td><td>展示导入计划、提供可选 client-state</td><td>决定 Core 状态是否可恢复</td></tr>
+</tbody></table>
+</section>
+
+<section id="capsule">
+<h2>6. Capsule 格式</h2>
+<pre>interface WorkspaceCapsuleManifest {
+  format: 'tinyai.workspace.capsule';
+  schemaVersion: 1;
+  capsuleId: string;
+  workspaceId: string;
+  generation: number;
+  createdAt: number;
+  producer: {
+    agentVersion: string;
+    hostProfile: string;
+    environmentId: string;
+  };
+  partitions: {
+    project: CapsulePartitionRef;
+    repository?: CapsulePartitionRef;
+    agentState: CapsulePartitionRef;
+    artifacts?: CapsulePartitionRef;
+    evidence: CapsulePartitionRef;
+    environment: CapsulePartitionRef;
+    clientState?: CapsulePartitionRef;
+  };
+  integrity: {
+    algorithm: 'sha256';
+    rootDigest: string;
+  };
+}</pre>
+<table><thead><tr><th>分区</th><th>内容</th><th>策略</th></tr></thead><tbody>
+<tr><td><code>project</code></td><td>规范路径树、文件对象、目录、symlink 描述、mode hint</td><td>必须；内容 hash 可独立读取</td></tr>
+<tr><td><code>repository</code></td><td>Portable VCS 对象、可选 Git refs/index/HEAD</td><td>存在仓库时应有；不支持时明确 warning</td></tr>
+<tr><td><code>agentState</code></td><td>所有 SessionSnapshot、active leaf、TaskGraph、父子关系、审批计划</td><td>必须；恢复后重新建立 runtime</td></tr>
+<tr><td><code>artifacts</code></td><td>测试日志、Diff、截图、大输出及 metadata</td><td>可转移引用必须闭合；Secret 不进入</td></tr>
+<tr><td><code>evidence</code></td><td>命令、退出码、报告、文件 hash、environmentId、status</td><td>必须；环境变化后可标记 stale</td></tr>
+<tr><td><code>environment</code></td><td>toolchain 要求、lockfile、测试 recipe、平台映射限制</td><td>必须；不包含本机绝对路径</td></tr>
+<tr><td><code>clientState</code></td><td>TUI 视图、面板、Chrome Tab binding</td><td>可选；不保证可恢复</td></tr>
+</tbody></table>
+<h3>完整性</h3>
+<ul><li>每个 blob 和分区记录 SHA-256；manifest 再记录根 digest。</li><li>导入先校验内容，再做 schema migration；拒绝重复路径、悬空引用和缺分区。</li><li>JSON 只承载 manifest 与小对象；大文件、Artifact 和 Git object 使用二进制分区。</li></ul>
+</section>
+
+<section id="state">
+<h2>7. 状态分类与迁移策略</h2>
+<table><thead><tr><th>状态</th><th>处理</th><th>导入后语义</th></tr></thead><tbody>
+<tr><td>已提交项目文件</td><td>完整复制并 hash 校验</td><td>直接可用</td></tr>
+<tr><td>未提交工作树</td><td>复制当前字节，不依赖 Git mtime 判断</td><td>继续编辑</td></tr>
+<tr><td>Session 对话/树/任务</td><td>原 ID 导入</td><td>同一 Session 继续</td></tr>
+<tr><td>已完成 ToolResult</td><td>保留历史并关联 Artifact</td><td>可作为历史，不自动成为当前环境证据</td></tr>
+<tr><td>已接受未完成命令</td><td>导出为 unknown/interruption record</td><td>不自动重放危险请求</td></tr>
+<tr><td>运行中的模型 Turn</td><td>取消并记录中断点</td><td>从最后确认消息重试/继续</td></tr>
+<tr><td>运行中应用动作/Job/交互会话</td><td>导出前终止；保存日志和退出原因</td><td>标记 interrupted，不恢复应用内部运行资源</td></tr>
+<tr><td>待审批</td><td>不迁移批准；只保留请求描述</td><td>新宿主重新评估与请求</td></tr>
+<tr><td>Secret/Lease</td><td>不导出</td><td>按 scope 重新获取</td></tr>
+<tr><td>UI binding</td><td>可选导出</td><td>无法恢复时回退默认视图</td></tr>
+</tbody></table>
+</section>
+
+<section id="paths">
+<h2>8. WorkspacePath 与跨平台文件语义</h2>
+<pre>WorkspacePath =
+  NFC(UTF-8), '/'-separated, relative,
+  no leading '/', no drive prefix, no '.'/'..',
+  never '.tinyai' control namespace</pre>
+<table><thead><tr><th>问题</th><th>设计规则</th></tr></thead><tbody>
+<tr><td>大小写</td><td>导入清单检测 case-fold 冲突；目标 FS 大小写不敏感时预先失败或生成明确 mapping</td></tr>
+<tr><td>Unicode</td><td>路径规范化为 NFC；检测规范化后冲突，不按显示字形合并</td></tr>
+<tr><td>Windows 名称</td><td>拒绝盘符、UNC、控制字符和 <code>CON/NUL/COM1</code> 等保留名对可迁移 Capsule 的污染</td></tr>
+<tr><td>Symlink</td><td>显式记录相对 target；越界、绝对 target 或目标宿主不支持时产生阻断/降级，不静默跳过</td></tr>
+<tr><td>Mode/ACL</td><td>POSIX mode 是 hint；ACL、owner、xattr 默认不迁移；executable 通过明确字段表达</td></tr>
+<tr><td>时间</td><td>mtime 是可选展示元数据；并发和 Patch 冲突以内容 hash/version 为准</td></tr>
+<tr><td>换行</td><td>文件按字节保存，不自动 CRLF/LF 转换</td></tr>
+<tr><td>大小写重命名</td><td>不得因目标 FS 大小写策略把 rename 静默变成 no-op</td></tr>
+</tbody></table>
+<div class="warn rule">Agent 只看到 WorkspacePath。宿主 absolute path 由 Adapter 在边界内解析；文件内容中原有的平台字符串属于项目内容，不做语义清洗。</div>
+</section>
+
+<section id="objects">
+<h2>9. 核心对象</h2>
+<pre>+-----------------------------+
+| WorkspaceContinuityService  |
+| exportCapsule()             |
+| stageImport()               |
+| commitImport()              |
++--------------+--------------+
+               |
+     +---------+----------+
+     |                    |
+     v                    v
+CapsuleBuilder      ImportCoordinator
+     |                    |
+     v                    +--> CapsuleValidator
+TransferBarrier            +--> CapsuleMigrator
+                           +--> Materializer
+                           +--> RecoveryReconciler
+     |                              |
+     +----------+-------------------+
+                v
+      CapsulePartitionProvider
+  Project / Repository / Agent / Artifact / Evidence / Environment</pre>
+<table><thead><tr><th>对象</th><th>职责</th><th>关键不变量</th></tr></thead><tbody>
+<tr><td><code>WorkspaceContinuityService</code></td><td>统一导出、导入和恢复入口</td><td>同一时刻一个 Workspace generation 可写</td></tr>
+<tr><td><code>CapsuleBuilder</code></td><td>收集分区并生成 manifest/root digest</td><td>所有分区来自同一已封存 generation</td></tr>
+<tr><td><code>TransferBarrier</code></td><td>冻结写入、取消临时操作、flush 持久化</td><td>封存后无新副作用</td></tr>
+<tr><td><code>CapsuleValidator</code></td><td>schema、hash、路径、引用、目标能力检查</td><td>无效 Capsule 不写入 active Workspace</td></tr>
+<tr><td><code>CapsuleMigrator</code></td><td>旧 schema/旧 Session/VCS 迁移</td><td>迁移是显式、可测试的纯状态转换</td></tr>
+<tr><td><code>Materializer</code></td><td>把分区写入 staging FS、Git/VCS、ArtifactStore</td><td>失败可完整丢弃 staging</td></tr>
+<tr><td><code>RecoveryReconciler</code></td><td>处理运行中操作、审批和 stale evidence</td><td>危险操作不自动重放</td></tr>
+<tr><td><code>EnvironmentFingerprint</code></td><td>描述宿主 Profile、动作版本和 Provider 环境</td><td>不暴露用户 Home、绝对路径、二进制路径或 Secret</td></tr>
+</tbody></table>
+</section>
+
+<section id="export">
+<h2>10. 导出流程</h2>
+<pre>export(workspaceId)
+  → validate active session/workspace
+  → TransferBarrier.begin()
+      → stop command admission
+      → cancel execution / PTY / network / running subagents
+      → wait for terminal cleanup
+      → flush Session / VCS / Artifact / Evidence
+      → seal WorkspaceGeneration
+  → collect partitions
+  → compute blob hashes + manifest rootDigest
+  → write temporary capsule
+  → verify re-read
+  → publish through HostTransportPort
+  → send export completion event</pre>
+<p>导出不是“随便列出当前 storage key”。各领域通过 <code>CapsulePartitionProvider</code> 枚举自己拥有的数据，避免把 Secret 或宿主私有配置误装进 Capsule。</p>
+<table><thead><tr><th>导出失败点</th><th>行为</th></tr></thead><tbody>
+<tr><td>仍有不可终止进程</td><td>失败并返回 blocker；不生成“可能包含运行状态”的 Capsule</td></tr>
+<tr><td>Session flush 失败</td><td>中止导出，Workspace 恢复可写，报告 persistence error</td></tr>
+<tr><td>Artifact 引用缺失</td><td>默认阻断；明确选择 historical-only 时可导出 excluding-artifact warning</td></tr>
+<tr><td>传输中断</td><td>目标 Capsule 不完整；manifest/rootDigest 校验失败</td></tr>
+</tbody></table>
+</section>
+
+<section id="import">
+<h2>11. 导入流程与原子性</h2>
+<pre>stageImport(capsuleStream)
+  → receive to staging blob
+  → verify manifest + partition hashes
+  → validate schema and migrate metadata
+  → preflight WorkspacePath compatibility
+  → resolve destination capabilities / available actions
+  → materialize project/repository/artifacts into staging
+  → load sessions/tasks/evidence into staging
+  → build RecoveryPlan
+  → present blockers/warnings/required capabilities
+  → commitImport(stagingId)
+      → atomically switch Workspace generation
+      → probe Host capabilities
+      → activate available ToolPacks
+      → emit host.changed/resume events
+      → expose same SessionId
+  → cleanup staging</pre>
+<table><thead><tr><th>检查</th><th>阻断条件</th><th>可降级条件</th></tr></thead><tbody>
+<tr><td>Capsule 完整性</td><td>hash、schema、manifest 或 blob 缺失</td><td>无</td></tr>
+<tr><td>路径</td><td>越界、非法盘符、case collision、目标不可表示且无映射</td><td>可选提示性元数据差异</td></tr>
+<tr><td>Session</td><td>引用结构损坏或 ID 冲突且不是迁移场景</td><td>运行中 Task 改为 interrupted</td></tr>
+<tr><td>Git/VCS</td><td>对象缺失、index 损坏</td><td>回退为工作树 + Portable VCS；PortableGit 可恢复时继续 common subset</td></tr>
+<tr><td>Artifact</td><td>Session 引用内容缺失</td><td>用户明确选择仅保留断链历史</td></tr>
+<tr><td>工具链</td><td>无</td><td>工具/Test 不可用，任务恢复为 degraded</td></tr>
+</tbody></table>
+<div class="rule">默认 commit 前不修改现有 Workspace。若导入发生崩溃，启动恢复只允许清除 staging 或完成已验证的 generation switch，不能留下半导入状态。</div>
+</section>
+
+<section id="resume">
+<h2>12. 恢复对账</h2>
+<pre>RecoveryReconciler.reconcile(snapshot, capsuleState, capabilityReport)
+  → preserve completed messages/results
+  → mark accepted-but-unknown commands as unknown
+  → mark active task paused/interrupted at tool boundary
+  → invalidate pending approvals
+  → mark old environment evidence stale when fingerprint changes
+  → attach new capability summary
+  → select next safe action</pre>
+<ul><li>同一宿主重启且 environment fingerprint 相同，可以沿用已满足的当前验证证据。</li><li>跨宿主或工具链变化时，旧证据保留为历史，但最终完成前必须重新运行相关验证。</li><li>中断在执行中的命令不自动重放，尤其 commit、deploy、网络写入、Git push 等危险操作。</li><li>子 Agent 若已产出一致性结果，可恢复结果；仅处于运行中的子任务标记 interrupted。</li><li>恢复事件进入 SessionTree，确保模型上下文知道已经换宿主以及哪些能力变化。</li></ul>
+</section>
+
+<section id="environment">
+<h2>13. 环境与应用动作抽象</h2>
+<pre>interface EnvironmentManifest {
+  manifestVersion: 1;
+  requiredActions: Array&lt;{
+    id: 'app.python.run-tests' | 'app.xcode.build' | string;
+    versionRange?: string;
+    required: boolean;
+  }&gt;;
+  requiredCapabilities: string[];
+}</pre>
+<table><thead><tr><th>宿主义务</th><th>Agent 可见结果</th></tr></thead><tbody>
+<tr><td>注册稳定 Action ID、JSON Schema、版本和 effects</td><td>Agent 看到具体动作，不看到 Python/Node/二进制路径</td></tr>
+<tr><td>在 Provider 内部将动作映射到 WorkspacePath、运行时或远程服务</td><td>工具输入保持平台无关</td></tr>
+<tr><td>只把授权 scope 和显式上下文传给动作</td><td>不继承宿主 Secret 或完整 env</td></tr>
+<tr><td>返回 actionId、actionVersion、environmentFingerprint</td><td>用于证据有效性和 stale 判断</td></tr>
+<tr><td>动作不可用时报告 unavailable/degraded</td><td>不尝试猜路径、运行通用 bash 或伪造结果</td></tr>
+</tbody></table>
+<div class="warn rule">Capsule 不保存通用命令配方。它保存应用动作的 ID、版本要求和证据契约；宿主应用负责决定该动作在 macOS、iOS、Browser 或 Linux 上如何实现。</div>
+</section>
+
+<section id="security">
+<h2>14. 安全与隐私</h2>
+<div class="grid">
+<div class="card"><h3>完整性</h3><p>防篡改、截断、路径逃逸、压缩炸弹、重复条目和悬空引用；所有校验在 materialize 前完成。</p></div>
+<div class="card"><h3>Secret</h3><p>SecretLease、token、cookie、环境凭据和宿主密钥不进 Capsule；导入后按 scope 重取。</p></div>
+<div class="card"><h3>路径</h3><p>WorkspacePath 不会因 symlink、Windows junction、Unicode 或 case-fold 绕过 root fence。</p></div>
+<div class="card"><h3>导出策略</h3><p>默认排除缓存和敏感文件；排除项形成 manifest 诊断，不能静默忽略项目内容。</p></div>
+<div class="card"><h3>审批</h3><p>旧批准不跨 generation 生效；命令、网络、写范围重新评估。</p></div>
+<div class="card"><h3>日志</h3><p>导入导出 Trace 记录 capsule ID、generation 和 hash，不记录完整敏感内容。</p></div>
+</div>
+</section>
+
+<section id="compat">
+<h2>15. 兼容与版本迁移</h2>
+<table><thead><tr><th>变化</th><th>策略</th></tr></thead><tbody>
+<tr><td>新增可选 partition</td><td>同主 schema 向后兼容；旧 reader 可忽略但需提示</td></tr>
+<tr><td>字段语义变化</td><td>增加 Capsule schemaVersion，并提供显式 migration</td></tr>
+<tr><td>Session schema 升级</td><td>导入时先迁移到当前 SessionSnapshot，再构建 runtime</td></tr>
+<tr><td>VCS/Git 格式升级</td><td>隔离在不同 PartitionProvider，可按版本选择</td></tr>
+<tr><td>新客户端</td><td>实现 HostTransport + 对应 Ports，不修改 Capsule 语义</td></tr>
+<tr><td>旧客户端读取新 UI state</td><td>忽略未知 client-state，不阻断 Agent</td></tr>
+</tbody></table>
+</section>
+
+<section id="host-change">
+<h2>16. 对 REQ-HOST-001 的配套修正</h2>
+<p><code>REQ-HOST-001</code> 仍是 14 个 Host 功能需求，不新增一套 <code>FR-HOST-015..</code>。需要修改的是已有接口/验收的精确语义：</p>
+<p>Git 的默认实现与格式契约由 <a href="git-portable-backend-design-v1.html">REQ-GIT-001</a> 单独定义。</p>
+<table><thead><tr><th>Host 需求</th><th>修正</th></tr></thead><tbody>
+<tr><td>FR-HOST-001</td><td>明确 Host workspace import/export 只传输不透明 Capsule bytes；Workspace 语义属于 REQ-WORKSPACE-001</td></tr>
+<tr><td>FR-HOST-002</td><td>Capability report 增加 contractVersion、environmentFingerprint 和不透明 host handle</td></tr>
+<tr><td>FR-HOST-003</td><td>FileSystemPort 使用 WorkspacePath；支持 content hash、lstat/symlink 语义、case/Unicode probe 与原子一致读取</td></tr>
+<tr><td>FR-HOST-004</td><td>改为 ActionProviderPort；应用注册具名动作、Schema、版本和 Probe；通用 exec 不是基线</td></tr>
+<tr><td>FR-HOST-005</td><td>交互动作是 ephemeral，不进入 Capsule；导出屏障必须终止并记录</td></tr>
+<tr><td>FR-HOST-006</td><td>GitBackend 增加 repository/index 导出能力，结果路径使用 WorkspacePath，证据绑定环境</td></tr>
+<tr><td>FR-HOST-007</td><td>TestReport 必须记录 actionId/actionVersion、环境指纹和文件 hash；换环境/动作版本后状态可为 stale</td></tr>
+<tr><td>FR-HOST-009</td><td>Network/Secret 明确为不可迁移能力，Secret 不得进入 Capsule/Session/Artifact</td></tr>
+<tr><td>FR-HOST-010</td><td>Workspace Transfer 不属于模型 ToolPack；它是 runtime service，避免模型自由调用危险迁移</td></tr>
+<tr><td>FR-HOST-011</td><td>Host Profile 增加 transfer capability 和 environment manifest 解析能力</td></tr>
+<tr><td>FR-HOST-012</td><td>degraded 诊断同时覆盖导入后的工具链缺失和 stale evidence</td></tr>
+<tr><td>FR-HOST-013</td><td>Core 不读取 <code>descriptor.platform</code> 做分支；平台信息仅用于 Adapter 诊断</td></tr>
+<tr><td>FR-HOST-014</td><td>兼容迁移不再只表示 VirtualFallback；增加“Capsule transport 与 workspace continuity 分离”</td></tr>
+</tbody></table>
+<div class="rule">Host 不做 Capsule 解释，Workspace 不直接操纵 OS。两者通过 WorkspacePath、能力图谱、环境指纹和不透明 bytes 这四个窄契约连接。</div>
+</section>
+
+<section id="migration">
+<h2>17. 实施阶段</h2>
+<div class="phase"><div class="phase-no">W1</div><div><h3>Capsule v1 与规范模型</h3></div></div>
+<ul><li>Manifest、分区、hash、WorkspacePath/Case Policy。</li><li>Memory → Capsule → Memory 完整往返；无 Session/Artifact 闭环。</li></ul>
+<div class="phase"><div class="phase-no">W2</div><div><h3>TUI 一致性导出导入</h3></div></div>
+<ul><li>Project + Session + Task + VCS + Artifact + Evidence。</li><li>TransferBarrier、staging、RecoveryPlan 和同宿主重启恢复。</li></ul>
+<div class="phase"><div class="phase-no">W3</div><div><h3>Node/Sandbox/Chrome 迁移</h3></div></div>
+<ul><li>Node 真实项目与 Git repository 导入导出。</li><li>Chrome 作为无 Execution 的接收宿主正确降级。</li></ul>
+<div class="phase"><div class="phase-no">W4</div><div><h3>真实 Coding 连续性</h3></div></div>
+<ul><li>Execution/Test 环境指纹、stale evidence、工具链解析。</li><li>中断任务对账、审批失效和安全重验证。</li></ul>
+<div class="phase"><div class="phase-no">W5</div><div><h3>Linux/Windows 扩展</h3></div></div>
+<ul><li>新 Path/App Action Adapter；盘符、大小写、保留名和动作注册验证。</li><li>App Provider 自行决定是否调用本地运行时，不改变 Agent 工具 Schema。</li><li>当前仅验证扩展性，不要求交付完整跨平台客户端。</li></ul>
+</section>
+
+<section id="acceptance">
+<h2>18. 确认项与完成定义</h2>
+<div class="grid">
+<div class="card"><h3>DECISION-01</h3><p>Capsule 是唯一跨宿主迁移单位，包含 Project、AgentState、Repository、Artifact、Evidence、Environment 与可选 ClientState。</p></div>
+<div class="card"><h3>DECISION-02</h3><p>跨宿主恢复的是逻辑任务安全边界，不迁移运行中的进程、PTY、网络连接或 Secret。</p></div>
+<div class="card"><h3>DECISION-03</h3><p>Agent 只使用 WorkspacePath 和能力语义；宿主绝对路径、PID 与平台分支不进入 Core/Prompt。</p></div>
+<div class="card"><h3>DECISION-04</h3><p>旧环境测试证据跨宿主后变为 stale，必须重新验证；历史记录不删除。</p></div>
+</div>
+<table><thead><tr><th>维度</th><th>完成标准</th></tr></thead><tbody>
+<tr><td>完整性</td><td>Capsule hash、分区、引用和版本均可验证，无静默丢失。</td></tr>
+<tr><td>连续性</td><td>同一 Workspace/Session 在 Node→Sandbox→Chrome Read-only 场景可恢复。</td></tr>
+<tr><td>原子性</td><td>任意导入失败不改变 active Workspace；崩溃可清理或完成。</td></tr>
+<tr><td>Git/VCS</td><td>工作树、历史和可用仓库状态恢复；不支持部分显式降级。</td></tr>
+<tr><td>Agent 边界</td><td>Trace/Prompt 中无宿主绝对路径和不可转移资源句柄。</td></tr>
+<tr><td>环境</td><td>指纹变化使旧 Test/Execution evidence 正确 stale。</td></tr>
+<tr><td>平台</td><td>Windows/Linux 可由新 Adapter 扩展，Core/Capsule 无需重写。</td></tr>
+<tr><td>测试</td><td>Round-trip、故障注入、路径、Git、Artifact、Soak 全部通过。</td></tr>
+</tbody></table>
+<p><a href="host-capability-architecture-v1.html#workspace-transfer-boundary">查看配套 Host 修正 →</a></p>
+<p><a href="workspace-portability-testing-v1.html#trace">查看工作区迁移测试方案 →</a></p>
+<p class="foot">需求：REQ-WORKSPACE-001 · 依赖：REQ-HOST-001 · 目标版本：0.3.0 · 状态：Proposed / Review · 设计版本：1.0 · 本文未声称功能已实现</p>
+</section>
+</div>
+</body>
+</html>

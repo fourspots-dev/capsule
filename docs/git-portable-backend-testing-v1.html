@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tinyai PortableGitBackend 测试设计 V1</title>
+<style>
+:root{--bg:#f4f5f7;--paper:#fff;--text:#191a1e;--muted:#6f7179;--line:#e2e3e8;--accent:#9a4d00;--accent-soft:#fff0e3;--ok:#137a4b;--ok-soft:#eef8f2;--warn:#986100;--warn-soft:#fff8e8;--danger:#b42318;--danger-soft:#fff1f0;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.72 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1240px;margin:auto;padding:36px 24px 100px}
+.hero{padding:40px;border-radius:27px;background:radial-gradient(circle at 88% 8%,#b9f0d2 0,transparent 23%),linear-gradient(135deg,#18150f,#3f3020 58%,#75532d);color:#fff}.hero small{letter-spacing:.12em;opacity:.72}.hero h1{font-size:38px;line-height:1.18;margin:12px 0}.hero p{max-width:980px;margin:0;color:#fff3df}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}
+nav{position:sticky;top:0;z-index:5;display:flex;gap:14px;overflow:auto;margin:18px 0;padding:10px 14px;border:1px solid var(--line);border-radius:13px;background:#f4f5f7ed;backdrop-filter:blur(12px)}nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}
+section{margin:18px 0;padding:26px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:23px;margin:0 0 14px}h3{font-size:16px;margin:22px 0 8px}p{color:#44454c}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafafa}.card h3{margin:0 0 8px}.card p{margin:0}.card ul{margin:8px 0 0;padding-left:18px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafafa;color:var(--muted);font-weight:600}
+code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{padding:17px;overflow:auto;border-radius:12px;background:#17130f;color:#fff3e5;font:12px/1.62 var(--mono);border:1px solid #463225}
+.rule{padding:13px 15px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#fff3e8}.warn{border-color:var(--warn);background:var(--warn-soft)}.danger{border-color:var(--danger);background:var(--danger-soft)}
+.tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;white-space:nowrap;background:var(--ok-soft);color:var(--ok)}.tag.unit{background:var(--accent-soft);color:var(--accent)}.tag.risk{background:var(--warn-soft);color:var(--warn)}.tag.sec{background:var(--danger-soft);color:var(--danger)}.tag.e2e{background:#eaf7ef;color:var(--ok)}
+.metric{font:700 22px/1.1 var(--mono);color:var(--accent);margin-bottom:5px}.foot{color:var(--muted);font-size:12px}
+@media(max-width:850px){.grid3{grid-template-columns:1fr}}@media(max-width:700px){.grid{grid-template-columns:1fr}.hero h1{font-size:28px}.wrap{padding:20px 12px 70px}section{padding:20px}table{display:block;max-width:100%;overflow-x:auto}pre{max-width:100%}}
+@media print{nav{display:none}body{background:#fff}.hero{border-radius:0}.wrap{max-width:none;padding:0}section{break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+<small>REQ-GIT-001 / PORTABLE GIT / TEST DESIGN V1</small>
+<h1>PortableGitBackend<br>格式兼容与命令语义测试</h1>
+<p>用真实 Git 作为互操作 oracle，用独立解析器验证生成格式，用纯 JS 环境证明不依赖 git/node process，并以跨后端差分测试保证 PortableGitBackend 是实现主体而非降级附属。</p>
+<div class="chips"><span class="chip">Target 0.3.0</span><span class="chip">Git CLI Oracle</span><span class="chip">Pure JS E2E</span><span class="chip">Format Compatibility</span><span class="chip">Status: Proposed / Review</span></div>
+</header>
+<nav><a href="#strategy">策略</a><a href="#trace">追踪矩阵</a><a href="#fixtures">夹具</a><a href="#objects">Objects/Refs</a><a href="#index">Index/Status</a><a href="#commands">命令</a><a href="#interop">Git互操作</a><a href="#portable-default">Portable默认</a><a href="#capsule">Capsule</a><a href="#paths">路径/大文件</a><a href="#security">安全故障</a><a href="#parity">差分/属性</a><a href="#gates">门禁</a><a href="#phases">阶段验收</a></nav>
+
+<section id="strategy">
+<h2>1. 测试策略</h2>
+<div class="grid">
+<div class="card"><h3>三层判定</h3><ul><li>Portable 自己读取并理解真实仓库。</li><li>Portable 写出的文件由真实 Git 读取和校验。</li><li>相同输入下 Portable 与 CLI 的规范化结果一致。</li></ul></div>
+<div class="card"><h3>不能接受的假成功</h3><ul><li>只在自己的 SnapshotVcs 中成功，真实 Git 无法读取。</li><li>把 pack/index 当不透明 blob，无法 status/log。</li><li>CLI 缺失时自动禁用 Git。</li><li>hooks/filter 被执行或对象格式不支持时半写入。</li></ul></div>
+</div>
+<div class="danger rule"><b>P0：</b>Git-compatible 文件被真实 Git 拒绝、Index 写入破坏 staged 状态、checkout 覆盖用户修改、执行 hook/filter、对象 hash 校验缺失，任一发生即阻止发布。</div>
+</section>
+
+<section id="trace">
+<h2>2. 需求追踪矩阵</h2>
+<table><thead><tr><th>需求</th><th>核心用例</th><th>通过条件</th></tr></thead><tbody>
+<tr><td><code>FR-GIT-001</code> GitBackend</td><td>PGIT-001..006</td><td>Portable/CLI 共享领域接口和稳定错误</td></tr>
+<tr><td><code>FR-GIT-002</code> Format</td><td>PGIT-007..021、033..036、059..067</td><td>objects/refs/HEAD/index 可双向互操作</td></tr>
+<tr><td><code>FR-GIT-003</code> Commands</td><td>PGIT-022..052</td><td>常用本地命令在真实仓库闭环</td></tr>
+<tr><td><code>FR-GIT-004</code> Index/Status</td><td>PGIT-018..021、036、048..050、053..067</td><td>staged/unstaged/untracked/rename/binary 准确</td></tr>
+<tr><td><code>FR-GIT-005</code> Portable default</td><td>PGIT-001、068..075</td><td>无 git binary 仍通过 common subset；CLI 可选</td></tr>
+<tr><td><code>FR-GIT-006</code> No host dependency</td><td>PGIT-068..070、084</td><td>纯 JS 环境不引用 node/process/native git</td></tr>
+<tr><td><code>FR-GIT-007</code> WorkspacePath</td><td>PGIT-076..080</td><td>无宿主绝对路径、盘符和目录逃逸</td></tr>
+<tr><td><code>FR-GIT-008</code> Capsule</td><td>PGIT-081..083</td><td>repository partition 往返后状态一致</td></tr>
+<tr><td><code>FR-GIT-009</code> Security</td><td>PGIT-079..080、085..094</td><td>hooks/filter 不执行，恶意 pack/index fail closed</td></tr>
+<tr><td><code>FR-GIT-010</code> Limitations</td><td>PGIT-095..100</td><td>不支持项稳定诊断，不部分写入</td></tr>
+</tbody></table>
+</section>
+
+<section id="fixtures">
+<h2>3. 测试夹具</h2>
+<div class="grid">
+<div class="card"><h3><code>GitRepoFixture</code></h3><ul><li>empty、single commit、branch/tag、dirty、staged、detached。</li><li>binary、rename、symlink、Unicode/CRLF。</li><li>loose objects 与 packfile 两种仓库。</li></ul></div>
+<div class="card"><h3><code>GitOracle</code></h3><ul><li>真实 git status/diff/log/show/rev-parse。</li><li>只用于测试和可选 CLI 后端，不是运行时必需。</li><li>规范化 author/time/path 后比较。</li></ul></div>
+<div class="card"><h3><code>PureJsRuntime</code></h3><ul><li>禁用 node:fs、child_process、native modules 和 git PATH。</li><li>只提供 VFS、Crypto/Compression、Storage。</li><li>证明 Browser/iOS 基线可运行。</li></ul></div>
+<div class="card"><h3><code>PackFixture</code></h3><ul><li>pack v2、index v2、OFS/REF delta、多对象 pack。</li><li>循环 delta、越界、错 hash、截断。</li><li>真实 Git 生成样本。</li></ul></div>
+</div>
+</section>
+
+<section id="objects">
+<h2>4. Objects 与 Refs</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>级别</th></tr></thead><tbody>
+<tr><td>PGIT-007</td><td>blob 编码/解码与 SHA-1</td><td>OID 与真实 Git 相同；内容 hash 不符拒绝</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PGIT-008</td><td>tree 排序、mode、name 字节</td><td>生成 tree OID 与真实 Git 一致；非法 mode 拒绝</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PGIT-009</td><td>commit parents/message/author/time</td><td>标准 Git 可 cat-file/show；结构字段保持</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PGIT-010</td><td>annotated tag 读取</td><td>指向正确 object；不支持写入时明确 limitation</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PGIT-011</td><td>loose object zlib 互操作</td><td>Portable 生成，由真实 Git hash-object/cat-file 验证</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>PGIT-012</td><td>HEAD symbolic/detached</td><td>读写语义正确；无效 ref 拒绝</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PGIT-013</td><td>loose refs 与 packed-refs</td><td>优先级和冲突规则稳定；标准 Git 可读取写结果</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>PGIT-014</td><td>pack v2 object lookup</td><td>非 delta 与常见 delta 可正确解出</td><td><span class="tag risk">Unit</span></td></tr>
+<tr><td>PGIT-015</td><td>OFS_DELTA / REF_DELTA</td><td>delta chain 安全解析，深度/大小有界</td><td><span class="tag risk">Unit</span></td></tr>
+<tr><td>PGIT-016</td><td>错 OID/截断/循环 delta</td><td>GIT_OBJECT_INVALID；无无限循环或大内存</td><td><span class="tag sec">Security</span></td></tr>
+<tr><td>PGIT-017</td><td>SHA-256 repository</td><td>GIT_OBJECT_FORMAT_UNSUPPORTED，不部分写入</td><td><span class="tag risk">Compatibility</span></td></tr>
+</tbody></table>
+</section>
+
+<section id="index">
+<h2>5. Index、Status 与 Ignore</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>级别</th></tr></thead><tbody>
+<tr><td>PGIT-018</td><td>Index v2 读/写</td><td>path/mode/OID/stage/flags 与真实 Git 一致</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PGIT-019</td><td>Index v3/v4 读取</td><td>常见路径压缩/flags 正确；未知必要扩展 fail closed</td><td><span class="tag risk">Compatibility</span></td></tr>
+<tr><td>PGIT-020</td><td>Index 排序与冲突 stage</td><td>排序稳定；冲突 entry 不误当 clean</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PGIT-021</td><td>stat cache 失效</td><td>不被错误 mtime 欺骗；以内容 OID 判断</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PGIT-053</td><td>clean repo status</td><td>staged/unstaged/untracked 全空，branch 正确</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>PGIT-054</td><td>staged + unstaged 同一文件</td><td>两层内容/OID 同时正确，不相互覆盖</td><td><span class="tag risk">E2E</span></td></tr>
+<tr><td>PGIT-055</td><td>untracked/ignored/deleted</td><td>状态分类准确；ignored 不进入 add</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PGIT-056</td><td>binary/rename/CRLF</td><td>binary 标记；rename 检测；字节不被转换</td><td><span class="tag risk">E2E</span></td></tr>
+<tr><td>PGIT-057</td><td>Index lock 已存在</td><td>超时后 GIT_INDEX_LOCKED；不覆盖</td><td><span class="tag sec">Concurrency</span></td></tr>
+<tr><td>PGIT-058</td><td>并发 status/add/commit</td><td>最终状态符合串行化顺序；无损坏 Index 或 ref</td><td><span class="tag risk">Concurrency</span></td></tr>
+</tbody></table>
+</section>
+
+<section id="commands">
+<h2>6. 常用命令</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>级别</th></tr></thead><tbody>
+<tr><td>PGIT-001</td><td>GitBackend 契约</td><td>Portable 与测试 CLI adapter 的输入/错误/结果结构一致</td><td><span class="tag unit">Contract</span></td></tr>
+<tr><td>PGIT-002</td><td>Backend descriptor</td><td>kind、version、limitations 和默认选择规则明确</td><td><span class="tag unit">Contract</span></td></tr>
+<tr><td>PGIT-003</td><td>统一错误映射</td><td>portable/CLI 的 not-found/conflict/unsupported 使用稳定领域错误</td><td><span class="tag unit">Contract</span></td></tr>
+<tr><td>PGIT-004</td><td>输出 Schema</td><td>status/diff/log/show 返回字段相同，不暴露后端私有数据</td><td><span class="tag unit">Contract</span></td></tr>
+<tr><td>PGIT-005</td><td>命令取消</td><td>AbortSignal 停止读取/写入；不留下半提交 index/ref</td><td><span class="tag risk">Fault</span></td></tr>
+<tr><td>PGIT-006</td><td>Unsupported backend operation</td><td>Portable 明确失败，不自动调用 CLI 或改变工具 Schema</td><td><span class="tag sec">Boundary</span></td></tr>
+<tr><td>PGIT-022</td><td><code>init</code></td><td>.git 核心文件合法；已有 repo 不覆盖</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>PGIT-023</td><td><code>add</code> file/dir/glob</td><td>index 更新准确；路径逃逸拒绝</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>PGIT-024</td><td><code>commit</code> 首次/后续/多 parent 读取</td><td>tree 与 HEAD ref 正确；message 编码保持</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>PGIT-025</td><td>空 commit / 空 message</td><td>按明确策略拒绝；不移动 ref</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PGIT-026</td><td><code>log</code> count/HEAD/branch</td><td>顺序、parents 和摘要稳定</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>PGIT-027</td><td><code>show</code> commit/tree/blob/tag</td><td>结构与内容正确；大内容 Artifact 化</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>PGIT-028</td><td><code>diff</code> worktree/index/commit</td><td>patch/binary/rename/truncated 语义稳定</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>PGIT-029</td><td><code>branch</code> list/create/delete</td><td>当前分支删除拒绝；ref 原子写</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>PGIT-030</td><td><code>checkout</code> branch/detached</td><td>worktree/index/HEAD 同步；HEAD 正确</td><td><span class="tag risk">E2E</span></td></tr>
+<tr><td>PGIT-031</td><td>checkout 覆盖未保存修改</td><td>拒绝且不部分写入</td><td><span class="tag sec">Security</span></td></tr>
+<tr><td>PGIT-032</td><td><code>rev-parse</code> HEAD/branch/tag/短 OID</td><td>解析正确；歧义/不存在稳定失败</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PGIT-039</td><td>非 ASCII commit message/author</td><td>UTF-8 字节保持；真实 Git 可显示</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>PGIT-040</td><td>非法/冲突 branch name</td><td>ref 校验失败且不写文件</td><td><span class="tag sec">Security</span></td></tr>
+<tr><td>PGIT-041</td><td>checkout 遇到 untracked collision</td><td>拒绝覆盖；HEAD/index/worktree 保持</td><td><span class="tag risk">E2E</span></td></tr>
+<tr><td>PGIT-042</td><td>删除不存在/当前 branch</td><td>稳定错误；ref 不变</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PGIT-043</td><td>超大 diff 截断</td><td>摘要有界，完整 patch 进入 Artifact</td><td><span class="tag risk">Integration</span></td></tr>
+<tr><td>PGIT-044</td><td>malformed/cyclic commit parent</td><td>遍历有界并返回 GIT_OBJECT_INVALID</td><td><span class="tag sec">Security</span></td></tr>
+<tr><td>PGIT-045</td><td>show 不存在 OID/ref</td><td>稳定 not-found，不返回空对象伪成功</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PGIT-046</td><td>短 OID 多候选</td><td>歧义失败并返回最小候选摘要</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PGIT-047</td><td>init branch 配置合法/非法</td><td>合法 branch 写入 HEAD；非法值拒绝</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PGIT-048</td><td>add 删除路径</td><td>Index 删除 entry；staged deletion 正确</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>PGIT-049</td><td>refresh stat cache</td><td>更新 hint 但不改变 OID/语义状态</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PGIT-050</td><td>rename staged file</td><td>旧 entry 删除、新 entry 写入；重命名可识别</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>PGIT-051</td><td>empty repository status/log</td><td>status 返回 unborn branch；log 返回空而非崩溃</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PGIT-052</td><td>commit cancellation before ref update</td><td>objects 可残留但 ref/index 不半更新</td><td><span class="tag risk">Fault</span></td></tr>
+</tbody></table>
+</section>
+
+<section id="interop">
+<h2>7. 真实 Git 双向互操作</h2>
+<table><thead><tr><th>ID</th><th>方向</th><th>验证</th><th>级别</th></tr></thead><tbody>
+<tr><td>PGIT-033</td><td>Git → Portable</td><td>真实 Git 创建的 clean/dirty repo 可 status/log/show/diff</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>PGIT-034</td><td>Portable → Git</td><td>Portable init/add/commit 后 <code>git fsck --strict</code>、status/log 通过</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>PGIT-035</td><td>分支/tag 互操作</td><td>真实 Git 可列出/解析 Portable refs</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>PGIT-036</td><td>Index 互操作</td><td>Portable add 后真实 Git status 显示相同 staged 集合</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>PGIT-037</td><td>CLI 差分：status</td><td>规范化后 staged/unstaged/untracked 一致</td><td><span class="tag risk">Parity</span></td></tr>
+<tr><td>PGIT-038</td><td>CLI 差分：diff/log/show</td><td>patch/commit 摘要一致；时间/路径规范</td><td><span class="tag risk">Parity</span></td></tr>
+</tbody></table>
+</section>
+
+<section id="portable-default">
+<h2>8. Portable 默认与 CLI 可选</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>级别</th></tr></thead><tbody>
+<tr><td>PGIT-071</td><td>Browser/WebView Profile 默认选择</td><td>Portable 为默认 GitBackend，不探测或要求 CLI</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>PGIT-072</td><td>Node/Sandbox 未注册 CLI</td><td>仍默认 Portable；common subset 完整可用</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>PGIT-073</td><td>显式注册 CLI 高级后端</td><td>common tools 仍由 Portable 提供；高级能力使用独立工具</td><td><span class="tag unit">Contract</span></td></tr>
+<tr><td>PGIT-074</td><td>Portable/CLI capability report</td><td>后端差异通过 limitations 表达，不改变 Agent 工具名</td><td><span class="tag unit">Contract</span></td></tr>
+<tr><td>PGIT-075</td><td>CLI 测试 oracle 不可用</td><td>纯 JavaScript 测试仍可运行；CLI interop 用例明确标记环境前置</td><td><span class="tag e2e">E2E</span></td></tr>
+</tbody></table>
+</section>
+
+<section id="capsule">
+<h2>9. Workspace Capsule</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>级别</th></tr></thead><tbody>
+<tr><td>PGIT-081</td><td>repository 导出/导入</td><td>objects/refs/HEAD/index 完整，worktree hash 不变</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>PGIT-082</td><td>dirty/staged/branch 往返</td><td>真实 Git 与 Portable 均看到相同状态</td><td><span class="tag risk">E2E</span></td></tr>
+<tr><td>PGIT-083</td><td>导入后无 Git binary</td><td>Portable 可继续 status/add/commit/log</td><td><span class="tag e2e">E2E</span></td></tr>
+</tbody></table>
+</section>
+
+<section id="paths">
+<h2>10. 路径、文件语义与资源上限</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>级别</th></tr></thead><tbody>
+<tr><td>PGIT-059</td><td>Index/tree 大小写冲突</td><td>大小写不敏感目标导入前阻断或显式映射，不合并</td><td><span class="tag sec">Security</span></td></tr>
+<tr><td>PGIT-060</td><td>NFC/NFD Unicode path</td><td>规范化稳定；冲突不覆盖</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PGIT-061</td><td>symlink tree entry</td><td>mode/target 保持；越界 checkout 拒绝</td><td><span class="tag sec">Security</span></td></tr>
+<tr><td>PGIT-062</td><td>gitlink/submodule entry</td><td>仅保存/展示 commit 引用，不递归访问</td><td><span class="tag unit">Compatibility</span></td></tr>
+<tr><td>PGIT-063</td><td>Index 与 tree path 类型冲突</td><td>文件和目录冲突明确失败，不覆盖</td><td><span class="tag risk">Unit</span></td></tr>
+<tr><td>PGIT-064</td><td>CRLF blob 与 worktree</td><td>字节保持；Portable 不应用 autocrlf</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PGIT-065</td><td>NUL/binary blob</td><td>diff 标 binary；内容不被 UTF-8 截断</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PGIT-066</td><td>大 blob 分页读取与 hash</td><td>内存有界；OID 与真实 Git 一致</td><td><span class="tag risk">Performance</span></td></tr>
+<tr><td>PGIT-067</td><td>路径长度/深度上限</td><td>稳定 limitation，不写出部分 worktree</td><td><span class="tag risk">Compatibility</span></td></tr>
+</tbody></table>
+</section>
+
+<section id="security">
+<h2>11. 安全、边界与故障</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>级别</th></tr></thead><tbody>
+<tr><td>PGIT-068</td><td>Pure JS no-git runtime</td><td>common subset 通过，不调用 PATH/child_process/node:fs</td><td><span class="tag sec">Boundary</span></td></tr>
+<tr><td>PGIT-069</td><td>Bundle 中无 node:* 引用</td><td>PortableGit 依赖图只包含 Workspace/平台无关模块</td><td><span class="tag sec">Boundary</span></td></tr>
+<tr><td>PGIT-070</td><td>CLI 不存在</td><td>能力仍 available，不使用 fake/optional skip</td><td><span class="tag e2e">E2E</span></td></tr>
+<tr><td>PGIT-076</td><td>tree/index 绝对路径/盘符/..</td><td>拒绝，不写出 Workspace</td><td><span class="tag sec">Security</span></td></tr>
+<tr><td>PGIT-077</td><td>大小写/Unicode collision</td><td>不覆盖两个逻辑文件；限制明确</td><td><span class="tag sec">Security</span></td></tr>
+<tr><td>PGIT-078</td><td>symlink target 越界</td><td>读取/checkout 不跟随到 Workspace 外</td><td><span class="tag sec">Security</span></td></tr>
+<tr><td>PGIT-079</td><td>hooks/filter/textconv</td><td>从不执行，仓库可继续读取但相关扩展标 limitation</td><td><span class="tag sec">Security</span></td></tr>
+<tr><td>PGIT-080</td><td>config 中 remote credential</td><td>不进入 Capsule/Prompt/Trace；必要时移除或拒绝</td><td><span class="tag sec">Security</span></td></tr>
+<tr><td>PGIT-085</td><td>oversized object/delta chain</td><td>超限 fail closed，无资源耗尽</td><td><span class="tag risk">Security</span></td></tr>
+<tr><td>PGIT-086</td><td>commit 写入中断</td><td>旧 HEAD/index 保持；临时对象不改变可见状态</td><td><span class="tag risk">Crash</span></td></tr>
+<tr><td>PGIT-087</td><td>hook 文件存在</td><td>Portable 永不执行或请求系统执行 hook</td><td><span class="tag sec">Security</span></td></tr>
+<tr><td>PGIT-088</td><td>filter/textconv 配置</td><td>不启动外部程序，不改变 worktree 字节</td><td><span class="tag sec">Security</span></td></tr>
+<tr><td>PGIT-089</td><td>malicious index offsets</td><td>越界、负长度和循环数据 fail closed</td><td><span class="tag sec">Security</span></td></tr>
+<tr><td>PGIT-090</td><td>pack 内对象重叠/错类型</td><td>结构性校验失败，不返回伪造 object</td><td><span class="tag sec">Security</span></td></tr>
+<tr><td>PGIT-091</td><td>checkout 前后 symlink 交换</td><td>不写到 Workspace 外；失败保持旧状态</td><td><span class="tag sec">Security</span></td></tr>
+<tr><td>PGIT-092</td><td>ref 并发更新</td><td>CAS/fencing 阻止丢失更新；冲突可诊断</td><td><span class="tag risk">Concurrency</span></td></tr>
+<tr><td>PGIT-093</td><td>worktree hash 与 Index OID 不符</td><td>status 正确报告 modified，不信任 stat cache</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PGIT-094</td><td>unknown config include/path</td><td>不读取 Workspace 外配置，不执行外部命令</td><td><span class="tag sec">Security</span></td></tr>
+<tr><td>PGIT-084</td><td>依赖图和 bundle 扫描</td><td>Portable runtime 不包含 node:*、child_process、原生 git 或 WASM 扩展</td><td><span class="tag sec">Boundary</span></td></tr>
+</tbody></table>
+</section>
+
+<section id="parity">
+<h2>12. 差分、属性与限制</h2>
+<pre>不变量：
+  OID = SHA1(type + ' ' + size + NUL + content)
+  index path <=> valid WorkspacePath
+  commit tree = staged snapshot
+  worktree bytes unchanged by status/diff/log
+  checkout failure => old HEAD + index + worktree preserved
+  no hook/filter/process invocation in Portable backend
+  unsupported feature => no partial state mutation
+
+bounded property inputs:
+  files 1..20
+  paths with case/unicode
+  tree depth <= 5
+  delta chain <= 32
+  commit DAG depth <= 20</pre>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>PGIT-095</td><td>SHA-256 repo</td><td>稳定 unsupported；不写 index/ref</td></tr>
+<tr><td>PGIT-096</td><td>unknown index extension</td><td>只读或拒绝写，不丢失 extension</td></tr>
+<tr><td>PGIT-097</td><td>linked worktree</td><td>v1 unsupported，不把外部 .git 路径带入 Agent</td></tr>
+<tr><td>PGIT-098</td><td>submodule</td><td>gitlink/.gitmodules 可见；不自动拉取</td></tr>
+<tr><td>PGIT-099</td><td>LFS pointer</td><td>pointer 保持；缺失 object warning</td></tr>
+<tr><td>PGIT-100</td><td>CLI 与 Portable 不共性</td><td>只暴露 stable capability；高级 CLI 操作不改变 common tools</td></tr>
+</tbody></table>
+</section>
+
+<section id="gates">
+<h2>13. 发布门禁</h2>
+<div class="grid3">
+<div class="card"><div class="metric">100%</div><h3>格式互操作</h3><p>Portable 写出的每个必需仓库由真实 Git 读取通过。</p></div>
+<div class="card"><div class="metric">0</div><h3>宿主依赖</h3><p>Pure JS E2E 不调用 git、node process 或 node:fs。</p></div>
+<div class="card"><div class="metric">0</div><h3>静默扩权</h3><p>不支持项、hooks、filter、凭据不静默执行或丢弃。</p></div>
+</div>
+<table><thead><tr><th>门禁</th><th>证据</th><th>阻塞</th></tr></thead><tbody>
+<tr><td>Object/format</td><td>Portable fixtures + real Git <code>fsck --strict</code></td><td>OID/tree/index 不一致</td></tr>
+<tr><td>Real repo read</td><td>loose/pack repo status/log/show/diff</td><td>无法读取常见 clone</td></tr>
+<tr><td>Write interop</td><td>Portable commit → git status/log/show</td><td>真实 Git 拒绝或状态不一致</td></tr>
+<tr><td>Pure JS E2E</td><td>禁用 git/PATH/node process</td><td>common subset 依赖宿主</td></tr>
+<tr><td>Capsule</td><td>dirty/staged/branch 跨宿主往返</td><td>索引/历史/ref 丢失</td></tr>
+<tr><td>Security</td><td>恶意 object/pack/index/path/hook fixture</td><td>越界、执行或半写入</td></tr>
+<tr><td>Parity</td><td>Portable vs CLI normalized golden</td><td>核心状态不可解释地不同</td></tr>
+</tbody></table>
+</section>
+
+<section id="phases">
+<h2>14. 阶段验收</h2>
+<div class="phase"><div class="phase-no">G1</div><div><h3>Objects/Refs</h3></div></div>
+<ul><li>PGIT-007..017、026..027、032..035、068..070。</li><li>真实 Git 创建仓库可被 Portable 读取。</li></ul>
+<div class="phase"><div class="phase-no">G2</div><div><h3>Index/Status</h3></div></div>
+<ul><li>PGIT-018..021、036..037、053..058。</li><li>staged/unstaged/untracked/ignored 与真实 Git 对齐。</li></ul>
+<div class="phase"><div class="phase-no">G3</div><div><h3>Write commands</h3></div></div>
+<ul><li>PGIT-001、022..025、028..031、034..038。</li><li>Portable commit 可被标准 Git 读取，checkout 失败不覆盖。</li></ul>
+<div class="phase"><div class="phase-no">G4</div><div><h3>Pack/Capsule</h3></div></div>
+<ul><li>PGIT-014..016、081..086。</li><li>常见 pack 仓库、Capsule dirty/staged/branch 往返通过。</li></ul>
+<div class="phase"><div class="phase-no">G5</div><div><h3>Limitations/CLI parity</h3></div></div>
+<ul><li>PGIT-079..080、095..100。</li><li>不支持能力与可选 CLI 边界完成文档化和测试。</li></ul>
+</section>
+
+<section id="acceptance">
+<h2>15. 完成定义</h2>
+<table><thead><tr><th>维度</th><th>完成标准</th></tr></thead><tbody>
+<tr><td>默认性</td><td>无 Git 的 Browser/iOS 环境通过全部 common subset 验收。</td></tr>
+<tr><td>格式</td><td>Portable 写出的 objects/refs/index 被真实 Git 接受。</td></tr>
+<tr><td>读取</td><td>常见 loose/pack Git 仓库可完成 status/log/show/diff。</td></tr>
+<tr><td>写入</td><td>init/add/commit/branch/checkout 在真实 Git 与 Portable 间互操作。</td></tr>
+<tr><td>安全</td><td>恶意格式 fail closed；hook/filter/credential 不执行、不泄漏。</td></tr>
+<tr><td>连续性</td><td>Repository Capsule 往返保持 HEAD、branch、index、worktree。</td></tr>
+<tr><td>限制</td><td>SHA-256、merge/rebase、submodule/LFS 等明确报告。</td></tr>
+</tbody></table>
+<p><a href="git-portable-backend-design-v1.html#requirements">← 返回 PortableGitBackend 设计</a></p>
+<p class="foot">需求：REQ-GIT-001 · 依赖：REQ-HOST-001、REQ-WORKSPACE-001 · 目标版本：0.3.0 · 状态：Proposed / Review · 测试设计版本：1.0 · 本文未声称功能已实现</p>
+</section>
+</div>
+</body>
+</html>
