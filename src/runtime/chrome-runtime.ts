@@ -19,6 +19,7 @@ import { AgentError } from '../core/errors';
 import { SequentialIdGenerator, systemClock } from '../core/ports';
 import { PermissionModeRegistry } from '../core/policy';
 import { ModelGateway } from '../core/model-gateway';
+import type { WorkspaceRuntime } from '../core/workspace-runtime';
 import { chromePromptProfile } from '../adapters/chrome-prompts';
 import { PortApprovalBroker } from './approval-broker';
 import type { RuntimeBundle } from './runtime-gateway';
@@ -30,6 +31,9 @@ import { WorkspaceSubagentDriver } from './workspace-subagent-driver';
 import { TabSessionRegistry } from '../adapters/chrome-workspace-session-registry';
 import { ChromeRuntimeExtension } from '../adapters/chrome-runtime-extension';
 import { CONFIG_KEY, migrateLegacyStorage } from './storage-migration';
+import { PortableGitBackend } from '../git/backend';
+import { WorkspaceContinuityService } from '../workspace/continuity';
+import { serializeWorkspaceCapsule } from '../workspace/codec';
 
 export const KERNEL_PORT_NAME = 'tinyai-runtime-v1';
 
@@ -103,13 +107,15 @@ export async function createChromeRuntimeBundle(
     chromeApi?: typeof chrome;
     browser?: ChromeBrowserProvider;
     createBrowser?: () => ChromeBrowserProvider;
+    initialCapsule?: Uint8Array;
   } = {}
 ): Promise<RuntimeBundle> {
+  const chromeHost = new ChromeHostBridge({
+    storage: options.storage as unknown as ChromeStorageArea,
+    id: 'tinyai-chrome-virtual-workspace',
+  });
   const virtualWorkspace = new VirtualWorkspace({
-    host: new ChromeHostBridge({
-      storage: options.storage as unknown as ChromeStorageArea,
-      id: 'tinyai-chrome-virtual-workspace',
-    }),
+    host: chromeHost,
     storageKey: 'tinyai:virtual-workspace:v1',
   });
   const storage = options.storage ?? chromeLocalStorage();
@@ -145,6 +151,33 @@ export async function createChromeRuntimeBundle(
       get(keys: string | string[] | null): Promise<Record<string, unknown>>;
     }
   );
+  let activeRuntime: WorkspaceRuntime | undefined;
+  const continuity = new WorkspaceContinuityService({
+    workspaceId: 'tinyai-browser-workspace',
+    vfs: virtualWorkspace.fs,
+    git: new PortableGitBackend(virtualWorkspace.fs),
+    sessions: sessionStore,
+    artifacts: artifactStore,
+    environmentId: 'chrome-extension-v1',
+    hostProfile: 'browser-agent',
+    agentVersion: '0.3.0',
+    newId: () => `capsule_${crypto.randomUUID()}`,
+    beforeExport: async () => {
+      if (!activeRuntime) return;
+      for (const session of await activeRuntime.listSessions()) {
+        await activeRuntime.flush(session.sessionId);
+      }
+    },
+    environment: {
+      manifestVersion: 1,
+      requiredActions: [],
+      requiredCapabilities: ['filesystem', 'git', 'storage'],
+    },
+  });
+  if (options.initialCapsule) {
+    const prepared = await continuity.prepareImport(options.initialCapsule);
+    await continuity.commitImport(prepared, { replaceProject: true });
+  }
   const hooks = new HookRunner();
   await registerDeclarativeHooks(hooks, hookConfig['tinyai-declarative-hooks']);
   const ids = new SequentialIdGenerator();
@@ -319,6 +352,7 @@ export async function createChromeRuntimeBundle(
     ],
     workspaceTabs,
   });
+  activeRuntime = mainWorkspace.runtime;
   const unsubscribeChildren = coordinator.subscribe((child) => {
     mainWorkspace.runtime.updateChildTask(child.parentTaskId, {
       taskId: child.taskId,
@@ -349,6 +383,15 @@ export async function createChromeRuntimeBundle(
     approval,
     skills: () => skillStore.list(),
     artifacts: artifactStore,
+    workspaceTransfer: {
+      exportCapsule: () => continuity.exportCapsule(),
+      serializeCapsule: async () =>
+        serializeWorkspaceCapsule(await continuity.exportCapsule()),
+      importCapsule: async (capsule) => {
+        const prepared = await continuity.prepareImport(capsule);
+        return continuity.commitImport(prepared, { replaceProject: true });
+      },
+    },
     async dispose() {
       await extension.dispose();
       unsubscribeChildren();

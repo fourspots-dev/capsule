@@ -26,7 +26,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <small>REQ-GIT-001 / PORTABLE GIT / DESIGN V1</small>
 <h1>PortableGitBackend<br>纯 TS 常用 Git 语义与格式兼容</h1>
 <p>PortableGitBackend 是 tinyai 的默认 Git 后端，建立在 WorkspaceFileSystem 之上，不要求宿主安装 git。它实现 Agent 必需的常用本地 Git 子集，并读写 Git-compatible objects、refs、index 和 HEAD；CLI 后端仅作为可选加速与高级兼容性校验。</p>
-<div class="chips"><span class="chip">Target 0.3.0</span><span class="chip">Portable First</span><span class="chip">Git-compatible Format</span><span class="chip">No Native Dependency</span><span class="chip">Status: Proposed / Review</span></div>
+<div class="chips"><span class="chip">Target 0.3.0</span><span class="chip">Portable First</span><span class="chip">Git-compatible Format</span><span class="chip">No Native Dependency</span><span class="chip">Status: Verified core v1</span></div>
 </header>
 <nav><a href="#goal">目标</a><a href="#scope">范围</a><a href="#requirements">需求</a><a href="#architecture">架构</a><a href="#objects">对象</a><a href="#format">文件格式</a><a href="#commands">命令</a><a href="#status">Status/Index</a><a href="#safety">安全与并发</a><a href="#cli">CLI定位</a><a href="#capsule">Workspace迁移</a><a href="#compat">兼容策略</a><a href="#phases">阶段</a><a href="#acceptance">验收</a></nav>
 
@@ -266,7 +266,7 @@ Result:
 </tbody></table>
 <p><a href="git-portable-backend-testing-v1.html#trace">查看 PortableGitBackend 测试方案 →</a></p>
 <p><a href="workspace-portability-design-v1.html#capsule">查看 Workspace Capsule 集成 →</a></p>
-<p class="foot">需求：REQ-GIT-001 · 依赖：REQ-HOST-001、REQ-WORKSPACE-001 · 目标版本：0.3.0 · 状态：Proposed / Review · 设计版本：1.0 · 本文未声称功能已实现</p>
+<p class="foot">需求：REQ-GIT-001 · 依赖：REQ-HOST-001、REQ-WORKSPACE-001 · 目标版本：0.3.0 · 状态：Verified core v1 · 设计版本：1.0 · 纯 JS、真实 Git 互操作和 Capsule 恢复已验证</p>
 </section>
 </div>
 </body>

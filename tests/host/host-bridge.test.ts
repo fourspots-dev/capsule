@@ -4,6 +4,7 @@ import {
   hasHostCapability,
   inspectHostCapabilities,
   MemoryHostBridge,
+  probeHostCapabilities,
   type HostBridge,
 } from '../../src/host';
 
@@ -95,5 +96,45 @@ describe('host capability discovery', () => {
     expect(() => assertHostCapabilities(malformed, [])).toThrow(
       /capabilities must be an array/
     );
+  });
+
+  it('probes named application actions and produces an environment fingerprint', async () => {
+    const base = new MemoryHostBridge({
+      descriptor: {
+        id: 'action-host',
+        capabilities: [
+          'storage',
+          'clock',
+          'scheduler',
+          'crypto',
+          'clone',
+          'actions',
+        ],
+      },
+    });
+    const host: HostBridge = {
+      ...base,
+      actions: {
+        describe: async () => [
+          {
+            id: 'app.game.check',
+            version: '1.0.0',
+            title: 'Check game',
+            description: 'Run game validation.',
+            inputSchema: { type: 'object', properties: {} },
+            effects: ['execute'],
+            risk: 'dangerous',
+            probe: async () => ({ state: 'available' }),
+          },
+        ],
+        invoke: async () => ({ value: { passed: true } }),
+      },
+    };
+    const report = await probeHostCapabilities(host);
+    expect(report.environmentFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(report.capabilities.find((item) => item.id === 'actions')).toMatchObject({
+      state: 'available',
+      details: { actionIds: ['app.game.check'] },
+    });
   });
 });

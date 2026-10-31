@@ -26,7 +26,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <small>REQ-GIT-001 / PORTABLE GIT / TEST DESIGN V1</small>
 <h1>PortableGitBackend<br>格式兼容与命令语义测试</h1>
 <p>用真实 Git 作为互操作 oracle，用独立解析器验证生成格式，用纯 JS 环境证明不依赖 git/node process，并以跨后端差分测试保证 PortableGitBackend 是实现主体而非降级附属。</p>
-<div class="chips"><span class="chip">Target 0.3.0</span><span class="chip">Git CLI Oracle</span><span class="chip">Pure JS E2E</span><span class="chip">Format Compatibility</span><span class="chip">Status: Proposed / Review</span></div>
+<div class="chips"><span class="chip">Target 0.3.0</span><span class="chip">Git CLI Oracle</span><span class="chip">Pure JS E2E</span><span class="chip">Format Compatibility</span><span class="chip">Status: Verified core v1</span></div>
 </header>
 <nav><a href="#strategy">策略</a><a href="#trace">追踪矩阵</a><a href="#fixtures">夹具</a><a href="#objects">Objects/Refs</a><a href="#index">Index/Status</a><a href="#commands">命令</a><a href="#interop">Git互操作</a><a href="#portable-default">Portable默认</a><a href="#capsule">Capsule</a><a href="#paths">路径/大文件</a><a href="#security">安全故障</a><a href="#parity">差分/属性</a><a href="#gates">门禁</a><a href="#phases">阶段验收</a></nav>
 
@@ -278,7 +278,7 @@ bounded property inputs:
 <tr><td>限制</td><td>SHA-256、merge/rebase、submodule/LFS 等明确报告。</td></tr>
 </tbody></table>
 <p><a href="git-portable-backend-design-v1.html#requirements">← 返回 PortableGitBackend 设计</a></p>
-<p class="foot">需求：REQ-GIT-001 · 依赖：REQ-HOST-001、REQ-WORKSPACE-001 · 目标版本：0.3.0 · 状态：Proposed / Review · 测试设计版本：1.0 · 本文未声称功能已实现</p>
+<p class="foot">需求：REQ-GIT-001 · 依赖：REQ-HOST-001、REQ-WORKSPACE-001 · 目标版本：0.3.0 · 状态：Verified core v1 · 测试设计版本：1.0 · Portable Git 与真实 Git 双向兼容证据已通过</p>
 </section>
 </div>
 </body>

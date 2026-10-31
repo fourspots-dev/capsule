@@ -26,7 +26,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <small>REQ-WORKSPACE-001 / PORTABLE WORKSPACE CAPSULE / TEST DESIGN V1</small>
 <h1>Portable Workspace Capsule<br>跨宿主连续性测试方案</h1>
 <p>证明同一 Workspace 在导出、传输、导入和恢复后仍保持内容、会话、任务、版本、Artifact、证据与应用动作要求的一致性；任何无法迁移的状态都必须显式失败或降级，不能静默丢失或误报成功。</p>
-<div class="chips"><span class="chip">Target 0.3.0</span><span class="chip">Round-trip</span><span class="chip">Atomic Import</span><span class="chip">Fault Injection</span><span class="chip">Environment Drift</span><span class="chip">Status: Proposed / Review</span></div>
+<div class="chips"><span class="chip">Target 0.3.0</span><span class="chip">Round-trip</span><span class="chip">Atomic Import</span><span class="chip">Fault Injection</span><span class="chip">Environment Drift</span><span class="chip">Status: Verified core v1</span></div>
 </header>
 <nav><a href="#strategy">策略</a><a href="#scope">边界</a><a href="#trace">追踪矩阵</a><a href="#fixtures">夹具</a><a href="#capsule">Capsule</a><a href="#project">项目树</a><a href="#state">Agent状态</a><a href="#repo">Git/VCS</a><a href="#artifact">Artifact证据</a><a href="#path">路径</a><a href="#atomic">原子导入</a><a href="#resume">恢复对账</a><a href="#hosts">跨宿主</a><a href="#security">安全故障</a><a href="#state-space">状态空间</a><a href="#gates">发布门禁</a><a href="#phases">阶段验收</a></nav>
 
@@ -330,7 +330,7 @@ Host Transport bytes + Host capability probes</pre>
 <div class="card"><h3>确认 04</h3><p>接受 Host 运输不透明 bytes，Workspace 负责解释 Capsule，Core 不读取宿主平台信息做分支。</p></div>
 </div>
 <p><a href="workspace-portability-design-v1.html#requirements">← 返回 Workspace Capsule 设计</a></p>
-<p class="foot">需求：REQ-WORKSPACE-001 · 依赖：REQ-HOST-001 · 目标版本：0.3.0 · 状态：Proposed / Review · 测试设计版本：1.0 · 本文未声称功能已实现</p>
+<p class="foot">需求：REQ-WORKSPACE-001 · 依赖：REQ-HOST-001 · 目标版本：0.3.0 · 状态：Verified core v1 · 测试设计版本：1.0 · Capsule 完整性、Chrome 导入运行和 Session 续跑已通过</p>
 </section>
 </div>
 </body>

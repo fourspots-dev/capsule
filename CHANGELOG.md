@@ -1,21 +1,31 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
-### Planned
+### Features
 
-- `REQ-HOST-001`: proposed host capability ports, runtime probes, composable
-  workspace tool packs, profile-driven degradation and matching test design.
-- `REQ-WORKSPACE-001`: proposed portable workspace capsule for cross-host
-  session, project, repository, artifact, evidence and environment continuity.
-- `REQ-HOST-001`: clarify WorkspacePath, transport, environment fingerprint and
-  ephemeral-resource boundaries required by the workspace capsule.
-- `REQ-HOST-001`: replace the generic execution baseline with declarative,
-  probeable application Action Providers; test/build/browser capabilities are
-  registered only by the embedding application.
-- `REQ-GIT-001`: proposed a default pure-TypeScript PortableGitBackend with a
-  common local Git subset and Git-compatible objects, refs, HEAD and index;
-  the CLI backend remains optional.
+- `REQ-HOST-001`: probeable host capabilities, declarative application Action
+  Providers, capability graphs, composable tool packs, environment fingerprints
+  and explicit degradation without a built-in generic command runner.
+- `REQ-WORKSPACE-001`: integrity-checked Workspace Capsules with project,
+  Session, Portable Git, Artifact, evidence and environment state; staged
+  import, rollback, resume reconciliation and Node/Chrome transfer support.
+- `REQ-GIT-001`: default pure-TypeScript PortableGitBackend with Git-compatible
+  loose/packed objects, refs, HEAD and Index; real-Git interoperability and an
+  optional CLI conformance backend.
+- Headless workspace agent and candidate-aware completion guard driven only by
+  declared application actions.
+
+### Verification
+
+- `npm run check`: 350 deterministic tests and all production builds.
+- `npm run test:e2e`: 5 real Chrome extension tests.
+- Real DeepSeek agent run built and committed `VOID LANCE`, a dependency-free
+  WebGL 3D space combat game.
+- Game gate: 76 unit/render tests and 46 validation checks.
+- Migration: Node Local Host → Capsule → Chrome Portable Host ran the game,
+  exported a round-trip Capsule, restored to Node, and resumed the same Session
+  with a fresh passing application check.
 
 ## 0.2.1
 

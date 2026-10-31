@@ -2977,7 +2977,7 @@
         if (entry.stage === 0) indexByIdentity.set(entry.path, entry);
       }
       const staged = compareMaps(headFiles, indexByIdentity);
-      const files = (await this.fs.list("", { recursive: true, signal })).filter((entry) => entry.kind === "file").filter((entry) => !entry.path.startsWith(`${this.gitDir}/`));
+      const files = (await this.fs.list("", { recursive: true, signal })).filter((entry) => entry.kind === "file").filter((entry) => !isControlPath(entry.path, this.gitDir));
       const ignore = await this.loadIgnore();
       const untracked = [];
       const ignored = [];
@@ -3030,13 +3030,16 @@
         assertActive2(signal);
         if (!input.trim() || input.trim() === ".") {
           for (const file of await this.fs.list("", { recursive: true, signal })) {
-            if (file.kind === "file" && !file.path.startsWith(`${this.gitDir}/`)) {
+            if (file.kind === "file" && !isControlPath(file.path, this.gitDir)) {
               selected.add(file.path);
             }
           }
           continue;
         }
         const path = normalizeGitPath(input);
+        if (isControlPath(path, this.gitDir)) {
+          throw new AgentError("GIT_PATH_RESERVED", `Control path is reserved: ${path}`);
+        }
         const info2 = await this.fs.stat(path, signal);
         if (!info2) {
           for (const existing of [...indexByPath.keys()]) {
@@ -3050,7 +3053,7 @@
         else {
           const nested = await this.fs.list(path, { recursive: true, signal });
           for (const file of nested) {
-            if (file.kind === "file" && !file.path.startsWith(`${this.gitDir}/`)) {
+            if (file.kind === "file" && !isControlPath(file.path, this.gitDir)) {
               selected.add(file.path);
             }
           }
@@ -3363,7 +3366,7 @@
     async worktreeFiles(signal) {
       const result = /* @__PURE__ */ new Map();
       for (const file of await this.fs.list("", { recursive: true, signal })) {
-        if (file.kind !== "file" || file.path.startsWith(`${this.gitDir}/`)) continue;
+        if (file.kind !== "file" || isControlPath(file.path, this.gitDir)) continue;
         const data = await this.fs.read(file.path, { signal });
         result.set(file.path, {
           path: file.path,
@@ -3471,6 +3474,9 @@
       error2.name = "AbortError";
       throw error2;
     }
+  }
+  function isControlPath(path, gitDir) {
+    return path === gitDir || path.startsWith(`${gitDir}/`) || path === ".tinyai" || path.startsWith(".tinyai/");
   }
 
   // src/git/tools.ts
@@ -4390,6 +4396,17 @@
       await this.loading;
     }
   };
+  function createWorkspaceBundle(input) {
+    return parseWorkspaceBundle({
+      format: WORKSPACE_BUNDLE_FORMAT,
+      schemaVersion: WORKSPACE_BUNDLE_SCHEMA_VERSION,
+      ...input.createdAt === void 0 ? {} : { createdAt: input.createdAt },
+      ...input.revision ? { revision: input.revision } : {},
+      ...input.metadata ? { metadata: { ...input.metadata } } : {},
+      directories: input.directories ?? [],
+      files: input.files
+    });
+  }
   function parseWorkspaceBundle(input) {
     const value = input instanceof Uint8Array ? parseJson(input) : input;
     if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -6516,6 +6533,7 @@
   var capabilityOrder = [
     "storage",
     "actions",
+    "interactiveActions",
     "workspace.import",
     "workspace.export",
     "workspace.picker",
@@ -6604,12 +6622,12 @@
   }
   function assertHostCapabilities(host, required) {
     const report = inspectHostCapabilities(host);
-    const invalid3 = report.diagnostics.find(
+    const invalid4 = report.diagnostics.find(
       (diagnostic) => diagnostic.severity === "error"
     );
-    if (invalid3) {
-      throw new AgentError(invalid3.code, invalid3.message, {
-        details: { capability: invalid3.capability }
+    if (invalid4) {
+      throw new AgentError(invalid4.code, invalid4.message, {
+        details: { capability: invalid4.capability }
       });
     }
     const missing = required.filter(
@@ -6633,6 +6651,8 @@
         return Boolean(host.storage);
       case "actions":
         return typeof host.actions?.describe === "function" && typeof host.actions?.invoke === "function";
+      case "interactiveActions":
+        return typeof host.interactiveActions?.open === "function";
       case "workspace.import":
         return typeof host.workspace?.importWorkspace === "function";
       case "workspace.export":
@@ -7121,9 +7141,9 @@
   }
 
   // src/adapters/virtual-workspace-tools.ts
-  function createVirtualWorkspaceTools(workspace) {
+  function createVirtualWorkspaceTools(workspace, options = {}) {
     const git = new PortableGitBackend(workspace.fs);
-    return [
+    const tools = [
       tool3(
         "read_file",
         "Read a UTF-8 or base64 file from the virtual workspace.",
@@ -7436,6 +7456,9 @@
       ),
       ...createGitTools(git)
     ];
+    return options.includeVirtualShell === false ? tools.filter(
+      (tool5) => tool5.name !== "exec" && tool5.name !== "job_start" && tool5.name !== "job_read" && tool5.name !== "job_list" && tool5.name !== "job_cancel"
+    ) : tools;
   }
   function tool3(name, description, parameters, risk, effect, execute) {
     return {
@@ -8098,7 +8121,7 @@
           try {
             validateJsonValue(profile.resultSchema, result.output ?? result.summary, "result");
           } catch (error2) {
-            const invalid3 = {
+            const invalid4 = {
               ...result,
               status: "failed",
               summary: "Child result failed schema validation",
@@ -8112,8 +8135,8 @@
                 retryable: false
               }
             };
-            this.finish(task, invalid3);
-            return completionCopy(invalid3);
+            this.finish(task, invalid4);
+            return completionCopy(invalid4);
           }
         }
         this.finish(task, result);
@@ -13389,6 +13412,594 @@ ${lines.join("\n")}
     return [...skills.values()];
   }
 
+  // src/workspace/types.ts
+  var WORKSPACE_CAPSULE_FORMAT = "tinyai.workspace.capsule";
+  var WORKSPACE_CAPSULE_SCHEMA_VERSION = 1;
+
+  // src/workspace/path-policy.ts
+  var windowsReserved = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+  function validatePortableWorkspacePaths(paths) {
+    const folded = /* @__PURE__ */ new Map();
+    for (const original of paths) {
+      const path = original.normalize("NFC");
+      if (!path || path.startsWith("/") || path.startsWith("\\")) {
+        throw invalid3(path, "Paths must be non-empty and relative");
+      }
+      if (path.includes("\0")) throw invalid3(original, "Paths cannot contain NUL");
+      if (/^[A-Za-z]:/.test(path) || path.startsWith("//")) {
+        throw invalid3(original, "Drive and UNC paths are not portable");
+      }
+      for (const segment of path.split("/")) {
+        if (!segment || segment === "." || segment === "..") {
+          throw invalid3(original, "Dot path segments are not portable");
+        }
+        if (/[<>:"|?*]/.test(segment) || /[\x00-\x1f]/.test(segment)) {
+          throw invalid3(original, "Filename contains a non-portable character");
+        }
+        if (windowsReserved.test(segment) || segment.endsWith(".") || segment.endsWith(" ")) {
+          throw invalid3(original, "Filename is reserved or ambiguous on Windows");
+        }
+      }
+      const key = path.toLocaleLowerCase("en-US");
+      const existing = folded.get(key);
+      if (existing && existing !== path) {
+        throw invalid3(
+          original,
+          `Path collides by case with ${existing}`
+        );
+      }
+      folded.set(key, path);
+    }
+  }
+  function invalid3(path, detail) {
+    return new AgentError(
+      "WORKSPACE_PATH_NOT_PORTABLE",
+      `Workspace path is not portable (${detail}): ${path}`
+    );
+  }
+
+  // src/workspace/codec.ts
+  var encoder3 = new TextEncoder();
+  function canonicalJson(value) {
+    return JSON.stringify(canonicalize(value));
+  }
+  async function sha256Hex(value) {
+    if (!globalThis.crypto?.subtle) {
+      throw new AgentError(
+        "CAPSULE_CRYPTO_UNAVAILABLE",
+        "SHA-256 support is required"
+      );
+    }
+    const digest2 = await globalThis.crypto.subtle.digest(
+      "SHA-256",
+      value.buffer.slice(
+        value.byteOffset,
+        value.byteOffset + value.byteLength
+      )
+    );
+    return [...new Uint8Array(digest2)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+  async function buildWorkspaceCapsule(input) {
+    const partitions = normalizePartitions(input.partitions);
+    validateProjectPaths(partitions);
+    const refs = {};
+    for (const [name, value] of Object.entries(partitions)) {
+      if (value === void 0) continue;
+      const bytes = encoder3.encode(canonicalJson(value));
+      refs[name] = {
+        hash: await sha256Hex(bytes),
+        bytes: bytes.byteLength
+      };
+    }
+    const rootDigest = await sha256Hex(
+      encoder3.encode(canonicalJson(refs))
+    );
+    return {
+      manifest: {
+        format: WORKSPACE_CAPSULE_FORMAT,
+        schemaVersion: WORKSPACE_CAPSULE_SCHEMA_VERSION,
+        capsuleId: input.capsuleId,
+        workspaceId: input.workspaceId,
+        generation: input.generation,
+        createdAt: input.createdAt,
+        producer: { ...input.producer },
+        partitions: refs,
+        integrity: { algorithm: "sha256", rootDigest }
+      },
+      partitions
+    };
+  }
+  function serializeWorkspaceCapsule(capsule) {
+    return encoder3.encode(canonicalJson(capsule));
+  }
+  async function parseWorkspaceCapsule(input) {
+    let value = input;
+    if (input instanceof Uint8Array) {
+      try {
+        value = JSON.parse(new TextDecoder().decode(input));
+      } catch {
+        throw invalidCapsule("Capsule is not valid JSON");
+      }
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw invalidCapsule("Capsule must be an object");
+    }
+    const candidate = value;
+    if (candidate.manifest?.format !== WORKSPACE_CAPSULE_FORMAT || candidate.manifest.schemaVersion !== WORKSPACE_CAPSULE_SCHEMA_VERSION) {
+      throw new AgentError(
+        "CAPSULE_SCHEMA_UNSUPPORTED",
+        `Unsupported workspace capsule schema: ${String(candidate.manifest?.schemaVersion)}`
+      );
+    }
+    if (!candidate.partitions?.project) {
+      throw invalidCapsule("Capsule project partition is missing");
+    }
+    validateProjectPaths(candidate.partitions);
+    validateManifest(candidate.manifest);
+    const refs = candidate.manifest.partitions;
+    for (const name of requiredPartitions) {
+      if (!refs[name]) throw invalidCapsule(`Required partition is missing: ${name}`);
+    }
+    for (const [name, value2] of Object.entries(candidate.partitions)) {
+      if (value2 === void 0) continue;
+      const ref = refs[name];
+      if (!ref) throw invalidCapsule(`Partition reference is missing: ${name}`);
+      const bytes = encoder3.encode(canonicalJson(value2));
+      const hash = await sha256Hex(bytes);
+      if (hash !== ref.hash || bytes.byteLength !== ref.bytes) {
+        throw invalidCapsule(`Partition integrity mismatch: ${name}`);
+      }
+    }
+    const expectedRoot = await sha256Hex(
+      encoder3.encode(canonicalJson(refs))
+    );
+    if (expectedRoot !== candidate.manifest.integrity.rootDigest) {
+      throw invalidCapsule("Capsule root digest mismatch");
+    }
+    return {
+      manifest: candidate.manifest,
+      partitions: normalizePartitions(candidate.partitions)
+    };
+  }
+  var requiredPartitions = [
+    "project",
+    "agentState",
+    "artifacts",
+    "evidence",
+    "environment"
+  ];
+  function validateManifest(manifest) {
+    if (!manifest.capsuleId || !manifest.workspaceId || !Number.isInteger(manifest.generation) || manifest.generation < 0 || !Number.isFinite(manifest.createdAt) || !manifest.producer?.agentVersion || !manifest.producer.hostProfile || !manifest.producer.environmentId || manifest.integrity?.algorithm !== "sha256" || typeof manifest.integrity.rootDigest !== "string") {
+      throw invalidCapsule("Capsule manifest is incomplete");
+    }
+  }
+  function normalizePartitions(partitions) {
+    return {
+      project: {
+        ...partitions.project,
+        directories: [...partitions.project.directories].sort(),
+        files: [...partitions.project.files].sort(
+          (left, right) => left.path.localeCompare(right.path)
+        )
+      },
+      ...partitions.repository ? { repository: { ...partitions.repository } } : {},
+      agentState: {
+        sessions: [...partitions.agentState.sessions].sort(
+          (left, right) => left.sessionId.localeCompare(right.sessionId)
+        )
+      },
+      artifacts: {
+        records: [...partitions.artifacts.records].sort(
+          (left, right) => left.metadata.id.localeCompare(right.metadata.id)
+        )
+      },
+      evidence: {
+        records: [...partitions.evidence.records].sort(
+          (left, right) => left.id.localeCompare(right.id)
+        )
+      },
+      environment: {
+        manifestVersion: 1,
+        requiredActions: [...partitions.environment.requiredActions].sort(
+          (left, right) => left.id.localeCompare(right.id)
+        ),
+        requiredCapabilities: [...partitions.environment.requiredCapabilities].sort()
+      },
+      ...partitions.clientState ? { clientState: structuredClone(partitions.clientState) } : {}
+    };
+  }
+  function canonicalize(value) {
+    if (Array.isArray(value)) return value.map(canonicalize);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(
+        Object.entries(value).filter(([, item]) => item !== void 0).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, canonicalize(item)])
+      );
+    }
+    return value;
+  }
+  function invalidCapsule(message) {
+    return new AgentError("CAPSULE_INVALID", message);
+  }
+  function validateProjectPaths(partitions) {
+    validatePortableWorkspacePaths([
+      ...partitions.project.directories,
+      ...partitions.project.files.map((file) => file.path)
+    ]);
+  }
+
+  // src/workspace/continuity.ts
+  var WorkspaceContinuityService = class {
+    constructor(options) {
+      this.options = options;
+      this.generation = options.generation ?? 0;
+      this.now = options.now ?? (() => Date.now());
+      this.workspaceId = options.workspaceId;
+    }
+    options;
+    generation;
+    now;
+    evidenceRecords = [];
+    workspaceId;
+    importedRequiredActions = [];
+    importedRequiredCapabilities = [];
+    async exportCapsule() {
+      await this.options.beforeExport?.();
+      const sessions = await this.collectSessions();
+      const artifacts = await this.collectArtifacts();
+      this.evidenceRecords = await this.options.evidence?.() ?? this.evidenceRecords;
+      const repository = this.options.git?.exportRepository && await this.options.git.repository?.() ? {
+        format: "tinyai.git.repository",
+        dataBase64: bytesToBase642(await this.options.git.exportRepository())
+      } : void 0;
+      return buildWorkspaceCapsule({
+        capsuleId: this.options.newId?.() ?? `capsule_${this.now()}`,
+        workspaceId: this.workspaceId,
+        generation: this.generation,
+        createdAt: this.now(),
+        producer: {
+          agentVersion: this.options.agentVersion ?? "0.3.0-dev",
+          hostProfile: this.options.hostProfile ?? "portable",
+          environmentId: this.options.environmentId
+        },
+        partitions: {
+          project: await this.collectProject(),
+          ...repository ? { repository } : {},
+          agentState: { sessions },
+          artifacts: { records: artifacts },
+          evidence: {
+            records: this.evidenceRecords
+          },
+          environment: this.effectiveEnvironment(),
+          ...this.options.clientState ? { clientState: this.options.clientState } : {}
+        }
+      });
+    }
+    async transferToHost(host) {
+      if (typeof host.workspace?.exportWorkspace !== "function") {
+        throw new AgentError(
+          "HOST_CAPABILITY_MISSING",
+          `Host ${host.descriptor.id} does not support workspace.export`
+        );
+      }
+      const capsule = await this.exportCapsule();
+      await host.workspace.exportWorkspace(serializeWorkspaceCapsule(capsule));
+      return capsule;
+    }
+    async prepareImport(input, options = {}) {
+      const capsule = await parseWorkspaceCapsule(input);
+      const actions = new Map(
+        (options.availableActions ?? []).map((action) => [
+          action.descriptor.id,
+          action.descriptor
+        ])
+      );
+      const actionsMissing = [];
+      for (const requirement of capsule.partitions.environment.requiredActions) {
+        const action = actions.get(requirement.id);
+        const missing = !action;
+        const incompatible = action && requirement.versionRange && /^v?\d+\.\d+\.\d+$/.test(requirement.versionRange) && requirement.versionRange.replace(/^v/, "") !== action.version;
+        if (missing || incompatible) {
+          actionsMissing.push(requirement.id);
+          if (requirement.required) {
+            throw new AgentError(
+              "CAPSULE_ACTION_MISSING",
+              `Required application action is unavailable: ${requirement.id}`,
+              { details: { actionId: requirement.id } }
+            );
+          }
+        }
+      }
+      return {
+        capsule,
+        actionsMissing,
+        environmentChanged: capsule.manifest.producer.environmentId !== this.options.environmentId
+      };
+    }
+    async importFromHost(host, options = {}) {
+      if (typeof host.workspace?.importWorkspace !== "function") {
+        throw new AgentError(
+          "HOST_CAPABILITY_MISSING",
+          `Host ${host.descriptor.id} does not support workspace.import`
+        );
+      }
+      const bytes = await host.workspace.importWorkspace();
+      if (!bytes) {
+        throw new AgentError("CAPSULE_IMPORT_EMPTY", "Host returned no workspace capsule");
+      }
+      const prepared = await this.prepareImport(bytes, options);
+      return this.commitImport(prepared, options);
+    }
+    async commitImport(prepared, options = {}) {
+      const capsule = prepared.capsule;
+      const warnings = prepared.actionsMissing.map(
+        (actionId) => `Application action unavailable: ${actionId}`
+      );
+      const backup = await this.captureBackup();
+      try {
+        await this.materializeProject(
+          capsule.partitions.project,
+          options.replaceProject === true
+        );
+        if (capsule.partitions.repository && this.options.git?.importRepository) {
+          if (await this.options.vfs.stat(".git")) {
+            await this.options.vfs.remove(".git", { recursive: true });
+          }
+          await this.options.git.importRepository(
+            base64ToBytes2(capsule.partitions.repository.dataBase64)
+          );
+        }
+        const sessions = capsule.partitions.agentState.sessions.map(
+          (snapshot) => reconcileSession(
+            snapshot,
+            prepared.environmentChanged,
+            this.options.environmentId,
+            this.now()
+          )
+        );
+        if (this.options.sessions) {
+          for (const session of sessions) await this.options.sessions.save(session);
+        }
+        await this.restoreArtifacts(capsule.partitions.artifacts.records);
+        this.evidenceRecords = await this.reconcileEvidence(
+          capsule.partitions.evidence.records,
+          prepared.environmentChanged
+        );
+        this.generation = Math.max(
+          this.generation + 1,
+          capsule.manifest.generation + 1
+        );
+        this.workspaceId = capsule.manifest.workspaceId;
+        this.importedRequiredActions = mergeActionRequirements(
+          this.importedRequiredActions,
+          capsule.partitions.environment.requiredActions
+        );
+        this.importedRequiredCapabilities = [
+          .../* @__PURE__ */ new Set([
+            ...this.importedRequiredCapabilities,
+            ...capsule.partitions.environment.requiredCapabilities
+          ])
+        ].sort();
+        return {
+          workspaceId: capsule.manifest.workspaceId,
+          generation: this.generation,
+          sessions: sessions.map((session) => session.sessionId),
+          artifacts: capsule.partitions.artifacts.records.length,
+          environmentChanged: prepared.environmentChanged,
+          warnings
+        };
+      } catch (error2) {
+        await this.restoreBackup(backup);
+        throw error2;
+      }
+    }
+    currentGeneration() {
+      return this.generation;
+    }
+    evidence() {
+      return this.evidenceRecords.map((record) => ({
+        ...record,
+        fileHashes: { ...record.fileHashes },
+        ...record.data === void 0 ? {} : { data: structuredClone(record.data) }
+      }));
+    }
+    effectiveEnvironment() {
+      return {
+        manifestVersion: 1,
+        requiredActions: mergeActionRequirements(
+          this.options.environment.requiredActions,
+          this.importedRequiredActions
+        ),
+        requiredCapabilities: [
+          .../* @__PURE__ */ new Set([
+            ...this.options.environment.requiredCapabilities,
+            ...this.importedRequiredCapabilities
+          ])
+        ].sort()
+      };
+    }
+    async collectProject() {
+      const files = [];
+      const directories = [];
+      for (const entry of await this.options.vfs.list("", { recursive: true })) {
+        if (entry.path === ".git" || entry.path.startsWith(".git/")) continue;
+        if (entry.path === ".tinyai" || entry.path.startsWith(".tinyai/")) continue;
+        if (entry.kind === "directory") directories.push(entry.path);
+        else {
+          files.push({
+            path: entry.path,
+            dataBase64: bytesToBase642(await this.options.vfs.read(entry.path)),
+            mode: entry.mode,
+            modifiedAt: entry.modifiedAt
+          });
+        }
+      }
+      return createWorkspaceBundle({
+        files,
+        directories,
+        createdAt: this.now(),
+        metadata: { workspaceId: this.options.workspaceId }
+      });
+    }
+    async collectSessions() {
+      if (!this.options.sessions) return [];
+      const sessions = [];
+      for (const summary of await this.options.sessions.list?.() ?? []) {
+        const snapshot = await this.options.sessions.load(summary.sessionId);
+        if (snapshot) sessions.push(cloneSnapshot(snapshot));
+      }
+      return sessions;
+    }
+    async collectArtifacts() {
+      if (!this.options.artifacts) return [];
+      const records = [];
+      for (const metadata of await this.options.artifacts.list()) {
+        const data = await this.options.artifacts.read(metadata.id);
+        if (!data) {
+          throw new AgentError(
+            "CAPSULE_ARTIFACT_MISSING",
+            `Artifact content is missing: ${metadata.id}`
+          );
+        }
+        records.push({
+          metadata: { ...metadata },
+          dataBase64: bytesToBase642(data)
+        });
+      }
+      return records;
+    }
+    async materializeProject(project, replace) {
+      if (replace) {
+        for (const entry of (await this.options.vfs.list("", { recursive: true })).filter((item) => item.kind === "file").filter((item) => item.path !== ".git" && !item.path.startsWith(".git/")).filter((item) => item.path !== ".tinyai" && !item.path.startsWith(".tinyai/")).sort((left, right) => right.path.length - left.path.length)) {
+          await this.options.vfs.remove(entry.path);
+        }
+      }
+      for (const directory of project.directories) {
+        await this.options.vfs.mkdir(directory, { recursive: true });
+      }
+      for (const file of project.files) {
+        await this.options.vfs.write(file.path, base64ToBytes2(file.dataBase64), {
+          ...file.mode === void 0 ? {} : { mode: file.mode }
+        });
+      }
+    }
+    async restoreArtifacts(records) {
+      if (!this.options.artifacts || !records.length) return;
+      if (!this.options.artifacts.restore) {
+        throw new AgentError(
+          "CAPSULE_ARTIFACT_RESTORE_UNSUPPORTED",
+          "Artifact store does not support stable restoration"
+        );
+      }
+      for (const record of records) {
+        await this.options.artifacts.restore(
+          record.metadata,
+          base64ToBytes2(record.dataBase64)
+        );
+      }
+    }
+    async reconcileEvidence(records, environmentChanged) {
+      const result = [];
+      for (const record of records) {
+        let current = !environmentChanged && record.status === "current";
+        if (current) {
+          for (const [path, expected] of Object.entries(record.fileHashes)) {
+            const info2 = await this.options.vfs.stat(path);
+            if (!info2) {
+              current = false;
+              break;
+            }
+            const actual = await sha256Hex(await this.options.vfs.read(path));
+            if (actual !== expected) {
+              current = false;
+              break;
+            }
+          }
+        }
+        result.push({
+          ...record,
+          status: record.status === "failed" ? "failed" : current ? "current" : "stale",
+          fileHashes: { ...record.fileHashes },
+          ...record.data === void 0 ? {} : { data: structuredClone(record.data) }
+        });
+      }
+      return result;
+    }
+    async captureBackup() {
+      const repository = this.options.git?.exportRepository && await this.options.git.repository?.() ? await this.options.git.exportRepository() : void 0;
+      return {
+        project: await this.collectProject(),
+        ...repository ? { repository } : {},
+        sessions: await this.collectSessions(),
+        artifacts: await this.collectArtifacts()
+      };
+    }
+    async restoreBackup(backup) {
+      await this.materializeProject(backup.project, true);
+      if (backup.repository && this.options.git?.importRepository) {
+        if (await this.options.vfs.stat(".git")) {
+          await this.options.vfs.remove(".git", { recursive: true });
+        }
+        await this.options.git.importRepository(backup.repository);
+      }
+      if (this.options.sessions) {
+        for (const session of backup.sessions) {
+          await this.options.sessions.save(session);
+        }
+      }
+      await this.restoreArtifacts(backup.artifacts);
+    }
+  };
+  function reconcileSession(input, environmentChanged, environmentId, now) {
+    const snapshot = cloneSnapshot(input);
+    const wasActive = snapshot.taskStatus === "queued" || snapshot.taskStatus === "running" || snapshot.taskStatus === "waiting";
+    if (wasActive) snapshot.taskStatus = "paused";
+    snapshot.tasks = (snapshot.tasks ?? []).map((task) => ({
+      ...task,
+      status: task.status === "queued" || task.status === "running" || task.status === "waiting" ? "paused" : task.status,
+      lease: void 0,
+      updatedAt: now
+    }));
+    snapshot.rows = snapshot.rows.map(
+      (row) => row.status === "pending" || row.status === "streaming" ? { ...row, status: "cancelled", completedAt: now } : row
+    );
+    snapshot.children = (snapshot.children ?? []).map(
+      (child) => child.status === "queued" || child.status === "running" ? { ...child, status: "cancelled", updatedAt: now } : child
+    );
+    snapshot.permission = snapshot.permission ? {
+      mode: "guarded",
+      ...snapshot.permission.plan ? { plan: snapshot.permission.plan } : {}
+    } : void 0;
+    snapshot.revision += 1;
+    snapshot.eventSeq += 1;
+    snapshot.events.push({
+      seq: snapshot.eventSeq,
+      type: "workspace.resumed",
+      revision: snapshot.revision,
+      occurredAt: now,
+      payload: {
+        environmentChanged,
+        environmentId,
+        interrupted: wasActive
+      }
+    });
+    return snapshot;
+  }
+  function mergeActionRequirements(base, overlay) {
+    const merged = /* @__PURE__ */ new Map();
+    for (const requirement of [...base, ...overlay]) {
+      const existing = merged.get(requirement.id);
+      merged.set(requirement.id, {
+        ...existing,
+        ...requirement,
+        required: Boolean(existing?.required || requirement.required),
+        ...requirement.versionRange ?? existing?.versionRange ? { versionRange: requirement.versionRange ?? existing?.versionRange } : {}
+      });
+    }
+    return [...merged.values()].sort(
+      (left, right) => left.id.localeCompare(right.id)
+    );
+  }
+
   // src/runtime/chrome-runtime.ts
   var KERNEL_PORT_NAME = "tinyai-runtime-v1";
   function parseKernelConfig(raw) {
@@ -13424,11 +14035,12 @@ ${lines.join("\n")}
     };
   }
   async function createChromeRuntimeBundle(options = {}) {
+    const chromeHost = new ChromeHostBridge({
+      storage: options.storage,
+      id: "tinyai-chrome-virtual-workspace"
+    });
     const virtualWorkspace = new VirtualWorkspace({
-      host: new ChromeHostBridge({
-        storage: options.storage,
-        id: "tinyai-chrome-virtual-workspace"
-      }),
+      host: chromeHost,
       storageKey: "tinyai:virtual-workspace:v1"
     });
     const storage = options.storage ?? chromeLocalStorage();
@@ -13459,6 +14071,33 @@ ${lines.join("\n")}
     const artifactStore = new ChromeArtifactStore(
       storage
     );
+    let activeRuntime;
+    const continuity = new WorkspaceContinuityService({
+      workspaceId: "tinyai-browser-workspace",
+      vfs: virtualWorkspace.fs,
+      git: new PortableGitBackend(virtualWorkspace.fs),
+      sessions: sessionStore,
+      artifacts: artifactStore,
+      environmentId: "chrome-extension-v1",
+      hostProfile: "browser-agent",
+      agentVersion: "0.3.0",
+      newId: () => `capsule_${crypto.randomUUID()}`,
+      beforeExport: async () => {
+        if (!activeRuntime) return;
+        for (const session of await activeRuntime.listSessions()) {
+          await activeRuntime.flush(session.sessionId);
+        }
+      },
+      environment: {
+        manifestVersion: 1,
+        requiredActions: [],
+        requiredCapabilities: ["filesystem", "git", "storage"]
+      }
+    });
+    if (options.initialCapsule) {
+      const prepared = await continuity.prepareImport(options.initialCapsule);
+      await continuity.commitImport(prepared, { replaceProject: true });
+    }
     const hooks = new HookRunner();
     await registerDeclarativeHooks(hooks, hookConfig["tinyai-declarative-hooks"]);
     const ids = new SequentialIdGenerator();
@@ -13629,6 +14268,7 @@ ${lines.join("\n")}
       ],
       workspaceTabs
     });
+    activeRuntime = mainWorkspace.runtime;
     const unsubscribeChildren = coordinator.subscribe((child) => {
       mainWorkspace.runtime.updateChildTask(child.parentTaskId, {
         taskId: child.taskId,
@@ -13659,6 +14299,14 @@ ${lines.join("\n")}
       approval,
       skills: () => skillStore.list(),
       artifacts: artifactStore,
+      workspaceTransfer: {
+        exportCapsule: () => continuity.exportCapsule(),
+        serializeCapsule: async () => serializeWorkspaceCapsule(await continuity.exportCapsule()),
+        importCapsule: async (capsule) => {
+          const prepared = await continuity.prepareImport(capsule);
+          return continuity.commitImport(prepared, { replaceProject: true });
+        }
+      },
       async dispose() {
         await extension.dispose();
         unsubscribeChildren();

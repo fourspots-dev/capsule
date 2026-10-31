@@ -10,6 +10,16 @@ import type {
   RuntimeExtension,
   RuntimeExtensionRequest,
 } from '../platform/runtime-extension';
+import type {
+  WorkspaceCapsule,
+  WorkspaceImportResult,
+} from '../workspace/types';
+
+export interface WorkspaceTransferControl {
+  exportCapsule(): Promise<WorkspaceCapsule>;
+  importCapsule(capsule: Uint8Array): Promise<WorkspaceImportResult>;
+  serializeCapsule(): Promise<Uint8Array>;
+}
 
 export interface RuntimeBundle {
   runtime: WorkspaceRuntime;
@@ -17,6 +27,7 @@ export interface RuntimeBundle {
   approval?: PortApprovalBroker;
   skills?: () => Promise<SkillDefinition[]>;
   artifacts?: ArtifactStore;
+  workspaceTransfer?: WorkspaceTransferControl;
   dispose(): Promise<void>;
 }
 

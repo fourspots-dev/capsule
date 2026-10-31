@@ -41,6 +41,7 @@ interface WorkspaceAgentOptions {
   exportCapsule?: string;
   scripts: NpmScriptActionDefinition[];
   maxSteps: number;
+  approval: 'auto' | 'ask';
 }
 
 const denyApproval: ApprovalPort = {
@@ -116,7 +117,7 @@ async function main(): Promise<void> {
       requiredActions: options.scripts.map((script) => ({
         id: script.id,
         versionRange: '1.0.0',
-        required: true,
+        required: false,
       })),
       requiredCapabilities: ['filesystem', 'git', 'actions'],
     },
@@ -134,7 +135,9 @@ async function main(): Promise<void> {
 
   const modes = new PermissionModeRegistry('sandbox-auto', () => systemClock.now());
   const ids = new SequentialIdGenerator();
-  const baseTools = createVirtualWorkspaceTools(workspace);
+  const baseTools = createVirtualWorkspaceTools(workspace, {
+    includeVirtualShell: false,
+  });
   const toolPackComposer = new ToolPackComposer();
   toolPackComposer.register({
     id: 'workspace-coding',
@@ -190,7 +193,9 @@ async function main(): Promise<void> {
   const toolsFor = (target: VirtualWorkspace): ToolDefinition[] => {
     let tools = toolCache.get(target);
     if (!tools) {
-      tools = createVirtualWorkspaceTools(target);
+      tools = createVirtualWorkspaceTools(target, {
+        includeVirtualShell: false,
+      });
       toolCache.set(target, tools);
     }
     return tools;
@@ -319,6 +324,19 @@ async function main(): Promise<void> {
   });
 
   try {
+    if (options.approval === 'auto') {
+      const modeAck = await runtime.command({
+        commandId: `mode_${Date.now()}`,
+        clientId: 'workspace-agent',
+        sessionId: options.sessionId,
+        type: 'set_mode',
+        payload: { mode: 'sandbox-auto' },
+        issuedAt: Date.now(),
+      });
+      if (modeAck.status !== 'accepted') {
+        throw new Error(modeAck.error?.message ?? `Mode command ${modeAck.status}`);
+      }
+    }
     const ack = await runtime.command({
       commandId: `agent_${Date.now()}`,
       clientId: 'workspace-agent',
@@ -377,7 +395,8 @@ function parseArgs(args: string[]): WorkspaceAgentOptions {
       arg === '--base-url' ||
       arg === '--import-capsule' ||
       arg === '--export-capsule' ||
-      arg === '--max-steps'
+      arg === '--max-steps' ||
+      arg === '--approval'
     ) {
       const value = args[++index];
       if (!value) throw new Error(`${arg} requires a value`);
@@ -421,6 +440,12 @@ function parseArgs(args: string[]): WorkspaceAgentOptions {
       : {}),
     scripts,
     maxSteps: Number(values.get('--max-steps') ?? 120),
+    approval:
+      values.get('--approval') === 'ask'
+        ? 'ask'
+        : values.get('--approval') === 'auto'
+          ? 'auto'
+          : (process.env.TINYAI_APPROVAL === 'ask' ? 'ask' : 'auto'),
   };
 }
 

@@ -63,6 +63,15 @@ describe('WorkspaceContinuityService', () => {
     expect(decoder.decode(await target.artifacts.read(artifacts[0].id))).toBe(
       'test report'
     );
+    const reExported = await target.service.exportCapsule();
+    expect(reExported.manifest.workspaceId).toBe('game-workspace');
+    expect(reExported.partitions.environment.requiredActions).toEqual([
+      {
+        id: 'app.browser.run-tests',
+        versionRange: '1.0.0',
+        required: false,
+      },
+    ]);
   });
 
   it('moves a capsule through the host workspace bridge', async () => {

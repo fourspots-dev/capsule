@@ -268,6 +268,17 @@ describe('virtual workspace agent tools', () => {
       'space'
     );
   });
+
+  it('omits the generic shell when an embedding application disables it', () => {
+    const workspace = new VirtualWorkspace({ host: new MemoryHostBridge() });
+    const names = createVirtualWorkspaceTools(workspace, {
+      includeVirtualShell: false,
+    }).map((tool) => tool.name);
+    expect(names).not.toContain('exec');
+    expect(names).not.toContain('job_start');
+    expect(names).toContain('git_status');
+    expect(names).toContain('read_file');
+  });
 });
 
 function descriptorToolDefinitions(executor: ToolExecutor, name: string) {

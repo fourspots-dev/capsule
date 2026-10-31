@@ -47,6 +47,25 @@ export interface HostActionProvider {
   ): Promise<HostActionResult | JsonValue>;
 }
 
+export interface HostInteractiveSession {
+  id: string;
+  write(data: string, signal?: AbortSignal): Promise<void>;
+  resize(columns: number, rows: number): Promise<void>;
+  read(
+    timeoutMs?: number,
+    signal?: AbortSignal
+  ): Promise<Array<{ type: 'data'; data: string } | { type: 'exit'; exitCode: number }>>;
+  close(): Promise<void>;
+}
+
+export interface HostInteractiveActionProvider {
+  open(
+    actionId: string,
+    input: JsonValue,
+    context: HostActionContext
+  ): Promise<HostInteractiveSession>;
+}
+
 export interface AvailableHostAction {
   descriptor: HostActionDescriptor;
   sourceId: string;

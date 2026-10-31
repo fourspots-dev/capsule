@@ -27,7 +27,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <small>REQ-HOST-001 / HOST CAPABILITY + CODING WORKSPACE / TEST DESIGN V1</small>
 <h1>宿主能力与 Coding Workspace<br>测试方案</h1>
 <p>验证宿主能力声明、运行时探测、应用动作注册、ToolPack 组合、Git/Test 回退与跨宿主一致性。核心判据不是接口“长得一样”，而是在能力缺失、故障、并发和恢复时仍然不误报、不越界、不伪装成功。通用 exec/Python/Bash 不是基线能力。</p>
-<div class="chips"><span class="chip">Target 0.3.0</span><span class="chip">Contract First</span><span class="chip">Host Parity</span><span class="chip">Fault Injection</span><span class="chip">Real E2E</span><span class="chip">Status: Draft for Review</span></div>
+<div class="chips"><span class="chip">Target 0.3.0</span><span class="chip">Contract First</span><span class="chip">Host Parity</span><span class="chip">Fault Injection</span><span class="chip">Real E2E</span><span class="chip">Status: Verified core v1</span></div>
 </header>
 <nav>
 <a href="#strategy">策略</a><a href="#scope">范围</a><a href="#levels">层级</a><a href="#trace">追踪矩阵</a><a href="#fixtures">测试夹具</a><a href="#ports">端口契约</a><a href="#capabilities">能力探测</a><a href="#composition">工具组合</a><a href="#integrations">宿主集成</a><a href="#execution">执行与 Git/Test</a><a href="#security">安全故障</a><a href="#parity">跨宿主</a><a href="#transfer-boundary">迁移边界</a><a href="#state">状态空间</a><a href="#gates">证据与门禁</a><a href="#phases">阶段验收</a>
@@ -414,7 +414,7 @@ Remote Review:
 </div>
 <p><a href="host-capability-architecture-v1.html">← 返回宿主能力与 Coding Workspace 设计</a></p>
 <p><a href="workspace-portability-testing-v1.html">查看 REQ-WORKSPACE-001 测试方案 →</a></p>
-<p class="foot">需求：REQ-HOST-001 · 目标版本：0.3.0 · 状态：Proposed / Review · 测试设计版本：1.0 · 本文未声称功能已实现</p>
+<p class="foot">需求：REQ-HOST-001 · 目标版本：0.3.0 · 状态：Verified core v1 · 测试设计版本：1.0 · 核心自动化与真实宿主证据已通过</p>
 </section>
 </div>
 </body>

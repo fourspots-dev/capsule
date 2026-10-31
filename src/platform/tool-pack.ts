@@ -1,5 +1,14 @@
 import type { ToolDefinition } from '../core/types';
 import type { ToolRegistration } from '../core/tool-registry';
+import type { PermissionModeRegistry } from '../core/policy';
+import type { ApprovalPort } from '../core/ports';
+import type { ArtifactStore } from '../core/artifact-store';
+
+export interface ToolPackContext {
+  approval: ApprovalPort;
+  permissions: PermissionModeRegistry;
+  artifacts?: ArtifactStore;
+}
 import {
   CapabilityGraph,
   type CapabilityReport,
@@ -7,7 +16,7 @@ import {
 
 export interface ToolPack {
   id: string;
-  register(context?: unknown): ToolRegistration[];
+  register(context: ToolPackContext): ToolRegistration[];
 }
 
 export interface ComposableToolPack {

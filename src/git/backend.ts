@@ -135,7 +135,7 @@ export class PortableGitBackend implements GitBackend {
     const staged = compareMaps(headFiles, indexByIdentity);
     const files = (await this.fs.list('', { recursive: true, signal }))
       .filter((entry) => entry.kind === 'file')
-      .filter((entry) => !entry.path.startsWith(`${this.gitDir}/`));
+      .filter((entry) => !isControlPath(entry.path, this.gitDir));
     const ignore = await this.loadIgnore();
     const untracked: string[] = [];
     const ignored: string[] = [];
@@ -195,7 +195,7 @@ export class PortableGitBackend implements GitBackend {
         for (const file of await this.fs.list('', { recursive: true, signal })) {
           if (
             file.kind === 'file' &&
-            !file.path.startsWith(`${this.gitDir}/`)
+            !isControlPath(file.path, this.gitDir)
           ) {
             selected.add(file.path);
           }
@@ -203,6 +203,9 @@ export class PortableGitBackend implements GitBackend {
         continue;
       }
       const path = normalizeGitPath(input);
+      if (isControlPath(path, this.gitDir)) {
+        throw new AgentError('GIT_PATH_RESERVED', `Control path is reserved: ${path}`);
+      }
       const info = await this.fs.stat(path, signal);
       if (!info) {
         for (const existing of [...indexByPath.keys()]) {
@@ -218,7 +221,7 @@ export class PortableGitBackend implements GitBackend {
         for (const file of nested) {
           if (
             file.kind === 'file' &&
-            !file.path.startsWith(`${this.gitDir}/`)
+            !isControlPath(file.path, this.gitDir)
           ) {
             selected.add(file.path);
           }
@@ -582,7 +585,7 @@ export class PortableGitBackend implements GitBackend {
   private async worktreeFiles(signal?: AbortSignal): Promise<Map<string, TreeFile>> {
     const result = new Map<string, TreeFile>();
     for (const file of await this.fs.list('', { recursive: true, signal })) {
-      if (file.kind !== 'file' || file.path.startsWith(`${this.gitDir}/`)) continue;
+      if (file.kind !== 'file' || isControlPath(file.path, this.gitDir)) continue;
       const data = await this.fs.read(file.path, { signal });
       result.set(file.path, {
         path: file.path,
@@ -721,4 +724,13 @@ function assertActive(signal?: AbortSignal): void {
     error.name = 'AbortError';
     throw error;
   }
+}
+
+function isControlPath(path: string, gitDir: string): boolean {
+  return (
+    path === gitDir ||
+    path.startsWith(`${gitDir}/`) ||
+    path === '.tinyai' ||
+    path.startsWith('.tinyai/')
+  );
 }

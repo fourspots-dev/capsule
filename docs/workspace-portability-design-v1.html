@@ -26,7 +26,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <small>REQ-WORKSPACE-001 / PORTABLE WORKSPACE CAPSULE / DESIGN V1</small>
 <h1>Portable Workspace Capsule<br>与跨宿主连续性设计</h1>
 <p>把项目内容、Agent 会话、任务、版本历史、Artifact、验证证据和应用动作要求封装为一致、可校验、可迁移的 Workspace Capsule。宿主只负责传输字节和提供命名能力；工作区语义、导入编排和恢复对账始终属于 tinyai。</p>
-<div class="chips"><span class="chip">Target 0.3.0</span><span class="chip">Capsule v1</span><span class="chip">Atomic Import</span><span class="chip">Resume Reconciliation</span><span class="chip">Environment Drift</span><span class="chip">Status: Proposed / Review</span></div>
+<div class="chips"><span class="chip">Target 0.3.0</span><span class="chip">Capsule v1</span><span class="chip">Atomic Import</span><span class="chip">Resume Reconciliation</span><span class="chip">Environment Drift</span><span class="chip">Status: Verified core v1</span></div>
 </header>
 <nav><a href="#goal">目标</a><a href="#gap">差距</a><a href="#requirements">需求</a><a href="#principles">原则</a><a href="#architecture">架构</a><a href="#capsule">Capsule</a><a href="#state">状态矩阵</a><a href="#paths">路径</a><a href="#objects">对象</a><a href="#export">导出</a><a href="#import">导入</a><a href="#resume">恢复</a><a href="#environment">环境</a><a href="#security">安全</a><a href="#compat">兼容</a><a href="#host-change">Host修正</a><a href="#acceptance">验收</a></nav>
 
@@ -397,7 +397,7 @@ TransferBarrier            +--> CapsuleMigrator
 </tbody></table>
 <p><a href="host-capability-architecture-v1.html#workspace-transfer-boundary">查看配套 Host 修正 →</a></p>
 <p><a href="workspace-portability-testing-v1.html#trace">查看工作区迁移测试方案 →</a></p>
-<p class="foot">需求：REQ-WORKSPACE-001 · 依赖：REQ-HOST-001 · 目标版本：0.3.0 · 状态：Proposed / Review · 设计版本：1.0 · 本文未声称功能已实现</p>
+<p class="foot">需求：REQ-WORKSPACE-001 · 依赖：REQ-HOST-001 · 目标版本：0.3.0 · 状态：Verified core v1 · 设计版本：1.0 · Node → Chrome → Node 迁移与续跑已验证</p>
 </section>
 </div>
 </body>

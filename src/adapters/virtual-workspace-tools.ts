@@ -9,10 +9,13 @@ import { createPatchTools } from './patch-tools';
 type ObjectInput = Record<string, JsonValue>;
 
 export function createVirtualWorkspaceTools(
-  workspace: VirtualWorkspace
+  workspace: VirtualWorkspace,
+  options: {
+    includeVirtualShell?: boolean;
+  } = {}
 ): ToolDefinition[] {
   const git = new PortableGitBackend(workspace.fs);
-  return [
+  const tools = [
     tool(
       'read_file',
       'Read a UTF-8 or base64 file from the virtual workspace.',
@@ -370,6 +373,16 @@ export function createVirtualWorkspaceTools(
     ),
     ...createGitTools(git),
   ];
+  return options.includeVirtualShell === false
+    ? tools.filter(
+        (tool) =>
+          tool.name !== 'exec' &&
+          tool.name !== 'job_start' &&
+          tool.name !== 'job_read' &&
+          tool.name !== 'job_list' &&
+          tool.name !== 'job_cancel'
+      )
+    : tools;
 }
 
 function tool(

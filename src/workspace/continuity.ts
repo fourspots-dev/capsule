@@ -50,10 +50,14 @@ export class WorkspaceContinuityService {
   private generation: number;
   private readonly now: () => number;
   private evidenceRecords: WorkspaceEvidenceRecord[] = [];
+  private workspaceId: string;
+  private importedRequiredActions: WorkspaceEnvironmentManifest['requiredActions'] = [];
+  private importedRequiredCapabilities: string[] = [];
 
   constructor(private readonly options: WorkspaceContinuityOptions) {
     this.generation = options.generation ?? 0;
     this.now = options.now ?? (() => Date.now());
+    this.workspaceId = options.workspaceId;
   }
 
   async exportCapsule(): Promise<WorkspaceCapsule> {
@@ -72,7 +76,7 @@ export class WorkspaceContinuityService {
         : undefined;
     return buildWorkspaceCapsule({
       capsuleId: this.options.newId?.() ?? `capsule_${this.now()}`,
-      workspaceId: this.options.workspaceId,
+      workspaceId: this.workspaceId,
       generation: this.generation,
       createdAt: this.now(),
       producer: {
@@ -88,7 +92,7 @@ export class WorkspaceContinuityService {
         evidence: {
           records: this.evidenceRecords,
         },
-        environment: this.options.environment,
+        environment: this.effectiveEnvironment(),
         ...(this.options.clientState
           ? { clientState: this.options.clientState }
           : {}),
@@ -212,6 +216,17 @@ export class WorkspaceContinuityService {
         this.generation + 1,
         capsule.manifest.generation + 1
       );
+      this.workspaceId = capsule.manifest.workspaceId;
+      this.importedRequiredActions = mergeActionRequirements(
+        this.importedRequiredActions,
+        capsule.partitions.environment.requiredActions
+      );
+      this.importedRequiredCapabilities = [
+        ...new Set([
+          ...this.importedRequiredCapabilities,
+          ...capsule.partitions.environment.requiredCapabilities,
+        ]),
+      ].sort();
       return {
         workspaceId: capsule.manifest.workspaceId,
         generation: this.generation,
@@ -236,6 +251,22 @@ export class WorkspaceContinuityService {
       fileHashes: { ...record.fileHashes },
       ...(record.data === undefined ? {} : { data: structuredClone(record.data) }),
     }));
+  }
+
+  private effectiveEnvironment(): WorkspaceEnvironmentManifest {
+    return {
+      manifestVersion: 1,
+      requiredActions: mergeActionRequirements(
+        this.options.environment.requiredActions,
+        this.importedRequiredActions
+      ),
+      requiredCapabilities: [
+        ...new Set([
+          ...this.options.environment.requiredCapabilities,
+          ...this.importedRequiredCapabilities,
+        ]),
+      ].sort(),
+    };
   }
 
   private async collectProject(): Promise<WorkspaceBundle> {
@@ -455,4 +486,25 @@ export function reconcileSession(
     },
   });
   return snapshot;
+}
+
+function mergeActionRequirements(
+  base: WorkspaceEnvironmentManifest['requiredActions'],
+  overlay: WorkspaceEnvironmentManifest['requiredActions']
+): WorkspaceEnvironmentManifest['requiredActions'] {
+  const merged = new Map<string, WorkspaceEnvironmentManifest['requiredActions'][number]>();
+  for (const requirement of [...base, ...overlay]) {
+    const existing = merged.get(requirement.id);
+    merged.set(requirement.id, {
+      ...existing,
+      ...requirement,
+      required: Boolean(existing?.required || requirement.required),
+      ...(requirement.versionRange ?? existing?.versionRange
+        ? { versionRange: requirement.versionRange ?? existing?.versionRange }
+        : {}),
+    });
+  }
+  return [...merged.values()].sort((left, right) =>
+    left.id.localeCompare(right.id)
+  );
 }

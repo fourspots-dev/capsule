@@ -268,6 +268,9 @@
   // src/runtime/storage-migration.ts
   var CONFIG_KEY = "tinyai:v2:config";
 
+  // src/workspace/codec.ts
+  var encoder3 = new TextEncoder();
+
   // src/runtime/chrome-runtime.ts
   var KERNEL_PORT_NAME = "tinyai-runtime-v1";
 

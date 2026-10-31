@@ -3,3 +3,4 @@ dist/
 coverage/
 extension/seed.js
 .DS_Store
+game-lab/
