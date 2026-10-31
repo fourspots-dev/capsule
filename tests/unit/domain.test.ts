@@ -1,10 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
   InputLedger,
+  SequentialIdGenerator,
   canTransitionLifecycle,
   canTransitionTask,
   isTerminalInputStatus,
 } from '../../src/core';
+
+describe('SequentialIdGenerator', () => {
+  it('reserves numeric sequences from restored ids', () => {
+    const ids = new SequentialIdGenerator();
+    ids.reserve(['task_7', 'input_3', 'row_9', 'message_12']);
+
+    expect(ids.next('task')).toBe('task_8');
+    expect(ids.next('input')).toBe('input_4');
+    expect(ids.next('row')).toBe('row_10');
+    expect(ids.next('message')).toBe('message_13');
+  });
+});
 
 describe('state machines', () => {
   it('keeps lifecycle and task status as independent machines', () => {

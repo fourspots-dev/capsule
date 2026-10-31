@@ -8,6 +8,7 @@ export interface Clock {
 
 export interface IdGenerator {
   next(prefix: string): string;
+  reserve?(ids: Iterable<string>): void;
 }
 
 export interface ModelTransport {
@@ -49,5 +50,16 @@ export class SequentialIdGenerator implements IdGenerator {
     const next = (this.counters.get(prefix) ?? 0) + 1;
     this.counters.set(prefix, next);
     return `${prefix}_${next}`;
+  }
+
+  reserve(ids: Iterable<string>): void {
+    for (const id of ids) {
+      const match = id.match(/^(.+)_(\d+)$/);
+      if (!match) continue;
+      const prefix = match[1];
+      const value = Number(match[2]);
+      if (!Number.isSafeInteger(value)) continue;
+      this.counters.set(prefix, Math.max(this.counters.get(prefix) ?? 0, value));
+    }
   }
 }

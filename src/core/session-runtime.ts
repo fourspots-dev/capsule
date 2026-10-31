@@ -897,6 +897,7 @@ export class SessionRuntime {
   }
 
   private restore(snapshot: SessionSnapshot): void {
+    this.options.ids.reserve?.(snapshotIds(snapshot));
     this.messages.splice(0, this.messages.length, ...cloneMessages(snapshot.messages));
     this.rows.splice(0, this.rows.length, ...snapshot.rows.map((row) => ({ ...row })));
     this.ledger.restore(snapshot.ledger);
@@ -970,6 +971,19 @@ function cloneMessages(messages: readonly ModelMessage[]): ModelMessage[] {
       ? { ...message, toolCalls: message.toolCalls.map((call) => ({ ...call })) }
       : { ...message }
   );
+}
+
+function snapshotIds(snapshot: SessionSnapshot): string[] {
+  return [
+    snapshot.logEpoch,
+    ...(snapshot.tasks ?? []).map((task) => task.taskId),
+    ...snapshot.rows.flatMap((row) => [
+      row.id,
+      row.entityId,
+      row.productTurnId,
+    ]),
+    ...snapshot.ledger.map((entry) => entry.inputId),
+  ];
 }
 
 function messagePayload(message: ModelMessage): SessionMessagePayload {

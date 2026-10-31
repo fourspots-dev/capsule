@@ -111,7 +111,7 @@ export class RuntimeGateway {
         return;
       }
       if (request.type === 'get_projection') {
-        this.reply(port, requestId, bundle.runtime.getProjection(request.sessionId));
+        this.reply(port, requestId, await bundle.runtime.loadProjection(request.sessionId));
         return;
       }
       if (request.type === 'query_command') {

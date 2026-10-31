@@ -10,6 +10,7 @@ import {
 import { PortApprovalBroker } from '../../src/runtime/approval-broker';
 import type { RuntimePort, RuntimeRequest, RuntimeResponse } from '../../src/runtime/protocol';
 import { RuntimeGateway } from '../../src/runtime/runtime-gateway';
+import { convertSession } from '../../src/adapters/legacy-session-importer';
 import { FakeApproval, FakeClock, events, text, until } from '../harness/fakes';
 import { command } from '../harness/workspace';
 
@@ -55,7 +56,7 @@ function isRuntimeResponse(
   return ['ready', 'response', 'projection', 'approval_request', 'handoff_request'].includes(message.type);
 }
 
-function workspace() {
+function workspace(store = new InMemorySessionStore()) {
   return new WorkspaceRuntime({
     model: {
       async *stream(_request) {
@@ -65,11 +66,65 @@ function workspace() {
     tools: new ToolExecutor([], new FakeApproval(true)),
     clock: new FakeClock(),
     ids: new SequentialIdGenerator(),
-    sessionStore: new InMemorySessionStore(),
+    sessionStore: store,
   });
 }
 
 describe('RuntimeGateway', () => {
+  it('hydrates a persisted legacy session before returning its projection', async () => {
+    const store = new InMemorySessionStore();
+    const sessionId = 'legacy_5db19410-a409-4da1-9d21-8ae09c1e10ed';
+    await store.save(
+      convertSession(
+        {
+          id: '5db19410-a409-4da1-9d21-8ae09c1e10ed',
+          messages: [{ role: 'user', content: 'legacy question' }],
+          timeline: [{ kind: 'user', text: 'legacy question' }],
+        },
+        sessionId,
+        10
+      )
+    );
+    const runtime = workspace(store);
+    const gateway = new RuntimeGateway(async () => ({
+      runtime,
+      async dispose() {
+        await runtime.dispose();
+      },
+    }));
+    const port = new FakePort();
+    gateway.connect(port);
+
+    port.send({
+      type: 'get_projection',
+      sessionId,
+      requestId: 'legacy-projection',
+    });
+    await until(() =>
+      port.sent.some(
+        (message) =>
+          message.type === 'response' && message.requestId === 'legacy-projection'
+      )
+    );
+
+    expect(
+      port.sent.find(
+        (message) =>
+          message.type === 'response' && message.requestId === 'legacy-projection'
+      )
+    ).toMatchObject({
+      ok: true,
+      data: {
+        sessionId,
+        lifecycle: 'ready',
+        availability: { canSend: true },
+        rows: [expect.objectContaining({ text: 'legacy question' })],
+      },
+    });
+    port.disconnect();
+    await gateway.dispose();
+  });
+
   it('routes commands and emits snapshot plus closed projection deltas over one port', async () => {
     const runtime = workspace();
     const gateway = new RuntimeGateway(async () => ({

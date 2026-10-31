@@ -2322,6 +2322,16 @@
       this.counters.set(prefix, next);
       return `${prefix}_${next}`;
     }
+    reserve(ids) {
+      for (const id of ids) {
+        const match = id.match(/^(.+)_(\d+)$/);
+        if (!match) continue;
+        const prefix = match[1];
+        const value = Number(match[2]);
+        if (!Number.isSafeInteger(value)) continue;
+        this.counters.set(prefix, Math.max(this.counters.get(prefix) ?? 0, value));
+      }
+    }
   };
 
   // src/core/policy.ts
@@ -2831,7 +2841,7 @@
           return;
         }
         if (request.type === "get_projection") {
-          this.reply(port, requestId, bundle.runtime.getProjection(request.sessionId));
+          this.reply(port, requestId, await bundle.runtime.loadProjection(request.sessionId));
           return;
         }
         if (request.type === "query_command") {
@@ -4989,6 +4999,7 @@ ${stringContent(item.content)}`
       });
     }
     restore(snapshot) {
+      this.options.ids.reserve?.(snapshotIds(snapshot));
       this.messages.splice(0, this.messages.length, ...cloneMessages(snapshot.messages));
       this.rows.splice(0, this.rows.length, ...snapshot.rows.map((row) => ({ ...row })));
       this.ledger.restore(snapshot.ledger);
@@ -5056,6 +5067,18 @@ ${stringContent(item.content)}`
       (message) => message.role === "assistant" && message.toolCalls ? { ...message, toolCalls: message.toolCalls.map((call) => ({ ...call })) } : { ...message }
     );
   }
+  function snapshotIds(snapshot) {
+    return [
+      snapshot.logEpoch,
+      ...(snapshot.tasks ?? []).map((task) => task.taskId),
+      ...snapshot.rows.flatMap((row) => [
+        row.id,
+        row.entityId,
+        row.productTurnId
+      ]),
+      ...snapshot.ledger.map((entry) => entry.inputId)
+    ];
+  }
   function messagePayload(message) {
     if (message.role === "assistant") {
       return {
@@ -5117,6 +5140,14 @@ ${lines.join("\n")}
     getProjection(sessionId) {
       const runtime = this.sessions.get(sessionId);
       if (!runtime) throw new AgentError("SESSION_NOT_FOUND", `Session not found: ${sessionId}`);
+      return runtime.projection();
+    }
+    async loadProjection(sessionId) {
+      const runtime = await this.ensureSession(sessionId, false);
+      if (!runtime) {
+        throw new AgentError("SESSION_NOT_FOUND", `Session not found: ${sessionId}`);
+      }
+      await runtime.ensureReady();
       return runtime.projection();
     }
     async ensureSessionReady(sessionId) {

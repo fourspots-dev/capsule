@@ -67,6 +67,22 @@ describe('session persistence and cold hydration', () => {
     expect(duplicate.status).toBe('duplicate');
     expect(second.model.requests).toHaveLength(0);
     expect(second.runtime.getProjection('session_1').rows).toHaveLength(3);
+
+    const continued = await second.runtime.command(
+      command('session_1', 'command_2', 'continue after restart')
+    );
+    expect(continued).toMatchObject({ status: 'accepted', taskId: 'task_2' });
+    await second.runtime.waitForSessionIdle('session_1');
+    expect(second.model.requests).toHaveLength(1);
+    expect(second.runtime.getProjection('session_1').rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          productTurnId: 'task_2',
+          kind: 'user',
+          text: 'continue after restart',
+        }),
+      ])
+    );
   });
 
   it('reconciles unfinished work as terminal without replaying admitted input', async () => {

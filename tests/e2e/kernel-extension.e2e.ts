@@ -580,6 +580,132 @@ describe('kernel extension E2E', () => {
       { timeout: 30_000 }
     );
     expect(modelCalls).toBe(11);
+
+    await reopened.evaluate(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          const port = chrome.runtime.connect({ name: 'tinyai-runtime-v1' });
+          port.onMessage.addListener((message) => {
+            if (message.type === 'response' && message.requestId === 'reload-existing') {
+              port.disconnect();
+              if (message.ok) resolve();
+              else reject(new Error(message.error?.message ?? 'reload failed'));
+            }
+          });
+          port.postMessage({ type: 'reload_runtime', requestId: 'reload-existing' });
+        })
+    );
+    await reopened.reload();
+    await reopened.waitForSelector('#kernel-input');
+    await reopened.waitForFunction(
+      () => document.querySelector('#kernel-rows')?.textContent?.includes('attachment smoke'),
+      undefined,
+      { timeout: 30_000 }
+    );
+    await reopened.fill('#kernel-input', 'after runtime reload');
+    await reopened.click('#kernel-send');
+    await reopened.waitForFunction(
+      () =>
+        document.querySelector('#kernel-rows')?.textContent?.includes(
+          'E2E received: after runtime reload'
+        ),
+      undefined,
+      { timeout: 30_000 }
+    );
+    expect(modelCalls).toBe(12);
+    expect(reopenErrors).toEqual([]);
+    await reopened.screenshot({
+      path: resolve('docs/restored-cold-reload.png'),
+      fullPage: false,
+    });
+  });
+
+  it('restores an imported legacy session and continues it after migration', async () => {
+    const legacyId = '5db19410-a409-4da1-9d21-8ae09c1e10ed';
+    const legacyDir = await mkdtemp(join(tmpdir(), 'tinyai-legacy-e2e-'));
+    const legacyContext = await chromium.launchPersistentContext(legacyDir, {
+      headless: true,
+      executablePath: chromeExecutable(),
+      args: [
+        `--disable-extensions-except=${resolve('extension')}`,
+        `--load-extension=${resolve('extension')}`,
+        '--no-first-run',
+      ],
+      ignoreDefaultArgs: ['--disable-extensions'],
+    });
+    try {
+      let worker = legacyContext.serviceWorkers()[0];
+      if (!worker) worker = await legacyContext.waitForEvent('serviceworker');
+      const extensionId = new URL(worker.url()).host;
+      await worker.evaluate(
+        async ({ modelUrl, legacyId }) => {
+          await chrome.storage.local.set({
+            'tinyai:v2:config': {
+              approval: 'auto',
+              language: 'en',
+              theme: 'light',
+              zoom: 100,
+              connection: 'e2e',
+              model: 'e2e-model',
+              connections: [
+                {
+                  id: 'e2e',
+                  label: 'E2E',
+                  'base-url': modelUrl,
+                  'api-key': 'e2e-key',
+                  models: ['e2e-model'],
+                },
+              ],
+            },
+            'clj-agent-sessions': {
+              active: legacyId,
+              sessions: [
+                {
+                  id: legacyId,
+                  title: 'Legacy restored chat',
+                  updated: 10,
+                  messages: [{ role: 'user', content: 'legacy restored question' }],
+                  timeline: [{ kind: 'user', text: 'legacy restored question' }],
+                },
+              ],
+            },
+          });
+        },
+        { modelUrl: baseUrl, legacyId }
+      );
+
+      const page = await legacyContext.newPage();
+      const pageErrors: string[] = [];
+      page.on('pageerror', (error) => pageErrors.push(error.message));
+      await page.goto(`chrome-extension://${extensionId}/sidepanel.html`);
+      await page.waitForSelector('#kernel-input');
+      await page.waitForFunction(
+        () =>
+          document.querySelector('#kernel-rows')?.textContent?.includes(
+            'legacy restored question'
+          ),
+        undefined,
+        { timeout: 30_000 }
+      );
+      expect(await page.textContent('body')).not.toContain('Session not found');
+      const callsBeforeFollowUp = modelCalls;
+      await page.fill('#kernel-input', 'legacy follow-up');
+      await page.click('#kernel-send');
+      await page.waitForFunction(
+        () =>
+          document.querySelector('#kernel-rows')?.textContent?.includes(
+            'E2E received: legacy follow-up'
+          ),
+        undefined,
+        { timeout: 30_000 }
+      );
+      expect(modelCalls).toBe(callsBeforeFollowUp + 1);
+      expect(pageErrors).toEqual([]);
+      await page.screenshot({ path: resolve('docs/restored-legacy.png'), fullPage: false });
+    } finally {
+      await legacyContext.close();
+      await rm(legacyDir, { recursive: true, force: true });
+    }
   });
 
   it('reports missing model configuration instead of dropping the runtime port', async () => {

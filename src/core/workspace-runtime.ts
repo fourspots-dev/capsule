@@ -46,6 +46,15 @@ export class WorkspaceRuntime {
     return runtime.projection();
   }
 
+  async loadProjection(sessionId: string): Promise<ProductProjection> {
+    const runtime = await this.ensureSession(sessionId, false);
+    if (!runtime) {
+      throw new AgentError('SESSION_NOT_FOUND', `Session not found: ${sessionId}`);
+    }
+    await runtime.ensureReady();
+    return runtime.projection();
+  }
+
   async ensureSessionReady(sessionId: string): Promise<void> {
     const runtime = await this.ensureSession(sessionId, true);
     if (!runtime) {
