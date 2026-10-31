@@ -1322,6 +1322,10 @@
             if (!parsed) continue;
             const choice = parsed.choices?.[0];
             const delta = choice?.delta;
+            const reasoning = reasoningDelta(delta);
+            if (reasoning) {
+              yield { type: "reasoning_delta", text: reasoning };
+            }
             if (typeof delta?.content === "string" && delta.content) {
               yield { type: "text_delta", text: delta.content };
             }
@@ -1361,6 +1365,10 @@
         const tail = parseDataLine(buffer);
         if (tail && tail !== "done") {
           const delta = tail.choices?.[0]?.delta;
+          const reasoning = reasoningDelta(delta);
+          if (reasoning) {
+            yield { type: "reasoning_delta", text: reasoning };
+          }
           if (typeof delta?.content === "string" && delta.content) {
             yield { type: "text_delta", text: delta.content };
           }
@@ -1428,6 +1436,11 @@
         parameters: tool3.parameters
       }
     };
+  }
+  function reasoningDelta(delta) {
+    if (!delta) return "";
+    const value = delta.reasoning_content ?? delta.reasoning ?? delta.thinking;
+    return typeof value === "string" ? value : "";
   }
   function parseDataLine(line) {
     const trimmed = line.trim();
@@ -3264,6 +3277,7 @@
             role: "assistant"
           });
           let text = "";
+          let reasoning = "";
           const calls = [];
           for await (const event of this.options.model.stream({
             sessionId: request.sessionId,
@@ -3281,6 +3295,14 @@
                 messageId,
                 delta: event.text
               });
+            } else if (event.type === "reasoning_delta") {
+              reasoning += event.text;
+              await request.onEvent?.({
+                type: "reasoning_update",
+                taskId: request.taskId,
+                messageId,
+                delta: event.text
+              });
             } else if (event.type === "tool_call") {
               calls.push(createToolCall(event.call));
             } else if (event.type === "error") {
@@ -3293,6 +3315,7 @@
           const assistantMessage = {
             role: "assistant",
             content: text,
+            ...reasoning ? { reasoning } : {},
             ...calls.length ? { toolCalls: calls } : {}
           };
           messages.push(assistantMessage);
@@ -4753,13 +4776,15 @@ ${stringContent(item.content)}`
     }
     async onLoopEvent(taskId, event) {
       if (event.type === "turn_start") {
+        const startedAt = this.clock.now();
         this.rows.push({
           id: `activity_${taskId}_${event.turn}`,
           entityId: `activity_${taskId}_${event.turn}`,
           productTurnId: taskId,
           kind: "activity",
           text: "Thinking",
-          status: "streaming"
+          status: "streaming",
+          startedAt
         });
         this.taskGraph.recordUsage(taskId, { turns: 1 });
         this.touch(event.type);
@@ -4770,9 +4795,32 @@ ${stringContent(item.content)}`
           productTurnId: taskId,
           kind: "assistant",
           text: "",
-          status: "streaming"
+          status: "streaming",
+          startedAt: this.clock.now()
         });
         this.touch("message.started");
+      } else if (event.type === "reasoning_update") {
+        let reasoningRow = this.rows.find(
+          (candidate) => candidate.id === `reasoning_${event.messageId}`
+        );
+        if (!reasoningRow) {
+          reasoningRow = {
+            id: `reasoning_${event.messageId}`,
+            entityId: `reasoning_${event.messageId}`,
+            productTurnId: taskId,
+            kind: "reasoning",
+            text: "",
+            status: "streaming",
+            startedAt: this.clock.now()
+          };
+          const assistantIndex = this.rows.findIndex(
+            (candidate) => candidate.id === event.messageId
+          );
+          if (assistantIndex >= 0) this.rows.splice(assistantIndex, 0, reasoningRow);
+          else this.rows.push(reasoningRow);
+        }
+        reasoningRow.text += event.delta;
+        this.touch("reasoning.delta");
       } else if (event.type === "message_update") {
         const row = this.rows.find((candidate) => candidate.id === event.messageId);
         if (row) row.text += event.delta;
@@ -4782,13 +4830,23 @@ ${stringContent(item.content)}`
         if (row) {
           row.text = event.message.role === "assistant" ? event.message.content : row.text;
           row.status = "completed";
+          row.completedAt = this.clock.now();
         }
         if (event.message.role === "assistant") {
+          const reasoningRow = this.rows.find(
+            (candidate) => candidate.id === `reasoning_${event.messageId}`
+          );
+          if (reasoningRow) {
+            reasoningRow.text = event.message.reasoning ?? reasoningRow.text;
+            reasoningRow.status = "completed";
+            reasoningRow.completedAt = this.clock.now();
+          }
           this.sessionTree.append({
             type: "message",
             payload: {
               role: "assistant",
               content: event.message.content,
+              ...event.message.reasoning ? { reasoning: event.message.reasoning } : {},
               ...event.message.toolCalls ? {
                 toolCallIds: event.message.toolCalls.map((call) => call.id),
                 toolCalls: event.message.toolCalls.map((call) => ({ ...call }))
@@ -4804,6 +4862,7 @@ ${stringContent(item.content)}`
         if (activity) {
           activity.text = "Thinking complete";
           activity.status = "completed";
+          activity.completedAt = this.clock.now();
         }
         this.touch(event.type);
       } else if (event.type === "tool_execution_start") {
@@ -4822,7 +4881,8 @@ ${stringContent(item.content)}`
           text: "",
           status: "pending",
           callId: event.result.callId,
-          toolName: event.result.name
+          toolName: event.result.name,
+          startedAt: this.clock.now()
         });
         this.touch("tool.started");
       } else if (event.type === "tool_execution_end") {
@@ -4830,6 +4890,7 @@ ${stringContent(item.content)}`
         if (row) {
           row.status = event.result.status === "succeeded" ? "completed" : event.result.status === "denied" ? "denied" : "failed";
           row.text = event.result.status === "succeeded" ? typeof event.result.output === "string" ? event.result.output : JSON.stringify(event.result.output ?? null) : event.result.error?.message ?? "Tool failed";
+          row.completedAt = this.clock.now();
         }
         this.sessionTree.append({
           type: "message",
@@ -4860,6 +4921,7 @@ ${stringContent(item.content)}`
       for (const row of this.rows) {
         if (row.productTurnId === taskId && (row.status === "pending" || row.status === "streaming")) {
           row.status = status;
+          row.completedAt ??= this.clock.now();
         }
       }
     }

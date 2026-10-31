@@ -17,6 +17,52 @@ import {
 import { command, createTestWorkspace } from '../harness/workspace';
 
 describe('Pi behavior baseline', () => {
+  it('keeps provider reasoning out of answer text while exposing reasoning events', async () => {
+    const model = new FakeModelTransport(async () =>
+      events(
+        { type: 'reasoning_delta', text: 'Check the target. ' },
+        { type: 'reasoning_delta', text: 'Then answer.' },
+        ...text('Visible answer')
+      )
+    );
+    const seen: AgentLoopEvent[] = [];
+    const loop = new AgentLoop({
+      model,
+      tools: new ToolExecutor([], new FakeApproval(true)),
+      ids: new SequentialIdGenerator(),
+    });
+
+    const result = await loop.run({
+      sessionId: 'session_1',
+      taskId: 'task_1',
+      messages: [{ role: 'user', content: 'start' }],
+      signal: new AbortController().signal,
+      onEvent: (event) => {
+        seen.push(event);
+      },
+    });
+
+    expect(result.messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: 'Visible answer',
+      reasoning: 'Check the target. Then answer.',
+    });
+    expect(
+      seen.filter((event) => event.type === 'reasoning_update').map((event) =>
+        event.type === 'reasoning_update' ? event.delta : ''
+      )
+    ).toEqual(['Check the target. ', 'Then answer.']);
+    expect(
+      seen.find((event) => event.type === 'message_end')
+    ).toMatchObject({
+      message: {
+        role: 'assistant',
+        content: 'Visible answer',
+        reasoning: 'Check the target. Then answer.',
+      },
+    });
+  });
+
   it('executes a parallel batch with completion-order events and source-order messages', async () => {
     const starts: string[] = [];
     const ends: string[] = [];

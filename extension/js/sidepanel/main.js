@@ -500,6 +500,197 @@
     info: "<svg viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'><circle cx='10' cy='10' r='7'/><path d='M10 9v4M10 6.5v.1'/></svg>"
   };
 
+  // src/sidepanel/turn-render-model.ts
+  var EXPLORE_TOOLS = /* @__PURE__ */ new Set([
+    "list_tabs",
+    "list_frames",
+    "snapshot",
+    "read_page",
+    "find",
+    "wait",
+    "scroll",
+    "list_files",
+    "read_file"
+  ]);
+  var TERMINAL_TOOLS = /* @__PURE__ */ new Set(["exec", "run_tests"]);
+  var CHANGE_TOOLS = /* @__PURE__ */ new Set(["write_file", "apply_patch", "edit"]);
+  var SUBAGENT_TOOLS = /* @__PURE__ */ new Set([
+    "spawn_agent",
+    "send_message",
+    "wait_agent",
+    "stop_agent",
+    "list_agents"
+  ]);
+  function buildTurnRenderUnits(projection) {
+    const grouped = /* @__PURE__ */ new Map();
+    for (const row of projection.rows) {
+      const turnId = row.productTurnId || "unassigned";
+      const rows = grouped.get(turnId) ?? [];
+      rows.push(row);
+      grouped.set(turnId, rows);
+    }
+    return [...grouped.entries()].map(([productTurnId, rows]) => {
+      const children = (projection.children ?? []).filter(
+        (child) => child.parentTaskId === productTurnId
+      );
+      return {
+        key: productTurnId,
+        productTurnId,
+        rows,
+        children,
+        segments: splitSegments(
+          productTurnId,
+          rows,
+          children,
+          projection.taskStatus,
+          projection
+        )
+      };
+    });
+  }
+  function splitSegments(productTurnId, rows, children, taskStatus, projection) {
+    const starts = rows.map((row, index) => row.kind === "user" ? index : -1).filter((index) => index >= 0);
+    if (starts.length === 0) {
+      return [
+        buildSegment(
+          productTurnId,
+          `${productTurnId}:0`,
+          void 0,
+          rows,
+          children,
+          taskStatus,
+          projection
+        )
+      ];
+    }
+    return starts.map((start, index) => {
+      const end = starts[index + 1] ?? rows.length;
+      return buildSegment(
+        productTurnId,
+        `${productTurnId}:${index}`,
+        rows[start],
+        rows.slice(start + 1, end),
+        index === starts.length - 1 ? children : [],
+        taskStatus,
+        projection
+      );
+    });
+  }
+  function buildSegment(productTurnId, key, user, rows, children, taskStatus, projection) {
+    const latestAssistantIndex = findLatestAssistantIndex(rows);
+    const historyRows = latestAssistantIndex >= 0 ? rows.slice(0, latestAssistantIndex) : rows;
+    const latestAssistant = latestAssistantIndex >= 0 ? rows[latestAssistantIndex] : void 0;
+    const tailRows = latestAssistantIndex >= 0 ? rows.slice(latestAssistantIndex + 1) : [];
+    const activeProductTurn = !projection.activeTaskId || projection.activeTaskId === productTurnId;
+    const running = activeProductTurn && (projection.taskStatus === "running" || projection.taskStatus === "queued" || projection.taskStatus === "waiting");
+    const state = taskStatus === "completed" ? "completed" : taskStatus === "failed" ? "failed" : taskStatus === "cancelled" ? "cancelled" : running ? "running" : "idle";
+    const durationMs = durationOf(rows);
+    const defaultOpen = running || state === "failed" || state === "cancelled" || !latestAssistant || children.some((child) => child.status === "running");
+    return {
+      key,
+      user,
+      historyRows,
+      latestAssistant,
+      tailRows,
+      children,
+      workItems: buildWorkItems(historyRows, children),
+      running,
+      state,
+      durationMs,
+      defaultOpen
+    };
+  }
+  function findLatestAssistantIndex(rows) {
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      const row = rows[index];
+      if (row.kind !== "assistant" || !row.text.trim()) continue;
+      const followedByWork = rows.slice(index + 1).some((candidate) => candidate.kind === "tool" || candidate.kind === "reasoning");
+      return followedByWork ? -1 : index;
+    }
+    return -1;
+  }
+  function durationOf(rows) {
+    const durations = rows.flatMap(
+      (row) => row.kind === "activity" && typeof row.startedAt === "number" && typeof row.completedAt === "number" ? [Math.max(0, row.completedAt - row.startedAt)] : []
+    );
+    return durations.length ? durations.reduce((total, duration) => total + duration, 0) : void 0;
+  }
+  function buildWorkItems(rows, children) {
+    const items = [];
+    let pendingGroup;
+    const flushGroup = () => {
+      if (!pendingGroup) return;
+      if (pendingGroup.rows.length >= 2) {
+        items.push({
+          kind: "tool-group",
+          key: pendingGroup.key,
+          group: pendingGroup
+        });
+      } else {
+        const row = pendingGroup.rows[0];
+        items.push({ kind: "tool", key: row.id, row });
+      }
+      pendingGroup = void 0;
+    };
+    for (const row of rows) {
+      if (row.kind === "tool") {
+        const family = toolFamily(row.toolName ?? "");
+        if (family !== "other") {
+          if (pendingGroup?.family === family) {
+            pendingGroup.rows.push(row);
+          } else {
+            flushGroup();
+            pendingGroup = {
+              key: `group:${row.id}`,
+              family,
+              rows: [row]
+            };
+          }
+          continue;
+        }
+      }
+      flushGroup();
+      if (row.kind === "activity" && (row.text === "Thinking" || row.text === "Thinking complete")) {
+        continue;
+      }
+      if (row.kind === "assistant" && row.status === "streaming" && !row.text.trim()) continue;
+      items.push({
+        kind: row.kind === "reasoning" ? "reasoning" : row.kind === "assistant" ? "assistant" : row.kind === "plan" ? "plan" : row.kind === "activity" ? "activity" : "tool",
+        key: row.id,
+        row
+      });
+    }
+    flushGroup();
+    for (const child of children) {
+      items.push({ kind: "child", key: `child:${child.taskId}`, child });
+    }
+    return items;
+  }
+  function toolFamily(name) {
+    if (EXPLORE_TOOLS.has(name)) return "explore";
+    if (TERMINAL_TOOLS.has(name)) return "terminal";
+    if (CHANGE_TOOLS.has(name)) return "changes";
+    if (SUBAGENT_TOOLS.has(name)) return "subagent";
+    if (name === "screenshot" || name.includes("artifact")) return "artifact";
+    if (["navigate", "click", "mouse_click", "fill", "select_option", "type_text", "send_keys"].includes(
+      name
+    )) {
+      return "browser";
+    }
+    return "other";
+  }
+  function workStateLabel(segment, language) {
+    const zh = language.startsWith("zh");
+    if (segment.state === "running") return zh ? "\u5DE5\u4F5C\u4E2D" : "Working";
+    if (segment.state === "failed") return zh ? "\u5931\u8D25" : "Failed";
+    if (segment.state === "cancelled") return zh ? "\u5DF2\u505C\u6B62" : "Stopped";
+    if (segment.durationMs !== void 0) {
+      const seconds = Math.max(1, Math.round(segment.durationMs / 1e3));
+      return zh ? `\u5DF2\u5DE5\u4F5C ${seconds} \u79D2` : `Worked for ${seconds}s`;
+    }
+    return zh ? "\u5DF2\u5DE5\u4F5C" : "Worked";
+  }
+
   // src/sidepanel/kernel-panel.ts
   async function initKernelUi() {
     const root = document.querySelector("#root");
@@ -527,6 +718,7 @@
     let busy = false;
     let busyStartedAt = 0;
     let reconnectAttempts = 0;
+    const detailState = /* @__PURE__ */ new Map();
     const render = () => {
       const zh = pageConfig.language.startsWith("zh");
       const rows = document.querySelector("#kernel-rows");
@@ -537,9 +729,10 @@
       const approvePlan = document.querySelector("#kernel-approve-plan");
       const compact = document.querySelector("#kernel-compact");
       const attachmentList = document.querySelector("#kernel-attachments");
+      const queue = document.querySelector("#kernel-queue");
       const modelLabelNode = document.querySelector("#kernel-model-label");
       const input = document.querySelector("#kernel-input");
-      if (!rows || !status || !send || !stop || !input || !modeButton || !approvePlan || !compact || !attachmentList || !modelLabelNode) return;
+      if (!rows || !status || !send || !stop || !input || !modeButton || !approvePlan || !compact || !attachmentList || !queue || !modelLabelNode) return;
       modelLabelNode.textContent = modelLabel;
       status.innerHTML = `<span class="wb-run-spinner"></span><span class="wb-run-text">${escapeHtml(statusText(
         projection,
@@ -551,11 +744,15 @@
       ))}</span>`;
       status.hidden = !busy && !error;
       status.dataset.error = error ? "true" : "false";
-      send.disabled = busy || Boolean(error) || projection?.availability.canSend === false || !input.value.trim() && !attachments.length && !selectedSkill;
+      send.disabled = Boolean(error) || projection?.availability.canSend === false || !input.value.trim() && !attachments.length && !selectedSkill;
       stop.hidden = !projection?.availability.canStop;
       modeButton.textContent = projection?.permissionMode === "plan" ? pageConfig.language.startsWith("zh") ? "\u9000\u51FA\u8BA1\u5212\u6A21\u5F0F" : "Exit plan" : pageConfig.language.startsWith("zh") ? "\u8BA1\u5212\u6A21\u5F0F" : "Plan mode";
       approvePlan.hidden = projection?.permissionMode !== "plan" || !projection.rows.some((row) => row.kind === "assistant" && row.text.trim());
       compact.hidden = !projection || busy || projection.rows.filter((row) => row.kind !== "tool").length < 2;
+      queue.hidden = !projection?.queueLength;
+      queue.innerHTML = projection?.queueLength ? `<span class="kernel-queue-dot" aria-hidden="true"></span><span>${escapeHtml(
+        zh ? `${projection.queueLength} \u6761\u6D88\u606F\u6392\u961F` : `${projection.queueLength} ${projection.queueLength === 1 ? "message" : "messages"} queued`
+      )}</span>` : "";
       attachmentList.innerHTML = [
         ...selectedSkill ? [`<span class="wb-chip"><span class="wb-chip-name">Skill: ${escapeHtml(selectedSkill.name)}</span></span>`] : [],
         ...attachments.map(
@@ -565,20 +762,16 @@
       const conversationHtml = (projection?.plan?.text ? `<section class="kernel-plan-card">
             <div class="kernel-plan-head"><span>${zh ? "\u8BA1\u5212" : "Plan"}</span><span>${projection.plan.approvedAt ? zh ? "\u5DF2\u6279\u51C6" : "Approved" : zh ? "\u8349\u7A3F" : "Draft"}</span></div>
             <div class="kernel-plan-body">${md(projection.plan.text)}</div>
-          </section>` : "") + (projection?.rows ?? []).map((row) => rowHtml(row, pageConfig.language)).join("") + (projection?.children ?? []).map(
-        (child) => `<article class="kernel-child kernel-child--${escapeHtml(child.status)}" data-child-task="${escapeHtml(child.taskId)}">
-            <span class="kernel-child-line" aria-hidden="true"></span>
-            <span class="kernel-child-icon" aria-hidden="true">\u2301</span>
-            <div class="kernel-child-copy">
-              <div><strong>${escapeHtml(child.profileName)}</strong><span class="kernel-child-status">${escapeHtml(statusLabel(child.status, pageConfig.language))}</span></div>
-              <p>${escapeHtml(child.summary ?? `${child.executionMode} \xB7 ${zh ? "\u7B49\u5F85\u9996\u6B21\u66F4\u65B0" : "waiting for first update"}`)}</p>
-            </div>
-            <button type="button" class="kernel-child-open" data-open-child="${escapeHtml(child.sessionId)}">${zh ? "\u67E5\u770B" : "View"}</button>
-          </article>`
-      ).join("") + approvals.map(
-        (approval) => `<article class="wb-permission-card kernel-approval">
+          </section>` : "") + (projection ? buildTurnRenderUnits(projection).map(
+        (unit) => renderTurnUnit(unit, pageConfig.language, pageConfig.showReasoning)
+      ).join("") : "") + approvals.map(
+        (approval) => `<article class="wb-permission-card kernel-approval" data-ui-key="approval:${escapeHtml(approval.approvalId)}">
             <div class="wb-permission-title">${zh ? "\u5141\u8BB8" : "Allow"} ${escapeHtml(toolLabel(approval.toolName))}?</div>
-            <div class="wb-permission-args">${escapeHtml(JSON.stringify(approval.input, null, 2))}</div>
+            <div class="kernel-permission-summary">${escapeHtml(approvalSummary(approval.toolName, approval.input, zh))}</div>
+            <details class="kernel-raw-details">
+              <summary>${zh ? "\u67E5\u770B\u53C2\u6570" : "Show arguments"}</summary>
+              <div class="wb-permission-args">${escapeHtml(JSON.stringify(approval.input, null, 2))}</div>
+            </details>
             <div class="wb-permission-actions">
               <button type="button" class="kernel-btn kernel-btn--primary" data-approval="${escapeHtml(approval.approvalId)}" data-decision="allow">${zh ? "\u5141\u8BB8" : "Allow"}</button>
               <button type="button" class="kernel-btn" data-approval="${escapeHtml(approval.approvalId)}" data-decision="deny">${zh ? "\u62D2\u7EDD" : "Deny"}</button>
@@ -594,9 +787,11 @@
             </div>
           </article>`
       ).join("");
-      rows.innerHTML = conversationHtml || emptyHtml(pageConfig.language);
       const scroll = document.querySelector(".wb-scroll");
-      if (scroll) scroll.scrollTop = scroll.scrollHeight;
+      const stickToBottom = scroll ? scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 72 : true;
+      rows.innerHTML = conversationHtml || emptyHtml(pageConfig.language);
+      restoreDetailState(rows, detailState);
+      if (scroll && stickToBottom) scroll.scrollTop = scroll.scrollHeight;
     };
     client.onProjection((_sessionId, next) => {
       reconnectAttempts = 0;
@@ -721,12 +916,21 @@
       render();
     });
     document.querySelector("#kernel-rows")?.addEventListener("click", (event) => {
+      const summary = event.target.closest("summary");
+      const details = summary?.closest("details[data-ui-key]");
+      const detailKey = details?.dataset.uiKey;
+      if (details && detailKey) {
+        queueMicrotask(() => {
+          if (details.isConnected) detailState.set(detailKey, details.open);
+        });
+      }
       const prompt = event.target.closest("[data-kernel-prompt]");
-      if (!prompt) return;
-      const input = document.querySelector("#kernel-input");
-      if (input) {
-        input.value = prompt.dataset.kernelPrompt ?? "";
-        input.focus();
+      if (prompt) {
+        const input = document.querySelector("#kernel-input");
+        if (input) {
+          input.value = prompt.dataset.kernelPrompt ?? "";
+          input.focus();
+        }
       }
     });
     document.querySelector("#kernel-mode")?.addEventListener("click", () => {
@@ -746,6 +950,7 @@
       error = "";
       busy = false;
       busyStartedAt = 0;
+      detailState.clear();
       render();
     });
     document.addEventListener("change", (event) => {
@@ -861,13 +1066,15 @@
     async function submit() {
       const input = document.querySelector("#kernel-input");
       const text = input?.value.trim() ?? "";
-      if (!text && !attachments.length && !selectedSkill || busy) return;
+      if (!text && !attachments.length && !selectedSkill) return;
+      if (projection?.availability.canSend === false) return;
       if (text === "/new") {
         if (input) input.value = "";
         sessionId = `session_${crypto.randomUUID()}`;
         projection = void 0;
         approvals = [];
         handoffs = [];
+        detailState.clear();
         render();
         return;
       }
@@ -932,7 +1139,7 @@
       const send = document.querySelector("#kernel-send");
       const input = document.querySelector("#kernel-input");
       if (!send || !input) return;
-      send.disabled = busy || Boolean(error) || projection?.availability.canSend === false || !input.value.trim() && !attachments.length && !selectedSkill;
+      send.disabled = Boolean(error) || projection?.availability.canSend === false || !input.value.trim() && !attachments.length && !selectedSkill;
     }
     async function sendControlCommand(type, payload) {
       const ack = await client.command({
@@ -1073,6 +1280,9 @@
           <div class="wb-set-card">
             <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.shield}</span>${zh ? "\u64CD\u4F5C\u5BA1\u6279" : "Action approval"}</span>
               <button type="button" class="wb-set-select" data-page-action="approval"><span class="wb-set-select-value">${pageConfig.approval === "auto" ? zh ? "\u81EA\u52A8\u6267\u884C" : "Auto-approve" : zh ? "\u9700\u8981\u5BA1\u6279" : "Requires approval"}</span>${icons.chevronDown}</button></div>
+            <div class="wb-set-sepa"></div>
+            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.sparkle}</span>${zh ? "\u663E\u793A\u63A8\u7406\u8FC7\u7A0B" : "Reasoning"}</span>
+              <button type="button" class="wb-set-select" data-page-action="reasoning"><span class="wb-set-select-value">${pageConfig.showReasoning ? zh ? "\u663E\u793A" : "Show" : zh ? "\u9690\u85CF" : "Hidden"}</span>${icons.chevronDown}</button></div>
           </div>
         </div>
         <div class="wb-set-group"><div class="wb-set-group-label">${zh ? "\u5173\u4E8E" : "About"}</div>
@@ -1154,6 +1364,7 @@
       });
       return {
         approval: raw.approval === "auto" ? "auto" : "ask",
+        showReasoning: raw.showReasoning !== false,
         theme: raw.theme === "dark" || raw.theme === "system" ? raw.theme : "light",
         language: typeof raw.language === "string" ? raw.language : "en",
         zoom: Number(raw.zoom ?? 100),
@@ -1230,6 +1441,12 @@
       }
       if (action === "approval") {
         pageConfig.approval = pageConfig.approval === "ask" ? "auto" : "ask";
+        await writePageConfig();
+        renderPage();
+        return;
+      }
+      if (action === "reasoning") {
+        pageConfig.showReasoning = !pageConfig.showReasoning;
         await writePageConfig();
         renderPage();
         return;
@@ -1417,6 +1634,7 @@
     async function switchSession(nextSessionId) {
       if (nextSessionId === sessionId && projection) return;
       if (projection) await client.unsubscribe(sessionId).catch(() => void 0);
+      detailState.clear();
       sessionId = nextSessionId;
       approvals = [];
       handoffs = [];
@@ -1477,54 +1695,209 @@
     </div>
   </div>`;
   }
-  function rowHtml(row, language = "en") {
+  function renderTurnUnit(unit, language, showReasoning) {
+    return `<article class="kernel-turn" data-product-turn="${escapeHtml(unit.productTurnId)}">
+    ${unit.segments.map((segment) => renderWorkSegment(segment, language, showReasoning)).join("")}
+  </article>`;
+  }
+  function renderWorkSegment(segment, language, showReasoning) {
     const zh = language.startsWith("zh");
-    if (row.kind === "user") {
-      return `<div class="wb-stream-row kernel-message-row kernel-message-row--user">
-      <div class="wb-msg wb-msg-user"><div class="wb-user-bubble">${escapeHtml(row.text)}</div></div>
-    </div>`;
+    const user = segment.user ? renderUserRow(segment.user.text) : "";
+    const workItems = segment.workItems.map((item) => renderWorkItem(item, showReasoning, language)).filter(Boolean);
+    const work = workItems.length ? renderWorkHistory(segment, workItems.join(""), language) : "";
+    const answer = segment.latestAssistant ? renderAssistantRow(segment.latestAssistant, language, true) : "";
+    const tail = segment.tailRows.map((row) => renderTailRow(row, showReasoning, language)).filter(Boolean).join("");
+    return `<section class="kernel-work-segment kernel-work-segment--${escapeHtml(segment.state)}">
+    ${user}
+    ${work}
+    ${answer}
+    ${tail || (segment.running && !answer ? `<div class="kernel-turn-placeholder">${zh ? "\u6B63\u5728\u51C6\u5907\u56DE\u590D\u2026" : "Preparing a response\u2026"}</div>` : "")}
+  </section>`;
+  }
+  function renderUserRow(text) {
+    return `<div class="wb-stream-row kernel-message-row kernel-message-row--user">
+    <div class="wb-msg wb-msg-user"><div class="wb-user-bubble">${escapeHtml(text)}</div></div>
+  </div>`;
+  }
+  function renderWorkHistory(segment, content, language) {
+    const zh = language.startsWith("zh");
+    if (segment.running) {
+      return `<section class="kernel-work kernel-work--running" aria-live="polite">
+      <div class="kernel-work-items">${content}</div>
+    </section>`;
     }
-    if (row.kind === "assistant") {
-      if (!row.text && row.status !== "streaming") return "";
-      const body = row.status === "streaming" && !row.text ? '<span class="wb-thinking"><i></i><i></i><i></i></span>' : `${md(row.text)}${row.status === "streaming" ? '<span class="wb-cursor"></span>' : ""}`;
-      const feedback = !row.status || row.status === "completed" ? `<div class="wb-feedback">
-          <button type="button" class="wb-mini-action" data-copy-message="${escapeHtml(row.id)}">${icons.file}${zh ? "\u590D\u5236" : "Copy"}</button>
-          <button type="button" class="wb-mini-action" data-export-message="${escapeHtml(row.id)}">${zh ? "\u5BFC\u51FA" : "Export"}</button>
-        </div>` : "";
-      return `<div class="wb-stream-row kernel-message-row">
-      <div class="wb-msg"><div class="wb-assistant"><div class="wb-assistant-body">${body}</div>${feedback}</div></div>
-    </div>`;
+    const forceOpen = segment.state === "failed" || segment.state === "cancelled";
+    return `<details class="kernel-work kernel-work--${escapeHtml(segment.state)}" data-ui-key="work:${escapeHtml(segment.key)}"${forceOpen ? ' data-force-open="true"' : ""}${segment.defaultOpen ? " open" : ""}>
+    <summary class="kernel-work-summary">
+      <span class="kernel-work-summary-icon" aria-hidden="true">${icons.sparkle}</span>
+      <span>${escapeHtml(workStateLabel(segment, language))}</span>
+      ${segment.state === "failed" ? `<span class="kernel-work-state">${zh ? "\u5931\u8D25" : "Failed"}</span>` : ""}
+      ${segment.state === "cancelled" ? `<span class="kernel-work-state">${zh ? "\u5DF2\u505C\u6B62" : "Stopped"}</span>` : ""}
+      <span class="kernel-work-chevron" aria-hidden="true">${icons.chevronRight}</span>
+    </summary>
+    <div class="kernel-work-items">${content}</div>
+  </details>`;
+  }
+  function renderWorkItem(item, showReasoning, language) {
+    if (item.kind === "reasoning" && item.row) {
+      return renderReasoningRow(item.row, showReasoning, language);
     }
-    if (row.kind === "tool") {
-      const running = row.status === "pending" || row.status === "streaming";
-      const failed = row.status === "failed" || row.status === "denied";
-      const statusLabel2 = row.status === "denied" ? zh ? "\u5DF2\u62D2\u7EDD" : "Denied" : failed ? zh ? "\u5931\u8D25" : "Failed" : running ? zh ? "\u6267\u884C\u4E2D" : "Running" : "";
-      return `<div class="wb-stream-row">
-      <details class="wb-step kernel-tool-step" data-call-id="${escapeHtml(row.callId ?? row.id)}"${failed ? " open" : ""}>
-        <summary class="wb-step-row">
-          <span class="wb-step-ico" aria-hidden="true">${icons.globe}</span>
-          <span class="wb-step-text">
-            <span class="wb-step-name">${escapeHtml(toolLabel(row.toolName ?? "tool"))}</span>
-            ${statusLabel2 ? `<span class="wb-tool-status${running ? " wb-tool-status--running" : failed ? " wb-tool-status--error" : ""}">${statusLabel2}</span>` : ""}
-          </span>
-          <span class="wb-tool-group-chev" aria-hidden="true">${icons.chevronRight}</span>
-        </summary>
-        <div class="wb-tool-body"><div class="wb-tool-card">${row.text ? toolOutput(row.toolName, row.text) : `<pre class="wb-kv-block">${running ? zh ? "\u6267\u884C\u4E2D\u2026" : "Running\u2026" : zh ? "\uFF08\u65E0\u8F93\u51FA\uFF09" : "(no output)"}</pre>`}</div></div>
-      </details>
-    </div>`;
+    if (item.kind === "tool" && item.row) {
+      return renderToolRow(item.row, language);
     }
-    if (row.kind === "activity") {
-      const running = row.status === "streaming" || row.status === "pending";
-      if (!running && row.text === "Thinking complete") return "";
-      return `<div class="kernel-activity${running ? " is-running" : ""}">
-      <span class="kernel-activity-mark" aria-hidden="true"></span>
-      <span>${escapeHtml(running ? zh ? "\u601D\u8003\u4E2D" : "Thinking" : row.text)}</span>
-    </div>`;
+    if (item.kind === "tool-group" && item.group) {
+      return renderToolGroup(item.group.family, item.group.rows, language);
     }
-    if (row.kind === "plan") {
-      return `<details class="kernel-plan-inline"><summary>${zh ? "\u8BA1\u5212" : "Plan"} \xB7 ${escapeHtml(row.status)}</summary><div>${md(row.text)}</div></details>`;
+    if (item.kind === "child" && item.child) {
+      return renderChildRow(item.child, language);
+    }
+    if (item.kind === "assistant" && item.row) {
+      return renderAssistantRow(item.row, language, false);
+    }
+    if (item.kind === "plan" && item.row) {
+      return renderPlanRow(item.row, language);
+    }
+    if (item.kind === "activity" && item.row) {
+      return renderActivityRow(item.row, language);
     }
     return "";
+  }
+  function renderReasoningRow(row, showReasoning, language) {
+    if (!showReasoning || !row.text.trim()) return "";
+    const zh = language.startsWith("zh");
+    const running = row.status === "streaming" || row.status === "pending";
+    return `<details class="kernel-reasoning" data-ui-key="reasoning:${escapeHtml(row.id)}">
+    <summary>
+      <span class="kernel-reasoning-icon" aria-hidden="true">${icons.sparkle}</span>
+      <span>${zh ? "\u63A8\u7406\u8FC7\u7A0B" : "Reasoning"}</span>
+      ${running ? `<span class="kernel-reasoning-running">${zh ? "\u601D\u8003\u4E2D" : "Thinking"}</span>` : ""}
+      <span class="kernel-work-chevron" aria-hidden="true">${icons.chevronRight}</span>
+    </summary>
+    <div class="kernel-reasoning-body">${escapeHtml(row.text)}</div>
+  </details>`;
+  }
+  function renderToolRow(row, language) {
+    const zh = language.startsWith("zh");
+    const running = row.status === "pending" || row.status === "streaming";
+    const failed = row.status === "failed" || row.status === "denied";
+    const status = row.status === "denied" ? zh ? "\u5DF2\u62D2\u7EDD" : "Denied" : failed ? zh ? "\u5931\u8D25" : "Failed" : running ? zh ? "\u6267\u884C\u4E2D" : "Running" : "";
+    return `<div class="wb-stream-row kernel-tool-row">
+    <details class="wb-step kernel-tool-step" data-call-id="${escapeHtml(row.callId ?? row.id)}" data-ui-key="tool:${escapeHtml(row.id)}"${failed ? ' data-force-open="true"' : ""}${failed || running ? " open" : ""}>
+      <summary class="wb-step-row">
+        <span class="wb-step-ico" aria-hidden="true">${familyIcon(toolFamily(row.toolName ?? ""))}</span>
+        <span class="wb-step-text">
+          <span class="wb-step-name">${escapeHtml(toolSummary(row.toolName ?? "tool"))}</span>
+          ${status ? `<span class="wb-tool-status${running ? " wb-tool-status--running" : failed ? " wb-tool-status--error" : ""}">${status}</span>` : ""}
+        </span>
+        <span class="wb-tool-group-chev" aria-hidden="true">${icons.chevronRight}</span>
+      </summary>
+      <div class="wb-tool-body"><div class="wb-tool-card">${row.text ? toolOutput(row.toolName, row.text) : `<pre class="wb-kv-block">${running ? zh ? "\u6267\u884C\u4E2D\u2026" : "Running\u2026" : zh ? "\uFF08\u65E0\u8F93\u51FA\uFF09" : "(no output)"}</pre>`}</div></div>
+    </details>
+  </div>`;
+  }
+  function renderToolGroup(family, rows, language) {
+    return `<section class="kernel-tool-group">
+    <div class="kernel-tool-group-head">
+      <span class="kernel-tool-group-icon" aria-hidden="true">${familyIcon(family)}</span>
+      <span>${escapeHtml(familySummary(family, rows.length, language))}</span>
+    </div>
+    <div class="kernel-tool-group-rows">
+      ${rows.map((row) => renderToolRow(row, language)).join("")}
+    </div>
+  </section>`;
+  }
+  function renderAssistantRow(row, language, withFeedback) {
+    if (!row.text && !withFeedback) return "";
+    const zh = language.startsWith("zh");
+    const body = row.text ? `${md(row.text)}${row.status === "streaming" ? '<span class="wb-cursor"></span>' : ""}` : "";
+    const feedback = withFeedback && row.status === "completed" ? `<div class="wb-feedback">
+        <button type="button" class="wb-mini-action" data-copy-message="${escapeHtml(row.id)}">${icons.file}${zh ? "\u590D\u5236" : "Copy"}</button>
+        <button type="button" class="wb-mini-action" data-export-message="${escapeHtml(row.id)}">${zh ? "\u5BFC\u51FA" : "Export"}</button>
+      </div>` : "";
+    return `<div class="wb-stream-row kernel-message-row kernel-answer-row">
+    <div class="wb-msg"><div class="wb-assistant"><div class="wb-assistant-body">${body}</div>${feedback}</div></div>
+  </div>`;
+  }
+  function renderPlanRow(row, language) {
+    const zh = language.startsWith("zh");
+    return `<details class="kernel-plan-inline" data-ui-key="plan:${escapeHtml(row.id)}">
+    <summary>${zh ? "\u8BA1\u5212" : "Plan"} \xB7 ${escapeHtml(statusLabel(row.status, language))}</summary>
+    <div>${md(row.text)}</div>
+  </details>`;
+  }
+  function renderActivityRow(row, language) {
+    if (row.text === "Thinking" || row.text === "Thinking complete") return "";
+    const running = row.status === "streaming" || row.status === "pending";
+    return `<div class="kernel-activity${running ? " is-running" : ""}">
+    <span class="kernel-activity-mark" aria-hidden="true"></span>
+    <span>${escapeHtml(row.text)}</span>
+  </div>`;
+  }
+  function renderChildRow(child, language) {
+    const zh = language.startsWith("zh");
+    return `<article class="kernel-child kernel-child--${escapeHtml(child.status)}" data-child-task="${escapeHtml(child.taskId)}">
+    <span class="kernel-child-line" aria-hidden="true"></span>
+    <span class="kernel-child-icon" aria-hidden="true">\u2301</span>
+    <div class="kernel-child-copy">
+      <div><strong>${escapeHtml(child.profileName)}</strong><span class="kernel-child-status">${escapeHtml(statusLabel(child.status, language))}</span></div>
+      <p>${escapeHtml(child.summary ?? `${child.executionMode} \xB7 ${zh ? "\u7B49\u5F85\u9996\u6B21\u66F4\u65B0" : "waiting for first update"}`)}</p>
+    </div>
+    <button type="button" class="kernel-child-open" data-open-child="${escapeHtml(child.sessionId)}">${zh ? "\u67E5\u770B" : "View"}</button>
+  </article>`;
+  }
+  function renderTailRow(row, showReasoning, language) {
+    if (row.kind === "reasoning") return renderReasoningRow(row, showReasoning, language);
+    if (row.kind === "tool") return renderToolRow(row, language);
+    if (row.kind === "assistant") return renderAssistantRow(row, language, true);
+    if (row.kind === "plan") return renderPlanRow(row, language);
+    if (row.kind === "activity") return renderActivityRow(row, language);
+    return "";
+  }
+  function restoreDetailState(root, state) {
+    root.querySelectorAll("details[data-ui-key]").forEach((details) => {
+      const key = details.dataset.uiKey;
+      if (details.dataset.forceOpen === "true") details.open = true;
+      else if (key && state.has(key)) details.open = state.get(key) ?? false;
+    });
+  }
+  function toolSummary(name) {
+    const family = toolFamily(name);
+    if (family === "explore") return toolLabel(name);
+    if (family === "browser") return toolLabel(name);
+    if (family === "terminal") return toolLabel(name);
+    if (family === "changes") return toolLabel(name);
+    if (family === "subagent") return toolLabel(name);
+    if (family === "artifact") return toolLabel(name);
+    return toolLabel(name);
+  }
+  function familyLabel(family, language) {
+    const zh = language.startsWith("zh");
+    return {
+      explore: zh ? "\u63A2\u7D22" : "Explore",
+      browser: zh ? "\u6D4F\u89C8\u5668" : "Browser",
+      terminal: zh ? "\u7EC8\u7AEF" : "Terminal",
+      changes: zh ? "\u53D8\u66F4" : "Changes",
+      subagent: zh ? "\u5B50 Agent" : "Subagents",
+      artifact: zh ? "\u4EA7\u7269" : "Artifacts",
+      other: zh ? "\u5DE5\u5177" : "Tools"
+    }[family];
+  }
+  function familySummary(family, count, language) {
+    const zh = language.startsWith("zh");
+    if (family === "explore") return zh ? `\u63A2\u7D22\u4E86 ${count} \u4E2A\u6B65\u9AA4` : `Explored ${count} steps`;
+    if (family === "browser") return zh ? `\u6D4F\u89C8\u5668\u64CD\u4F5C ${count} \u6B21` : `Used browser ${count} times`;
+    if (family === "terminal") return zh ? `\u8FD0\u884C\u4E86 ${count} \u6761\u547D\u4EE4` : `Ran ${count} commands`;
+    if (family === "changes") return zh ? `\u4FEE\u6539\u4E86 ${count} \u5904` : `Made ${count} changes`;
+    if (family === "subagent") return zh ? `\u534F\u8C03\u4E86 ${count} \u4E2A\u5B50 Agent \u64CD\u4F5C` : `Coordinated ${count} subagent actions`;
+    if (family === "artifact") return zh ? `\u751F\u6210\u4E86 ${count} \u4E2A\u4EA7\u7269` : `Created ${count} artifacts`;
+    return `${familyLabel(family, language)} \xB7 ${count}`;
+  }
+  function familyIcon(family) {
+    if (family === "browser" || family === "explore") return icons.globe;
+    if (family === "terminal") return icons.file;
+    if (family === "subagent") return icons.sparkle;
+    if (family === "artifact") return icons.file;
+    return icons.gear;
   }
   function toolLabel(name) {
     const labels = {
@@ -1553,6 +1926,30 @@
     };
     return labels[name] ?? name.replace(/_/g, " ");
   }
+  function approvalSummary(name, input, zh) {
+    const values = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+    const stringValue = (...keys) => {
+      const value = keys.map((key) => values[key]).find((item) => typeof item === "string");
+      return typeof value === "string" ? value : "";
+    };
+    const target = stringValue("url", "path", "selector", "command", "profile", "reason");
+    const suffix = target ? ` \xB7 ${truncateText(target, 90)}` : "";
+    if (name === "navigate") return `${zh ? "\u6253\u5F00\u9875\u9762" : "Open page"}${suffix}`;
+    if (name === "exec") return `${zh ? "\u6267\u884C\u547D\u4EE4" : "Run command"}${suffix}`;
+    if (name === "run_tests") return `${zh ? "\u8FD0\u884C\u6D4B\u8BD5" : "Run tests"}${suffix}`;
+    if (name === "write_file" || name === "apply_patch" || name === "edit") {
+      return `${zh ? "\u4FEE\u6539\u6587\u4EF6" : "Edit file"}${suffix}`;
+    }
+    if (name === "spawn_agent") return `${zh ? "\u542F\u52A8\u5B50 Agent" : "Start subagent"}${suffix}`;
+    if (name === "await_user_action") {
+      return target || (zh ? "\u9700\u8981\u4F60\u5B8C\u6210\u4E00\u6B21\u624B\u52A8\u64CD\u4F5C" : "Manual action required");
+    }
+    return `${toolLabel(name)}${suffix}`;
+  }
+  function truncateText(value, maxLength) {
+    const compact = value.replace(/\s+/g, " ").trim();
+    return compact.length > maxLength ? `${compact.slice(0, maxLength - 1)}\u2026` : compact;
+  }
   function shell(config) {
     const zh = config.language.startsWith("zh");
     const theme = config.theme === "system" ? window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light" : config.theme;
@@ -1578,6 +1975,7 @@
       </main>
     </div>
     <div class="wb-dock">
+      <div id="kernel-queue" class="kernel-queue" hidden></div>
       <div id="kernel-status" class="wb-bridge-note kernel-status" hidden></div>
       <div id="kernel-attachments" class="wb-attachment-bar kernel-context-list"></div>
       <form id="kernel-form" class="wb-composer">

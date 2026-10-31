@@ -13,6 +13,38 @@ import {
 import { command, createTestWorkspace, stopCommand } from '../harness/workspace';
 
 describe('headless WorkspaceRuntime', () => {
+  it('projects provider reasoning separately from the visible answer', async () => {
+    const h = createTestWorkspace({
+      model: async () =>
+        events(
+          { type: 'reasoning_delta', text: 'Inspect the request.' },
+          ...text('Here is the answer.')
+        ),
+      tools: [],
+    });
+
+    await h.runtime.command(command('session_1', 'command_reasoning', 'Explain it'));
+    await h.runtime.waitForSessionIdle('session_1');
+
+    const projection = h.runtime.getProjection('session_1');
+    expect(projection.rows.map((row) => row.kind)).toEqual([
+      'user',
+      'activity',
+      'reasoning',
+      'assistant',
+    ]);
+    expect(projection.rows.map((row) => row.text)).toEqual([
+      'Explain it',
+      'Thinking complete',
+      'Inspect the request.',
+      'Here is the answer.',
+    ]);
+    expect(projection.rows.find((row) => row.kind === 'activity')).toMatchObject({
+      startedAt: expect.any(Number),
+      completedAt: expect.any(Number),
+    });
+  });
+
   it('runs a deterministic tool loop and produces a command-driven projection', async () => {
     let effects = 0;
     const h = createTestWorkspace({

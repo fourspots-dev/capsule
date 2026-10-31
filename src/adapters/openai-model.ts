@@ -115,6 +115,10 @@ export class OpenAIModelTransport implements ModelTransport {
           if (!parsed) continue;
           const choice = parsed.choices?.[0];
           const delta = choice?.delta;
+          const reasoning = reasoningDelta(delta);
+          if (reasoning) {
+            yield { type: 'reasoning_delta', text: reasoning };
+          }
           if (typeof delta?.content === 'string' && delta.content) {
             yield { type: 'text_delta', text: delta.content };
           }
@@ -155,6 +159,10 @@ export class OpenAIModelTransport implements ModelTransport {
       const tail = parseDataLine(buffer);
       if (tail && tail !== 'done') {
         const delta = tail.choices?.[0]?.delta;
+        const reasoning = reasoningDelta(delta);
+        if (reasoning) {
+          yield { type: 'reasoning_delta', text: reasoning };
+        }
         if (typeof delta?.content === 'string' && delta.content) {
           yield { type: 'text_delta', text: delta.content };
         }
@@ -232,20 +240,32 @@ function toOpenAITool(tool: ModelRequest['tools'][number]): Record<string, unkno
 
 interface ParsedSse {
   choices?: Array<{
-    delta?: {
-      content?: unknown;
-      tool_calls?: Array<{
-        index?: unknown;
-        id?: unknown;
-        function?: { name?: unknown; arguments?: unknown };
-      }>;
-    };
+    delta?: ParsedSseDelta;
     finish_reason?: unknown;
   }>;
   usage?: {
     prompt_tokens?: unknown;
     completion_tokens?: unknown;
   };
+}
+
+interface ParsedSseDelta {
+  content?: unknown;
+  reasoning_content?: unknown;
+  reasoning?: unknown;
+  thinking?: unknown;
+  tool_calls?: Array<{
+    index?: unknown;
+    id?: unknown;
+    function?: { name?: unknown; arguments?: unknown };
+  }>;
+}
+
+function reasoningDelta(delta: ParsedSseDelta | undefined): string {
+  if (!delta) return '';
+  const value =
+    delta.reasoning_content ?? delta.reasoning ?? delta.thinking;
+  return typeof value === 'string' ? value : '';
 }
 
 function parseDataLine(line: string): ParsedSse | 'done' | undefined {

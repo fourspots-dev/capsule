@@ -6,6 +6,15 @@ import { CONFIG_KEY } from '../runtime/storage-migration';
 import type { KernelApprovalEvent, KernelHandoffEvent } from './kernel-client';
 import { KernelClient, connectChromeKernelPort } from './kernel-client';
 import { icons } from './icons';
+import {
+  buildTurnRenderUnits,
+  toolFamily,
+  workStateLabel,
+  type ToolFamily,
+  type TurnRenderUnit,
+  type WorkItem,
+  type WorkSegment,
+} from './turn-render-model';
 
 interface KernelConnectionConfig {
   id: string;
@@ -18,6 +27,7 @@ interface KernelConnectionConfig {
 
 interface KernelStoredConfig {
   approval: 'ask' | 'auto';
+  showReasoning: boolean;
   theme: 'light' | 'dark' | 'system';
   language: string;
   zoom: number;
@@ -58,6 +68,7 @@ export async function initKernelUi(): Promise<void> {
   let busy = false;
   let busyStartedAt = 0;
   let reconnectAttempts = 0;
+  const detailState = new Map<string, boolean>();
 
   const render = (): void => {
     const zh = pageConfig.language.startsWith('zh');
@@ -69,9 +80,10 @@ export async function initKernelUi(): Promise<void> {
     const approvePlan = document.querySelector<HTMLButtonElement>('#kernel-approve-plan');
     const compact = document.querySelector<HTMLButtonElement>('#kernel-compact');
     const attachmentList = document.querySelector<HTMLElement>('#kernel-attachments');
+    const queue = document.querySelector<HTMLElement>('#kernel-queue');
     const modelLabelNode = document.querySelector<HTMLElement>('#kernel-model-label');
     const input = document.querySelector<HTMLTextAreaElement>('#kernel-input');
-    if (!rows || !status || !send || !stop || !input || !modeButton || !approvePlan || !compact || !attachmentList || !modelLabelNode) return;
+    if (!rows || !status || !send || !stop || !input || !modeButton || !approvePlan || !compact || !attachmentList || !queue || !modelLabelNode) return;
     modelLabelNode.textContent = modelLabel;
     status.innerHTML = `<span class="wb-run-spinner"></span><span class="wb-run-text">${escapeHtml(statusText(
       projection,
@@ -84,7 +96,6 @@ export async function initKernelUi(): Promise<void> {
     status.hidden = !busy && !error;
     status.dataset.error = error ? 'true' : 'false';
     send.disabled =
-      busy ||
       Boolean(error) ||
       projection?.availability.canSend === false ||
       (!input.value.trim() && !attachments.length && !selectedSkill);
@@ -97,6 +108,14 @@ export async function initKernelUi(): Promise<void> {
       projection?.permissionMode !== 'plan' ||
       !projection.rows.some((row) => row.kind === 'assistant' && row.text.trim());
     compact.hidden = !projection || busy || projection.rows.filter((row) => row.kind !== 'tool').length < 2;
+    queue.hidden = !projection?.queueLength;
+    queue.innerHTML = projection?.queueLength
+      ? `<span class="kernel-queue-dot" aria-hidden="true"></span><span>${escapeHtml(
+          zh
+            ? `${projection.queueLength} 条消息排队`
+            : `${projection.queueLength} ${projection.queueLength === 1 ? 'message' : 'messages'} queued`
+        )}</span>`
+      : '';
     attachmentList.innerHTML = [
       ...(selectedSkill
         ? [`<span class="wb-chip"><span class="wb-chip-name">Skill: ${escapeHtml(selectedSkill.name)}</span></span>`]
@@ -113,25 +132,22 @@ export async function initKernelUi(): Promise<void> {
             <div class="kernel-plan-body">${md(projection.plan.text)}</div>
           </section>`
         : '') +
-      (projection?.rows ?? []).map((row) => rowHtml(row, pageConfig.language)).join('') +
-      (projection?.children ?? [])
-        .map(
-          (child) => `<article class="kernel-child kernel-child--${escapeHtml(child.status)}" data-child-task="${escapeHtml(child.taskId)}">
-            <span class="kernel-child-line" aria-hidden="true"></span>
-            <span class="kernel-child-icon" aria-hidden="true">⌁</span>
-            <div class="kernel-child-copy">
-              <div><strong>${escapeHtml(child.profileName)}</strong><span class="kernel-child-status">${escapeHtml(statusLabel(child.status, pageConfig.language))}</span></div>
-              <p>${escapeHtml(child.summary ?? `${child.executionMode} · ${zh ? '等待首次更新' : 'waiting for first update'}`)}</p>
-            </div>
-            <button type="button" class="kernel-child-open" data-open-child="${escapeHtml(child.sessionId)}">${zh ? '查看' : 'View'}</button>
-          </article>`
-        )
-        .join('') +
+      (projection
+        ? buildTurnRenderUnits(projection)
+            .map((unit) =>
+              renderTurnUnit(unit, pageConfig.language, pageConfig.showReasoning)
+            )
+            .join('')
+        : '') +
       approvals
         .map(
-          (approval) => `<article class="wb-permission-card kernel-approval">
+          (approval) => `<article class="wb-permission-card kernel-approval" data-ui-key="approval:${escapeHtml(approval.approvalId)}">
             <div class="wb-permission-title">${zh ? '允许' : 'Allow'} ${escapeHtml(toolLabel(approval.toolName))}?</div>
-            <div class="wb-permission-args">${escapeHtml(JSON.stringify(approval.input, null, 2))}</div>
+            <div class="kernel-permission-summary">${escapeHtml(approvalSummary(approval.toolName, approval.input, zh))}</div>
+            <details class="kernel-raw-details">
+              <summary>${zh ? '查看参数' : 'Show arguments'}</summary>
+              <div class="wb-permission-args">${escapeHtml(JSON.stringify(approval.input, null, 2))}</div>
+            </details>
             <div class="wb-permission-actions">
               <button type="button" class="kernel-btn kernel-btn--primary" data-approval="${escapeHtml(approval.approvalId)}" data-decision="allow">${zh ? '允许' : 'Allow'}</button>
               <button type="button" class="kernel-btn" data-approval="${escapeHtml(approval.approvalId)}" data-decision="deny">${zh ? '拒绝' : 'Deny'}</button>
@@ -151,9 +167,13 @@ export async function initKernelUi(): Promise<void> {
           </article>`
         )
         .join('');
-    rows.innerHTML = conversationHtml || emptyHtml(pageConfig.language);
     const scroll = document.querySelector<HTMLElement>('.wb-scroll');
-    if (scroll) scroll.scrollTop = scroll.scrollHeight;
+    const stickToBottom = scroll
+      ? scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 72
+      : true;
+    rows.innerHTML = conversationHtml || emptyHtml(pageConfig.language);
+    restoreDetailState(rows, detailState);
+    if (scroll && stickToBottom) scroll.scrollTop = scroll.scrollHeight;
   };
 
   client.onProjection((_sessionId, next) => {
@@ -293,12 +313,21 @@ export async function initKernelUi(): Promise<void> {
     render();
   });
   document.querySelector('#kernel-rows')?.addEventListener('click', (event) => {
+    const summary = (event.target as Element).closest<HTMLElement>('summary');
+    const details = summary?.closest<HTMLDetailsElement>('details[data-ui-key]');
+    const detailKey = details?.dataset.uiKey;
+    if (details && detailKey) {
+      queueMicrotask(() => {
+        if (details.isConnected) detailState.set(detailKey, details.open);
+      });
+    }
     const prompt = (event.target as Element).closest<HTMLElement>('[data-kernel-prompt]');
-    if (!prompt) return;
-    const input = document.querySelector<HTMLTextAreaElement>('#kernel-input');
-    if (input) {
-      input.value = prompt.dataset.kernelPrompt ?? '';
-      input.focus();
+    if (prompt) {
+      const input = document.querySelector<HTMLTextAreaElement>('#kernel-input');
+      if (input) {
+        input.value = prompt.dataset.kernelPrompt ?? '';
+        input.focus();
+      }
     }
   });
   document.querySelector('#kernel-mode')?.addEventListener('click', () => {
@@ -323,6 +352,7 @@ export async function initKernelUi(): Promise<void> {
     error = '';
     busy = false;
     busyStartedAt = 0;
+    detailState.clear();
     render();
   });
   document.addEventListener('change', (event) => {
@@ -444,13 +474,15 @@ export async function initKernelUi(): Promise<void> {
   async function submit(): Promise<void> {
     const input = document.querySelector<HTMLTextAreaElement>('#kernel-input');
     const text = input?.value.trim() ?? '';
-    if ((!text && !attachments.length && !selectedSkill) || busy) return;
+    if (!text && !attachments.length && !selectedSkill) return;
+    if (projection?.availability.canSend === false) return;
     if (text === '/new') {
       if (input) input.value = '';
       sessionId = `session_${crypto.randomUUID()}`;
       projection = undefined;
       approvals = [];
       handoffs = [];
+      detailState.clear();
       render();
       return;
     }
@@ -525,7 +557,6 @@ export async function initKernelUi(): Promise<void> {
     const input = document.querySelector<HTMLTextAreaElement>('#kernel-input');
     if (!send || !input) return;
     send.disabled =
-      busy ||
       Boolean(error) ||
       projection?.availability.canSend === false ||
       (!input.value.trim() && !attachments.length && !selectedSkill);
@@ -684,6 +715,9 @@ export async function initKernelUi(): Promise<void> {
           <div class="wb-set-card">
             <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.shield}</span>${zh ? '操作审批' : 'Action approval'}</span>
               <button type="button" class="wb-set-select" data-page-action="approval"><span class="wb-set-select-value">${pageConfig.approval === 'auto' ? (zh ? '自动执行' : 'Auto-approve') : (zh ? '需要审批' : 'Requires approval')}</span>${icons.chevronDown}</button></div>
+            <div class="wb-set-sepa"></div>
+            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.sparkle}</span>${zh ? '显示推理过程' : 'Reasoning'}</span>
+              <button type="button" class="wb-set-select" data-page-action="reasoning"><span class="wb-set-select-value">${pageConfig.showReasoning ? (zh ? '显示' : 'Show') : (zh ? '隐藏' : 'Hidden')}</span>${icons.chevronDown}</button></div>
           </div>
         </div>
         <div class="wb-set-group"><div class="wb-set-group-label">${zh ? '关于' : 'About'}</div>
@@ -776,6 +810,7 @@ export async function initKernelUi(): Promise<void> {
     });
     return {
       approval: raw.approval === 'auto' ? 'auto' : 'ask',
+      showReasoning: raw.showReasoning !== false,
       theme: raw.theme === 'dark' || raw.theme === 'system' ? raw.theme : 'light',
       language: typeof raw.language === 'string' ? raw.language : 'en',
       zoom: Number(raw.zoom ?? 100),
@@ -869,6 +904,12 @@ export async function initKernelUi(): Promise<void> {
     }
     if (action === 'approval') {
       pageConfig.approval = pageConfig.approval === 'ask' ? 'auto' : 'ask';
+      await writePageConfig();
+      renderPage();
+      return;
+    }
+    if (action === 'reasoning') {
+      pageConfig.showReasoning = !pageConfig.showReasoning;
       await writePageConfig();
       renderPage();
       return;
@@ -1099,6 +1140,7 @@ export async function initKernelUi(): Promise<void> {
   async function switchSession(nextSessionId: string): Promise<void> {
     if (nextSessionId === sessionId && projection) return;
     if (projection) await client.unsubscribe(sessionId).catch(() => undefined);
+    detailState.clear();
     sessionId = nextSessionId;
     approvals = [];
     handoffs = [];
@@ -1181,70 +1223,299 @@ function emptyHtml(language = 'en'): string {
   </div>`;
 }
 
-function rowHtml(row: ProductProjection['rows'][number], language = 'en'): string {
+function renderTurnUnit(
+  unit: TurnRenderUnit,
+  language: string,
+  showReasoning: boolean
+): string {
+  return `<article class="kernel-turn" data-product-turn="${escapeHtml(unit.productTurnId)}">
+    ${unit.segments
+      .map((segment) => renderWorkSegment(segment, language, showReasoning))
+      .join('')}
+  </article>`;
+}
+
+function renderWorkSegment(
+  segment: WorkSegment,
+  language: string,
+  showReasoning: boolean
+): string {
   const zh = language.startsWith('zh');
-  if (row.kind === 'user') {
-    return `<div class="wb-stream-row kernel-message-row kernel-message-row--user">
-      <div class="wb-msg wb-msg-user"><div class="wb-user-bubble">${escapeHtml(row.text)}</div></div>
-    </div>`;
+  const user = segment.user ? renderUserRow(segment.user.text) : '';
+  const workItems = segment.workItems
+    .map((item) => renderWorkItem(item, showReasoning, language))
+    .filter(Boolean);
+  const work = workItems.length
+    ? renderWorkHistory(segment, workItems.join(''), language)
+    : '';
+  const answer = segment.latestAssistant
+    ? renderAssistantRow(segment.latestAssistant, language, true)
+    : '';
+  const tail = segment.tailRows
+    .map((row) => renderTailRow(row, showReasoning, language))
+    .filter(Boolean)
+    .join('');
+  return `<section class="kernel-work-segment kernel-work-segment--${escapeHtml(segment.state)}">
+    ${user}
+    ${work}
+    ${answer}
+    ${tail || (segment.running && !answer ? `<div class="kernel-turn-placeholder">${zh ? '正在准备回复…' : 'Preparing a response…'}</div>` : '')}
+  </section>`;
+}
+
+function renderUserRow(text: string): string {
+  return `<div class="wb-stream-row kernel-message-row kernel-message-row--user">
+    <div class="wb-msg wb-msg-user"><div class="wb-user-bubble">${escapeHtml(text)}</div></div>
+  </div>`;
+}
+
+function renderWorkHistory(
+  segment: WorkSegment,
+  content: string,
+  language: string
+): string {
+  const zh = language.startsWith('zh');
+  if (segment.running) {
+    return `<section class="kernel-work kernel-work--running" aria-live="polite">
+      <div class="kernel-work-items">${content}</div>
+    </section>`;
   }
-  if (row.kind === 'assistant') {
-    if (!row.text && row.status !== 'streaming') return '';
-    const body =
-      row.status === 'streaming' && !row.text
-        ? '<span class="wb-thinking"><i></i><i></i><i></i></span>'
-        : `${md(row.text)}${row.status === 'streaming' ? '<span class="wb-cursor"></span>' : ''}`;
-    const feedback = !row.status || row.status === 'completed'
-      ? `<div class="wb-feedback">
-          <button type="button" class="wb-mini-action" data-copy-message="${escapeHtml(row.id)}">${icons.file}${zh ? '复制' : 'Copy'}</button>
-          <button type="button" class="wb-mini-action" data-export-message="${escapeHtml(row.id)}">${zh ? '导出' : 'Export'}</button>
-        </div>`
-      : '';
-    return `<div class="wb-stream-row kernel-message-row">
-      <div class="wb-msg"><div class="wb-assistant"><div class="wb-assistant-body">${body}</div>${feedback}</div></div>
-    </div>`;
+  const forceOpen = segment.state === 'failed' || segment.state === 'cancelled';
+  return `<details class="kernel-work kernel-work--${escapeHtml(segment.state)}" data-ui-key="work:${escapeHtml(segment.key)}"${forceOpen ? ' data-force-open="true"' : ''}${segment.defaultOpen ? ' open' : ''}>
+    <summary class="kernel-work-summary">
+      <span class="kernel-work-summary-icon" aria-hidden="true">${icons.sparkle}</span>
+      <span>${escapeHtml(workStateLabel(segment, language))}</span>
+      ${segment.state === 'failed' ? `<span class="kernel-work-state">${zh ? '失败' : 'Failed'}</span>` : ''}
+      ${segment.state === 'cancelled' ? `<span class="kernel-work-state">${zh ? '已停止' : 'Stopped'}</span>` : ''}
+      <span class="kernel-work-chevron" aria-hidden="true">${icons.chevronRight}</span>
+    </summary>
+    <div class="kernel-work-items">${content}</div>
+  </details>`;
+}
+
+function renderWorkItem(
+  item: WorkItem,
+  showReasoning: boolean,
+  language: string
+): string {
+  if (item.kind === 'reasoning' && item.row) {
+    return renderReasoningRow(item.row, showReasoning, language);
   }
-  if (row.kind === 'tool') {
-    const running = row.status === 'pending' || row.status === 'streaming';
-    const failed = row.status === 'failed' || row.status === 'denied';
-    const statusLabel =
-      row.status === 'denied'
-        ? (zh ? '已拒绝' : 'Denied')
-        : failed
-          ? (zh ? '失败' : 'Failed')
-          : running
-            ? (zh ? '执行中' : 'Running')
-            : '';
-    return `<div class="wb-stream-row">
-      <details class="wb-step kernel-tool-step" data-call-id="${escapeHtml(row.callId ?? row.id)}"${failed ? ' open' : ''}>
-        <summary class="wb-step-row">
-          <span class="wb-step-ico" aria-hidden="true">${icons.globe}</span>
-          <span class="wb-step-text">
-            <span class="wb-step-name">${escapeHtml(toolLabel(row.toolName ?? 'tool'))}</span>
-            ${statusLabel ? `<span class="wb-tool-status${running ? ' wb-tool-status--running' : failed ? ' wb-tool-status--error' : ''}">${statusLabel}</span>` : ''}
-          </span>
-          <span class="wb-tool-group-chev" aria-hidden="true">${icons.chevronRight}</span>
-        </summary>
-        <div class="wb-tool-body"><div class="wb-tool-card">${
-          row.text
-            ? toolOutput(row.toolName, row.text)
-            : `<pre class="wb-kv-block">${running ? (zh ? '执行中…' : 'Running…') : (zh ? '（无输出）' : '(no output)')}</pre>`
-        }</div></div>
-      </details>
-    </div>`;
+  if (item.kind === 'tool' && item.row) {
+    return renderToolRow(item.row, language);
   }
-  if (row.kind === 'activity') {
-    const running = row.status === 'streaming' || row.status === 'pending';
-    if (!running && row.text === 'Thinking complete') return '';
-    return `<div class="kernel-activity${running ? ' is-running' : ''}">
-      <span class="kernel-activity-mark" aria-hidden="true"></span>
-      <span>${escapeHtml(running ? (zh ? '思考中' : 'Thinking') : row.text)}</span>
-    </div>`;
+  if (item.kind === 'tool-group' && item.group) {
+    return renderToolGroup(item.group.family, item.group.rows, language);
   }
-  if (row.kind === 'plan') {
-    return `<details class="kernel-plan-inline"><summary>${zh ? '计划' : 'Plan'} · ${escapeHtml(row.status)}</summary><div>${md(row.text)}</div></details>`;
+  if (item.kind === 'child' && item.child) {
+    return renderChildRow(item.child, language);
+  }
+  if (item.kind === 'assistant' && item.row) {
+    return renderAssistantRow(item.row, language, false);
+  }
+  if (item.kind === 'plan' && item.row) {
+    return renderPlanRow(item.row, language);
+  }
+  if (item.kind === 'activity' && item.row) {
+    return renderActivityRow(item.row, language);
   }
   return '';
+}
+
+function renderReasoningRow(
+  row: ProductProjection['rows'][number],
+  showReasoning: boolean,
+  language: string
+): string {
+  if (!showReasoning || !row.text.trim()) return '';
+  const zh = language.startsWith('zh');
+  const running = row.status === 'streaming' || row.status === 'pending';
+  return `<details class="kernel-reasoning" data-ui-key="reasoning:${escapeHtml(row.id)}">
+    <summary>
+      <span class="kernel-reasoning-icon" aria-hidden="true">${icons.sparkle}</span>
+      <span>${zh ? '推理过程' : 'Reasoning'}</span>
+      ${running ? `<span class="kernel-reasoning-running">${zh ? '思考中' : 'Thinking'}</span>` : ''}
+      <span class="kernel-work-chevron" aria-hidden="true">${icons.chevronRight}</span>
+    </summary>
+    <div class="kernel-reasoning-body">${escapeHtml(row.text)}</div>
+  </details>`;
+}
+
+function renderToolRow(
+  row: ProductProjection['rows'][number],
+  language: string
+): string {
+  const zh = language.startsWith('zh');
+  const running = row.status === 'pending' || row.status === 'streaming';
+  const failed = row.status === 'failed' || row.status === 'denied';
+  const status =
+    row.status === 'denied'
+      ? (zh ? '已拒绝' : 'Denied')
+      : failed
+        ? (zh ? '失败' : 'Failed')
+        : running
+          ? (zh ? '执行中' : 'Running')
+          : '';
+  return `<div class="wb-stream-row kernel-tool-row">
+    <details class="wb-step kernel-tool-step" data-call-id="${escapeHtml(row.callId ?? row.id)}" data-ui-key="tool:${escapeHtml(row.id)}"${failed ? ' data-force-open="true"' : ''}${failed || running ? ' open' : ''}>
+      <summary class="wb-step-row">
+        <span class="wb-step-ico" aria-hidden="true">${familyIcon(toolFamily(row.toolName ?? ''))}</span>
+        <span class="wb-step-text">
+          <span class="wb-step-name">${escapeHtml(toolSummary(row.toolName ?? 'tool'))}</span>
+          ${status ? `<span class="wb-tool-status${running ? ' wb-tool-status--running' : failed ? ' wb-tool-status--error' : ''}">${status}</span>` : ''}
+        </span>
+        <span class="wb-tool-group-chev" aria-hidden="true">${icons.chevronRight}</span>
+      </summary>
+      <div class="wb-tool-body"><div class="wb-tool-card">${
+        row.text
+          ? toolOutput(row.toolName, row.text)
+          : `<pre class="wb-kv-block">${running ? (zh ? '执行中…' : 'Running…') : (zh ? '（无输出）' : '(no output)')}</pre>`
+      }</div></div>
+    </details>
+  </div>`;
+}
+
+function renderToolGroup(
+  family: ToolFamily,
+  rows: ProductProjection['rows'],
+  language: string
+): string {
+  return `<section class="kernel-tool-group">
+    <div class="kernel-tool-group-head">
+      <span class="kernel-tool-group-icon" aria-hidden="true">${familyIcon(family)}</span>
+      <span>${escapeHtml(familySummary(family, rows.length, language))}</span>
+    </div>
+    <div class="kernel-tool-group-rows">
+      ${rows.map((row) => renderToolRow(row, language)).join('')}
+    </div>
+  </section>`;
+}
+
+function renderAssistantRow(
+  row: ProductProjection['rows'][number],
+  language: string,
+  withFeedback: boolean
+): string {
+  if (!row.text && !withFeedback) return '';
+  const zh = language.startsWith('zh');
+  const body = row.text
+    ? `${md(row.text)}${row.status === 'streaming' ? '<span class="wb-cursor"></span>' : ''}`
+    : '';
+  const feedback = withFeedback && row.status === 'completed'
+    ? `<div class="wb-feedback">
+        <button type="button" class="wb-mini-action" data-copy-message="${escapeHtml(row.id)}">${icons.file}${zh ? '复制' : 'Copy'}</button>
+        <button type="button" class="wb-mini-action" data-export-message="${escapeHtml(row.id)}">${zh ? '导出' : 'Export'}</button>
+      </div>`
+    : '';
+  return `<div class="wb-stream-row kernel-message-row kernel-answer-row">
+    <div class="wb-msg"><div class="wb-assistant"><div class="wb-assistant-body">${body}</div>${feedback}</div></div>
+  </div>`;
+}
+
+function renderPlanRow(
+  row: ProductProjection['rows'][number],
+  language: string
+): string {
+  const zh = language.startsWith('zh');
+  return `<details class="kernel-plan-inline" data-ui-key="plan:${escapeHtml(row.id)}">
+    <summary>${zh ? '计划' : 'Plan'} · ${escapeHtml(statusLabel(row.status, language))}</summary>
+    <div>${md(row.text)}</div>
+  </details>`;
+}
+
+function renderActivityRow(
+  row: ProductProjection['rows'][number],
+  language: string
+): string {
+  if (row.text === 'Thinking' || row.text === 'Thinking complete') return '';
+  const running = row.status === 'streaming' || row.status === 'pending';
+  return `<div class="kernel-activity${running ? ' is-running' : ''}">
+    <span class="kernel-activity-mark" aria-hidden="true"></span>
+    <span>${escapeHtml(row.text)}</span>
+  </div>`;
+}
+
+function renderChildRow(
+  child: NonNullable<ProductProjection['children']>[number],
+  language: string
+): string {
+  const zh = language.startsWith('zh');
+  return `<article class="kernel-child kernel-child--${escapeHtml(child.status)}" data-child-task="${escapeHtml(child.taskId)}">
+    <span class="kernel-child-line" aria-hidden="true"></span>
+    <span class="kernel-child-icon" aria-hidden="true">⌁</span>
+    <div class="kernel-child-copy">
+      <div><strong>${escapeHtml(child.profileName)}</strong><span class="kernel-child-status">${escapeHtml(statusLabel(child.status, language))}</span></div>
+      <p>${escapeHtml(child.summary ?? `${child.executionMode} · ${zh ? '等待首次更新' : 'waiting for first update'}`)}</p>
+    </div>
+    <button type="button" class="kernel-child-open" data-open-child="${escapeHtml(child.sessionId)}">${zh ? '查看' : 'View'}</button>
+  </article>`;
+}
+
+function renderTailRow(
+  row: ProductProjection['rows'][number],
+  showReasoning: boolean,
+  language: string
+): string {
+  if (row.kind === 'reasoning') return renderReasoningRow(row, showReasoning, language);
+  if (row.kind === 'tool') return renderToolRow(row, language);
+  if (row.kind === 'assistant') return renderAssistantRow(row, language, true);
+  if (row.kind === 'plan') return renderPlanRow(row, language);
+  if (row.kind === 'activity') return renderActivityRow(row, language);
+  return '';
+}
+
+function restoreDetailState(
+  root: HTMLElement,
+  state: Map<string, boolean>
+): void {
+  root.querySelectorAll<HTMLDetailsElement>('details[data-ui-key]').forEach((details) => {
+    const key = details.dataset.uiKey;
+    if (details.dataset.forceOpen === 'true') details.open = true;
+    else if (key && state.has(key)) details.open = state.get(key) ?? false;
+  });
+}
+
+function toolSummary(name: string): string {
+  const family = toolFamily(name);
+  if (family === 'explore') return toolLabel(name);
+  if (family === 'browser') return toolLabel(name);
+  if (family === 'terminal') return toolLabel(name);
+  if (family === 'changes') return toolLabel(name);
+  if (family === 'subagent') return toolLabel(name);
+  if (family === 'artifact') return toolLabel(name);
+  return toolLabel(name);
+}
+
+function familyLabel(family: ToolFamily, language: string): string {
+  const zh = language.startsWith('zh');
+  return {
+    explore: zh ? '探索' : 'Explore',
+    browser: zh ? '浏览器' : 'Browser',
+    terminal: zh ? '终端' : 'Terminal',
+    changes: zh ? '变更' : 'Changes',
+    subagent: zh ? '子 Agent' : 'Subagents',
+    artifact: zh ? '产物' : 'Artifacts',
+    other: zh ? '工具' : 'Tools',
+  }[family];
+}
+
+function familySummary(family: ToolFamily, count: number, language: string): string {
+  const zh = language.startsWith('zh');
+  if (family === 'explore') return zh ? `探索了 ${count} 个步骤` : `Explored ${count} steps`;
+  if (family === 'browser') return zh ? `浏览器操作 ${count} 次` : `Used browser ${count} times`;
+  if (family === 'terminal') return zh ? `运行了 ${count} 条命令` : `Ran ${count} commands`;
+  if (family === 'changes') return zh ? `修改了 ${count} 处` : `Made ${count} changes`;
+  if (family === 'subagent') return zh ? `协调了 ${count} 个子 Agent 操作` : `Coordinated ${count} subagent actions`;
+  if (family === 'artifact') return zh ? `生成了 ${count} 个产物` : `Created ${count} artifacts`;
+  return `${familyLabel(family, language)} · ${count}`;
+}
+
+function familyIcon(family: ToolFamily): string {
+  if (family === 'browser' || family === 'explore') return icons.globe;
+  if (family === 'terminal') return icons.file;
+  if (family === 'subagent') return icons.sparkle;
+  if (family === 'artifact') return icons.file;
+  return icons.gear;
 }
 
 function toolLabel(name: string): string {
@@ -1275,6 +1546,35 @@ function toolLabel(name: string): string {
   return labels[name] ?? name.replace(/_/g, ' ');
 }
 
+function approvalSummary(name: string, input: unknown, zh: boolean): string {
+  const values =
+    input && typeof input === 'object' && !Array.isArray(input)
+      ? (input as Record<string, unknown>)
+      : {};
+  const stringValue = (...keys: string[]): string => {
+    const value = keys.map((key) => values[key]).find((item) => typeof item === 'string');
+    return typeof value === 'string' ? value : '';
+  };
+  const target = stringValue('url', 'path', 'selector', 'command', 'profile', 'reason');
+  const suffix = target ? ` · ${truncateText(target, 90)}` : '';
+  if (name === 'navigate') return `${zh ? '打开页面' : 'Open page'}${suffix}`;
+  if (name === 'exec') return `${zh ? '执行命令' : 'Run command'}${suffix}`;
+  if (name === 'run_tests') return `${zh ? '运行测试' : 'Run tests'}${suffix}`;
+  if (name === 'write_file' || name === 'apply_patch' || name === 'edit') {
+    return `${zh ? '修改文件' : 'Edit file'}${suffix}`;
+  }
+  if (name === 'spawn_agent') return `${zh ? '启动子 Agent' : 'Start subagent'}${suffix}`;
+  if (name === 'await_user_action') {
+    return target || (zh ? '需要你完成一次手动操作' : 'Manual action required');
+  }
+  return `${toolLabel(name)}${suffix}`;
+}
+
+function truncateText(value: string, maxLength: number): string {
+  const compact = value.replace(/\s+/g, ' ').trim();
+  return compact.length > maxLength ? `${compact.slice(0, maxLength - 1)}…` : compact;
+}
+
 function shell(config: KernelStoredConfig): string {
   const zh = config.language.startsWith('zh');
   const theme =
@@ -1303,6 +1603,7 @@ function shell(config: KernelStoredConfig): string {
       </main>
     </div>
     <div class="wb-dock">
+      <div id="kernel-queue" class="kernel-queue" hidden></div>
       <div id="kernel-status" class="wb-bridge-note kernel-status" hidden></div>
       <div id="kernel-attachments" class="wb-attachment-bar kernel-context-list"></div>
       <form id="kernel-form" class="wb-composer">
@@ -1409,6 +1710,7 @@ function toolOutput(name: string | undefined, text: string): string {
 function defaultPageConfig(): KernelStoredConfig {
   return {
     approval: 'ask',
+    showReasoning: true,
     theme: 'light',
     language: 'en',
     zoom: 100,

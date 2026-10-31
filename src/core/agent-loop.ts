@@ -50,6 +50,7 @@ export class AgentLoop {
         });
 
         let text = '';
+        let reasoning = '';
         const calls: ToolCall[] = [];
         for await (const event of this.options.model.stream({
           sessionId: request.sessionId,
@@ -67,6 +68,14 @@ export class AgentLoop {
               messageId,
               delta: event.text,
             });
+          } else if (event.type === 'reasoning_delta') {
+            reasoning += event.text;
+            await request.onEvent?.({
+              type: 'reasoning_update',
+              taskId: request.taskId,
+              messageId,
+              delta: event.text,
+            });
           } else if (event.type === 'tool_call') {
             calls.push(createToolCall(event.call));
           } else if (event.type === 'error') {
@@ -80,6 +89,7 @@ export class AgentLoop {
         const assistantMessage: ModelMessage = {
           role: 'assistant',
           content: text,
+          ...(reasoning ? { reasoning } : {}),
           ...(calls.length ? { toolCalls: calls } : {}),
         };
         messages.push(assistantMessage);

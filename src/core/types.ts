@@ -135,7 +135,7 @@ export interface ToolCall {
 
 export type ModelMessage =
   | { role: 'system' | 'user'; content: string }
-  | { role: 'assistant'; content: string; toolCalls?: ToolCall[] }
+  | { role: 'assistant'; content: string; reasoning?: string; toolCalls?: ToolCall[] }
   | { role: 'tool'; callId: string; name: string; content: string };
 
 export interface ModelRequest {
@@ -156,6 +156,7 @@ export type ToolDescriptor = ModelToolDescriptor;
 
 export type ModelEvent =
   | { type: 'text_delta'; text: string }
+  | { type: 'reasoning_delta'; text: string }
   | { type: 'tool_call'; call: ToolCall }
   | { type: 'usage'; inputTokens: number; outputTokens: number }
   | { type: 'finish'; reason: string }
@@ -198,6 +199,7 @@ export type AgentLoopEvent =
   | { type: 'turn_start'; taskId: string; turn: number }
   | { type: 'message_start'; taskId: string; messageId: string; role: 'assistant' }
   | { type: 'message_update'; taskId: string; messageId: string; delta: string }
+  | { type: 'reasoning_update'; taskId: string; messageId: string; delta: string }
   | { type: 'message_end'; taskId: string; messageId: string; message: ModelMessage }
   | { type: 'tool_execution_start'; taskId: string; result: ToolExecutionResult }
   | { type: 'tool_execution_end'; taskId: string; result: ToolExecutionResult }
@@ -210,7 +212,13 @@ export interface AgentLoopResult {
   error?: StructuredError;
 }
 
-export type ConversationRowKind = 'user' | 'assistant' | 'tool' | 'activity' | 'plan';
+export type ConversationRowKind =
+  | 'user'
+  | 'assistant'
+  | 'reasoning'
+  | 'tool'
+  | 'activity'
+  | 'plan';
 
 export interface ConversationRow {
   id: string;
@@ -221,6 +229,8 @@ export interface ConversationRow {
   status: 'pending' | 'streaming' | 'completed' | 'failed' | 'denied' | 'cancelled';
   callId?: string;
   toolName?: string;
+  startedAt?: number;
+  completedAt?: number;
 }
 
 export type ConversationPhase =

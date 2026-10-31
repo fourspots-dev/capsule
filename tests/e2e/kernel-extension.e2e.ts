@@ -198,7 +198,10 @@ beforeAll(async () => {
         `data: ${JSON.stringify({
           choices: [
             {
-              delta: { content: `E2E received: ${userText}` },
+              delta: {
+                reasoning_content: 'Check the request and return the committed result.',
+                content: `E2E received: ${userText}`,
+              },
               finish_reason: 'stop',
             },
           ],
@@ -324,6 +327,14 @@ describe('kernel extension E2E', () => {
     await page.waitForFunction(() => document.querySelector('.wb-settings-title')?.textContent === '设置');
     await page.selectOption('#kernel-page-language', 'en');
     await page.waitForFunction(() => document.querySelector('.wb-settings-title')?.textContent === 'Settings');
+    await page.click('[data-page-action="reasoning"]');
+    await page.waitForFunction(() =>
+      document.querySelector('[data-page-action="reasoning"]')?.textContent?.includes('Hidden')
+    );
+    await page.click('[data-page-action="reasoning"]');
+    await page.waitForFunction(() =>
+      document.querySelector('[data-page-action="reasoning"]')?.textContent?.includes('Show')
+    );
     await page.screenshot({ path: resolve('docs/settings.png'), fullPage: false });
     await page.click('[data-page-action="connections"]');
     await page.waitForSelector('.wb-conn-card');
@@ -356,6 +367,13 @@ describe('kernel extension E2E', () => {
     }));
     expect(mobileLayout.scrollWidth).toBeLessThanOrEqual(mobileLayout.viewport + 1);
     await page.screenshot({ path: resolve('docs/restored-empty-mobile.png'), fullPage: false });
+    await page.setViewportSize({ width: 320, height: 700 });
+    const narrowLayout = await page.evaluate(() => ({
+      viewport: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }));
+    expect(narrowLayout.scrollWidth).toBeLessThanOrEqual(narrowLayout.viewport + 1);
+    await page.screenshot({ path: resolve('docs/restored-empty-320.png'), fullPage: false });
     await page.setViewportSize({ width: 420, height: 900 });
     const offscreenDeadline = Date.now() + 5_000;
     let offscreenCount = 0;
@@ -382,6 +400,17 @@ describe('kernel extension E2E', () => {
     expect(pageErrors).toEqual([]);
     expect(modelCalls).toBe(1);
     expect(await page.locator('.wb-assistant').count()).toBeGreaterThan(0);
+    const completedWork = page.locator('.kernel-work').first();
+    expect(await completedWork.locator('.kernel-work-summary').textContent()).toContain('Worked');
+    expect(await completedWork.getAttribute('open')).toBeNull();
+    await completedWork.locator('.kernel-work-summary').click();
+    const reasoning = completedWork.locator('.kernel-reasoning');
+    expect(await reasoning.count()).toBe(1);
+    expect(await reasoning.getAttribute('open')).toBeNull();
+    await reasoning.locator('summary').click();
+    expect(await reasoning.locator('.kernel-reasoning-body').textContent()).toContain(
+      'Check the request'
+    );
     await page.screenshot({ path: resolve('docs/restored-chat.png'), fullPage: false });
     await page.click('#kernel-tabs');
     await page.waitForSelector('#kernel-tab-menu:not([hidden])');
@@ -417,6 +446,9 @@ describe('kernel extension E2E', () => {
     expect(await page.locator('.kernel-tool-step', { hasText: 'Start subagent' }).count()).toBe(1);
     expect(await page.locator('.kernel-child', { hasText: 'general' }).count()).toBe(1);
     expect(await page.locator('.kernel-child-open').count()).toBe(1);
+    const subagentTurn = page.locator('.kernel-turn', { hasText: 'subagent smoke' });
+    await subagentTurn.locator('.kernel-work-summary').click();
+    expect(await subagentTurn.locator('.kernel-tool-step').getAttribute('open')).toBeNull();
     await page.screenshot({ path: resolve('docs/restored-subagent.png'), fullPage: false });
     await page.click('.kernel-child-open');
     await page.waitForFunction(() =>
@@ -432,6 +464,11 @@ describe('kernel extension E2E', () => {
     await page.waitForFunction(() =>
       document.querySelector('#kernel-rows')?.textContent?.includes('subagent smoke')
     );
+    expect(
+      await page
+        .locator('.kernel-work:not(.kernel-work--running)')
+        .evaluateAll((details) => details.map((item) => item.hasAttribute('open')))
+    ).not.toContain(true);
     expect(pageErrors).toEqual([]);
 
     await page.click('#kernel-slash');
@@ -444,12 +481,18 @@ describe('kernel extension E2E', () => {
 
     await page.fill('#kernel-input', 'detached task');
     await page.click('#kernel-send');
-    await page.waitForSelector('.kernel-activity.is-running');
+    await page.waitForSelector('#kernel-status:not([hidden])');
+    await page.fill('#kernel-input', 'queued follow-up');
+    await page.click('#kernel-send');
+    await page.waitForFunction(() =>
+      document.querySelector('#kernel-queue')?.textContent?.includes('1 message queued')
+    );
     const deadline = Date.now() + 5_000;
     while (!detachedStarted && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     expect(detachedStarted).toBe(true);
+    await page.screenshot({ path: resolve('docs/restored-running.png'), fullPage: false });
     await page.close();
     await new Promise((resolve) => setTimeout(resolve, 1_200));
     const liveWorkersAfterClose = context.serviceWorkers().length;
@@ -501,7 +544,7 @@ describe('kernel extension E2E', () => {
       );
     }
     expect(reopenErrors).toEqual([]);
-    expect(modelCalls).toBe(7);
+    expect(modelCalls).toBe(8);
 
     await reopened.fill('#kernel-input', 'handoff smoke');
     await reopened.click('#kernel-send');
@@ -515,7 +558,7 @@ describe('kernel extension E2E', () => {
       undefined,
       { timeout: 30_000 }
     );
-    expect(modelCalls).toBe(9);
+    expect(modelCalls).toBe(10);
     expect(reopenErrors).toEqual([]);
 
     await reopened.setInputFiles('#kernel-file-input', {
@@ -536,7 +579,7 @@ describe('kernel extension E2E', () => {
       undefined,
       { timeout: 30_000 }
     );
-    expect(modelCalls).toBe(10);
+    expect(modelCalls).toBe(11);
   });
 
   it('reports missing model configuration instead of dropping the runtime port', async () => {

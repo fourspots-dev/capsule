@@ -650,6 +650,7 @@ export class SessionRuntime {
 
   private async onLoopEvent(taskId: string, event: AgentLoopEvent): Promise<void> {
     if (event.type === 'turn_start') {
+      const startedAt = this.clock.now();
       this.rows.push({
         id: `activity_${taskId}_${event.turn}`,
         entityId: `activity_${taskId}_${event.turn}`,
@@ -657,6 +658,7 @@ export class SessionRuntime {
         kind: 'activity',
         text: 'Thinking',
         status: 'streaming',
+        startedAt,
       });
       this.taskGraph.recordUsage(taskId, { turns: 1 });
       this.touch(event.type);
@@ -668,8 +670,31 @@ export class SessionRuntime {
         kind: 'assistant',
         text: '',
         status: 'streaming',
+        startedAt: this.clock.now(),
       });
       this.touch('message.started');
+    } else if (event.type === 'reasoning_update') {
+      let reasoningRow = this.rows.find(
+        (candidate) => candidate.id === `reasoning_${event.messageId}`
+      );
+      if (!reasoningRow) {
+        reasoningRow = {
+          id: `reasoning_${event.messageId}`,
+          entityId: `reasoning_${event.messageId}`,
+          productTurnId: taskId,
+          kind: 'reasoning',
+          text: '',
+          status: 'streaming',
+          startedAt: this.clock.now(),
+        };
+        const assistantIndex = this.rows.findIndex(
+          (candidate) => candidate.id === event.messageId
+        );
+        if (assistantIndex >= 0) this.rows.splice(assistantIndex, 0, reasoningRow);
+        else this.rows.push(reasoningRow);
+      }
+      reasoningRow.text += event.delta;
+      this.touch('reasoning.delta');
     } else if (event.type === 'message_update') {
       const row = this.rows.find((candidate) => candidate.id === event.messageId);
       if (row) row.text += event.delta;
@@ -679,13 +704,25 @@ export class SessionRuntime {
       if (row) {
         row.text = event.message.role === 'assistant' ? event.message.content : row.text;
         row.status = 'completed';
+        row.completedAt = this.clock.now();
       }
       if (event.message.role === 'assistant') {
+        const reasoningRow = this.rows.find(
+          (candidate) => candidate.id === `reasoning_${event.messageId}`
+        );
+        if (reasoningRow) {
+          reasoningRow.text = event.message.reasoning ?? reasoningRow.text;
+          reasoningRow.status = 'completed';
+          reasoningRow.completedAt = this.clock.now();
+        }
         this.sessionTree.append({
           type: 'message',
           payload: {
             role: 'assistant',
             content: event.message.content,
+            ...(event.message.reasoning
+              ? { reasoning: event.message.reasoning }
+              : {}),
             ...(event.message.toolCalls
               ? {
                   toolCallIds: event.message.toolCalls.map((call) => call.id),
@@ -703,6 +740,7 @@ export class SessionRuntime {
       if (activity) {
         activity.text = 'Thinking complete';
         activity.status = 'completed';
+        activity.completedAt = this.clock.now();
       }
       this.touch(event.type);
     } else if (event.type === 'tool_execution_start') {
@@ -722,6 +760,7 @@ export class SessionRuntime {
         status: 'pending',
         callId: event.result.callId,
         toolName: event.result.name,
+        startedAt: this.clock.now(),
       });
       this.touch('tool.started');
     } else if (event.type === 'tool_execution_end') {
@@ -739,6 +778,7 @@ export class SessionRuntime {
               ? event.result.output
               : JSON.stringify(event.result.output ?? null)
             : event.result.error?.message ?? 'Tool failed';
+        row.completedAt = this.clock.now();
       }
       this.sessionTree.append({
         type: 'message',
@@ -774,6 +814,7 @@ export class SessionRuntime {
         (row.status === 'pending' || row.status === 'streaming')
       ) {
         row.status = status;
+        row.completedAt ??= this.clock.now();
       }
     }
   }

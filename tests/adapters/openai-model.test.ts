@@ -132,6 +132,42 @@ describe('OpenAIModelTransport', () => {
     ]);
   });
 
+  it('streams provider-visible reasoning without sending it back to the model', async () => {
+    let body: any;
+    const transport = new OpenAIModelTransport({
+      baseUrl: 'https://model.example/v1',
+      model: 'reasoning-model',
+      fetch: async (_input, init) => {
+        body = JSON.parse(String(init?.body));
+        return sseResponse([
+          'data: {"choices":[{"delta":{"reasoning_content":"Inspect "}}]}\n\n',
+          'data: {"choices":[{"delta":{"reasoning":"the page.","content":"Done."},' +
+            '"finish_reason":"stop"}]}\n\n',
+          'data: [DONE]\n\n',
+        ]);
+      },
+    });
+
+    const events = await collect(
+      transport.stream(
+        request({
+          messages: [
+            { role: 'user', content: 'inspect' },
+            { role: 'assistant', content: 'previous', reasoning: 'private in transport only' },
+          ],
+        })
+      )
+    );
+
+    expect(events).toEqual([
+      { type: 'reasoning_delta', text: 'Inspect ' },
+      { type: 'reasoning_delta', text: 'the page.' },
+      { type: 'text_delta', text: 'Done.' },
+      { type: 'finish', reason: 'stop' },
+    ]);
+    expect(body.messages[1]).toEqual({ role: 'assistant', content: 'previous' });
+  });
+
   it('returns a structured HTTP error without leaking credentials', async () => {
     const transport = new OpenAIModelTransport({
       baseUrl: 'https://model.example/v1',
