@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tinyai 状态空间测试方案</title>
+<style>
+:root{--bg:#f4f5f7;--paper:#fff;--text:#191a1e;--muted:#6f7179;--line:#e2e3e8;--accent:#5145d8;--accent2:#7668f4;--ok:#137a4b;--warn:#986100;--bad:#b42318;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.72 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1200px;margin:auto;padding:36px 24px 100px}
+.hero{padding:36px;border-radius:25px;background:radial-gradient(circle at 90% 10%,#a69dff 0,transparent 28%),linear-gradient(135deg,#171726,#30299a 60%,#6658e9);color:#fff}.hero small{opacity:.72;letter-spacing:.11em}.hero h1{font-size:35px;line-height:1.2;margin:12px 0}.hero p{max-width:880px;margin:0;color:#e7e4ff}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}
+nav{position:sticky;top:0;z-index:5;display:flex;gap:14px;overflow:auto;margin:18px 0;padding:10px 14px;border:1px solid var(--line);border-radius:13px;background:#f4f5f7ed;backdrop-filter:blur(12px)}nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}
+section{margin:18px 0;padding:25px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:22px;margin:0 0 14px}h3{font-size:16px;margin:21px 0 8px}p{color:#44454c}.muted{color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafafa}.card h3{margin:0 0 8px}.card p{margin:0}.card ul{margin:8px 0 0;padding-left:18px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafafa;color:var(--muted);font-weight:600}
+code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{padding:16px;overflow:auto;border-radius:11px;background:#181820;color:#edecff;font:12px/1.6 var(--mono)}
+.rule{padding:12px 14px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#f5f3ff}.warn{border-color:var(--warn);background:#fff8e8}.danger{border-color:var(--bad);background:#fff1f0}
+.status{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;background:#eef8f2;color:var(--ok)}.status.mid{background:#fff6e4;color:var(--warn)}.status.gap{background:#fff0ef;color:var(--bad)}.status.unit{background:#f0efff;color:var(--accent)}
+.level{display:flex;gap:12px;align-items:center;margin-bottom:12px}.level-no{display:grid;place-items:center;width:42px;height:42px;border-radius:12px;background:#efedff;color:var(--accent);font-weight:750}.level h2{margin:0}.level p{margin:0;color:var(--muted);font-size:12px}
+@media(max-width:850px){.grid3{grid-template-columns:1fr}}@media(max-width:720px){.grid{grid-template-columns:1fr}.hero h1{font-size:28px}.wrap{padding:20px 12px 70px}section{padding:20px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+<small>TINYAI / STATE-SPACE TESTING / DESIGN</small>
+<h1>状态空间测试方案</h1>
+<p>用“有界穷举 + 参考模型 + 并发模型检查 + Chrome 故障注入 + UI 状态组合 + 代表性 E2E”覆盖 Coding Agent 和浏览器 Workspace 的关键行为，而不是依赖不断增加顺序手写测试。</p>
+<div class="chips"><span class="chip">当前基线：180 个确定性测试</span><span class="chip">5 个 Chrome E2E</span><span class="chip">7 个属性</span><span class="chip">目标：状态与交错可复现</span></div>
+</header>
+<nav><a href="#goal">目标</a><a href="#model">状态模型</a><a href="#invariants">不变量</a><a href="#levels">六级测试</a><a href="#matrix">顺序矩阵</a><a href="#fault">故障注入</a><a href="#ui">UI组合</a><a href="#oracle">判定与复现</a><a href="#ci">CI门禁</a><a href="#gaps">当前缺口</a></nav>
+<section id="goal">
+<h2>1. 目标与边界</h2>
+<div class="grid">
+<div class="card"><h3>要解决的问题</h3><ul><li>标签关闭、激活、分组和 Runtime 重载的事件交错。</li><li>Session、Workspace Binding 和 Projection 的一致性。</li><li>快速切换、审批、队列和后台任务的组合。</li><li>测试失败可以稳定重放。</li></ul></div>
+<div class="card"><h3>不追求的目标</h3><ul><li>穷举真实网页 DOM 和所有外部网络行为。</li><li>穷举任意长度模型输出和用户输入。</li><li>在 CI 中全量运行所有 Chrome/OS 组合。</li><li>用行覆盖率替代行为判断。</li></ul></div>
+</div>
+<div class="rule">核心策略：对控制面做有限抽象和有界穷举；对输入空间做属性测试；对真实浏览器只保留代表性 E2E 和故障注入。</div>
+</section>
+<section id="model">
+<h2>2. 被测状态模型</h2>
+<h3>2.1 浏览器 Workspace 状态</h3>
+<pre>Window
+  tabs: 0..3
+  activeTabId: one of tabs or none
+Tab
+  alive: true | false
+  group: none | G1 | G2
+Binding
+  scope: none | tab | group
+  session: S1 | S2 | historical
+  activeTarget: tab
+Session
+  lifecycle: unloaded | ready | reloading | stopped
+  task: idle | running | waiting | completed | failed | cancelled
+UI
+  currentSession: S1 | S2 | none
+  pendingActivation: 0..2
+  pendingApproval: yes | no
+  queue: 0..2</pre>
+<p>边界规模固定为最多 3 个 Tab、2 个 Group、2 个 Session。通过对称性约简，避免标签 ID 造成无意义的状态爆炸。</p>
+<h3>2.2 事件域</h3>
+<table><thead><tr><th>类别</th><th>事件</th><th>说明</th></tr></thead><tbody>
+<tr><td>Chrome</td><td>activate, close, group, ungroup, move-window</td><td>标签存在性和成员关系变化</td></tr>
+<tr><td>Workspace</td><td>resolve, create, bind, promote, release, clear</td><td>Session 映射变化</td></tr>
+<tr><td>Runtime</td><td>reload, cold-load, delete-session, stop-task</td><td>生命周期变化</td></tr>
+<tr><td>Agent</td><td>new-tab, switch-tab, read, write, approval</td><td>工具和目标操作</td></tr>
+<tr><td>UI</td><td>switch-tab, history-open, reconnect, render</td><td>客户端状态变化</td></tr>
+</tbody></table>
+</section>
+<section id="invariants">
+<h2>3. 必须始终成立的不变量</h2>
+<table><thead><tr><th>ID</th><th>不变量</th><th>失败含义</th></tr></thead><tbody>
+<tr><td>INV-01</td><td>一个 Tab 最多属于一个有效 Binding。</td><td>同一标签串到两个会话。</td></tr>
+<tr><td>INV-02</td><td>一个 Group 最多绑定一个 Workspace Session。</td><td>组内对话分裂。</td></tr>
+<tr><td>INV-03</td><td>Group Binding 的成员必须全部真实存在且 groupId 一致。</td><td>幽灵标签或错误目标。</td></tr>
+<tr><td>INV-04</td><td>Standalone Binding 不得指向已关闭 Tab。</td><td>BROWSER_TAB_NOT_FOUND 等脏映射。</td></tr>
+<tr><td>INV-05</td><td>Active Target 必须是当前 Workspace 的成员。</td><td>Agent 越界操作。</td></tr>
+<tr><td>INV-06</td><td>Session 不能同时绑定两个互不一致的 active tabs。</td><td>并发切换覆盖。</td></tr>
+<tr><td>INV-07</td><td>UI 最终只订阅最后活动 Scope 的 Projection。</td><td>旧会话覆盖新会话。</td></tr>
+<tr><td>INV-08</td><td>旧激活事件不得覆盖更新 generations 的状态。</td><td>竞态回退。</td></tr>
+<tr><td>INV-09</td><td>关闭最后 Group 成员必须清理 Group Binding。</td><td>groupId 复用导致串话。</td></tr>
+<tr><td>INV-10</td><td>Runtime 重建后有效 Tab 必须恢复原 Session。</td><td>对话丢失或重复。</td></tr>
+<tr><td>INV-11</td><td>只有显式 new_tab 才能创建浏览器 Tab。</td><td>自动打开空白页。</td></tr>
+<tr><td>INV-12</td><td>审批、队列和任务状态不能在切换时串 Session。</td><td>跨标签数据泄漏。</td></tr>
+</tbody></table>
+</section>
+<section id="levels">
+<h2>4. 六级测试结构</h2>
+<div class="level"><div class="level-no">L1</div><div><h2>纯状态机穷举</h2><p>没有浏览器和异步，只验证有限转换与终态。</p></div></div>
+<div class="grid">
+<div class="card"><h3>范围</h3><p>Session Lifecycle、Task、Input Ledger、Command Inbox、Binding 状态。</p></div>
+<div class="card"><h3>方法</h3><p>枚举所有 State × Event；断言只允许的转换、终态不可离开、重复事件幂等。</p></div>
+<div class="card"><h3>产出</h3><p>转换矩阵、非法转换表、覆盖率报告。</p></div>
+<div class="card"><h3>完成标准</h3><p>所有已声明状态和事件均至少被枚举；未建模事件必须显式失败。</p></div>
+</div>
+<div class="level"><div class="level-no">L2</div><div><h2>Workspace 参考模型与有界穷举</h2><p>用独立内存模型判断实际 Registry 是否始终等价。</p></div></div>
+<div class="grid">
+<div class="card"><h3>参考模型</h3><p>维护 tabs、groups、tabBindings、groupBindings、activeTab、sessions。</p></div>
+<div class="card"><h3>序列规模</h3><p>1-3 个 Tab、1-2 个 Group、2 个 Session，事件序列长度 1-5。</p></div>
+<div class="card"><h3>生成方式</h3><p>先做短序列穷举；再做 fast-check stateful property 随机序列 500-2000 步。</p></div>
+<div class="card"><h3>断言频率</h3><p>每个事件后校验全部 INV-01 至 INV-12，而不是只检查最终结果。</p></div>
+</div>
+<div class="level"><div class="level-no">L3</div><div><h2>并发事件与模型检查</h2><p>验证事件顺序，而非业务算法。</p></div></div>
+<div class="grid">
+<div class="card"><h3>TLA+</h3><p>建模 Tab、Group、Binding、Session、reload 和 activate/close 事件。</p></div>
+<div class="card"><h3>目标</h3><p>检查无死锁、无双绑定、无过期激活覆盖、无残留 Group Binding。</p></div>
+<div class="card"><h3>限制</h3><p>模型只保留控制面字段，不模拟 DOM、模型 token 或真实 Chrome 实现。</p></div>
+<div class="card"><h3>持久化</h3><p>把验证通过的模型和失败 trace 纳入仓库，作为实现对照。</p></div>
+</div>
+<div class="level"><div class="level-no">L4</div><div><h2>Chrome API 故障注入</h2><p>在 Adapter 边界模拟延迟、失败和状态漂移。</p></div></div>
+<div class="grid">
+<div class="card"><h3>注入点</h3><p>tabs.get/create/update/group/ungroup/remove、onActivated/onRemoved/onDetached、debugger.attach、tabGroups.update。</p></div>
+<div class="card"><h3>结果域</h3><p>success、delay、not-found、throw、stale、partial success。</p></div>
+<div class="card"><h3>时序</h3><p>每个操作前后允许事件晚到、重复和反序。</p></div>
+<div class="card"><h3>断言</h3><p>错误可观察、映射可清理、UI 不暴露内部竞态、后续操作可恢复。</p></div>
+</div>
+<div class="level"><div class="level-no">L5</div><div><h2>Projection 与 UI 状态组合</h2><p>覆盖 Render Model 输入组合和切换竞态。</p></div></div>
+<div class="grid">
+<div class="card"><h3>维度</h3><p>task、queue、approval、reasoning、tool family、child、error、session generation。</p></div>
+<div class="card"><h3>组合策略</h3><p>对高风险维度做全组合，对纯样式维度做 pairwise/representative。</p></div>
+<div class="card"><h3>断言</h3><p>无错位、无跨会话状态、旧帧不覆盖新帧、审批优先于 Thinking。</p></div>
+<div class="card"><h3>DOM</h3><p>语义快照 + 关键截图；不以像素截图替代状态逻辑。</p></div>
+</div>
+<div class="level"><div class="level-no">L6</div><div><h2>真实 Chrome E2E 与长时间运行</h2><p>保留最有价值的高风险路径，并加入 soak test。</p></div></div>
+<div class="grid">
+<div class="card"><h3>日常 E2E</h3><p>建组、组外独立、关闭活动标签、Runtime reload、审批、History、清理。</p></div>
+<div class="card"><h3>Soak</h3><p>连续切换/关闭/重开标签 1000 次，检查 Session、监听器、Debugger 和内存。</p></div>
+<div class="card"><h3>故障</h3><p>Service Worker 重启、Offscreen 重启、网络断开、模型断流。</p></div>
+<div class="card"><h3>发布门禁</h3><p>成功路径不足以发布；关键不变量和资源清理必须通过。</p></div>
+</div>
+</section>
+<section id="matrix">
+<h2>5. 事件顺序矩阵</h2>
+<table><thead><tr><th>ID</th><th>事件序列</th><th>必须验证</th></tr></thead><tbody>
+<tr><td>ORD-01</td><td>activate(A) → activate(B)</td><td>A 的晚到结果不能覆盖 B</td></tr>
+<tr><td>ORD-02</td><td>activate(A) → close(A)</td><td>映射删除，不显示内部错误</td></tr>
+<tr><td>ORD-03</td><td>close(A) → activate(A)</td><td>旧事件幂等忽略</td></tr>
+<tr><td>ORD-04</td><td>close(A) → activate(B)</td><td>切换 B，不引用 A</td></tr>
+<tr><td>ORD-05</td><td>group(A,B) → activate(B)</td><td>同一 Group Session</td></tr>
+<tr><td>ORD-06</td><td>ungroup(B) → activate(B)</td><td>B 获得独立 Session</td></tr>
+<tr><td>ORD-07</td><td>reload_runtime → activate(A)</td><td>恢复 A 的原 Session</td></tr>
+<tr><td>ORD-08</td><td>activate(B) → reload_runtime</td><td>最终恢复 B</td></tr>
+<tr><td>ORD-09</td><td>close(A) → onRemoved(A) → activate(B)</td><td>不出现 BROWSER_TAB_NOT_FOUND</td></tr>
+<tr><td>ORD-10</td><td>new_tab(A) → activate(new) → close(original)</td><td>Group 和 active target 一致</td></tr>
+</tbody></table>
+</section>
+<section id="fault">
+<h2>6. Chrome 故障注入细节</h2>
+<table><thead><tr><th>故障</th><th>模拟</th><th>预期行为</th></tr></thead><tbody>
+<tr><td>TAB_DISAPPEARS</td><td>getTab 返回 null</td><td>清除独立 Binding；不继续操作</td></tr>
+<tr><td>TAB_SLOW_VISIBLE</td><td>create 后延迟可见</td><td>有界重试，不创建第二个 Tab</td></tr>
+<tr><td>GROUP_FAILED</td><td>tabs.group 抛错</td><td>Session 保留，Workspace 状态不半写</td></tr>
+<tr><td>GROUP_TITLE_FAILED</td><td>tabGroups.update 失败</td><td>不影响核心 Workspace</td></tr>
+<tr><td>ACTIVATE_LATE</td><td>旧 onActivated 晚到</td><td>generation 拒绝旧结果</td></tr>
+<tr><td>REMOVE_DUPLICATE</td><td>onRemoved 重复触发</td><td>forget 幂等</td></tr>
+<tr><td>DEBUGGER_DETACHED</td><td>detach 报 not attached</td><td>清理成功，不阻断 reload</td></tr>
+<tr><td>GROUP_ID_REUSED</td><td>旧 groupId 被新组复用</td><td>成员交集校验后新建 Session</td></tr>
+</tbody></table>
+</section>
+<section id="ui">
+<h2>7. UI 状态组合</h2>
+<table><thead><tr><th>维度</th><th>值</th><th>策略</th></tr></thead><tbody>
+<tr><td>Task</td><td>idle/running/waiting/completed/failed/cancelled</td><td>全组合</td></tr>
+<tr><td>Queue</td><td>0/1/2+</td><td>全组合</td></tr>
+<tr><td>Approval</td><td>none/approval/handoff</td><td>全组合</td></tr>
+<tr><td>Reasoning</td><td>none/streaming/complete</td><td>全组合</td></tr>
+<tr><td>Tool</td><td>running/failed/completed/denied</td><td>全组合</td></tr>
+<tr><td>Child</td><td>none/running/completed/failed</td><td>Pairwise</td></tr>
+<tr><td>Session generation</td><td>old/current/new</td><td>竞态必测</td></tr>
+</tbody></table>
+<pre>风险组合示例：
+running + approval + queue>0 + child-running
+running + old-generation projection + current blank
+failed tool + closed tab + history switch
+completed + reasoning-open + session reload</pre>
+</section>
+<section id="oracle">
+<h2>8. 判定、复现与失败产物</h2>
+<div class="grid">
+<div class="card"><h3>双重判定</h3><p>参考模型必须与真实状态逐步一致；同时执行全部不变量检查。</p></div>
+<div class="card"><h3>确定性</h3><p>时钟、随机数、Chrome 回调、模型输出和 ID 必须可注入。</p></div>
+<div class="card"><h3>失败复现</h3><p>输出 seed、事件序列、每步前后状态、Chrome API 结果和 UI generation。</p></div>
+<div class="card"><h3>最小化</h3><p>fast-check 自动 shrink 到最短失败序列；不可 shrink 的 E2E 保留完整 trace。</p></div>
+</div>
+<pre>Failure artifact:
+{
+  suite, seed, failureInvariant,
+  initialSnapshot,
+  events: [{ method, args, outcome, before, after }],
+  projectionRevision,
+  browserTabs,
+  uiGeneration,
+  consoleAndRuntimeLogs
+}</pre>
+<div class="rule">任何新发现的竞态必须加入固定回归 seed 和一条可读的 E2E/Integration trace，不能只依赖随机测试“以后可能跑到”。</div>
+</section>
+<section id="ci">
+<h2>9. CI 与执行频率</h2>
+<table><thead><tr><th>阶段</th><th>内容</th><th>目标</th></tr></thead><tbody>
+<tr><td>PR Fast</td><td>TypeScript、Core 边界、L1 全量、L2 短序列 100 seeds、关键 Integration</td><td>&lt; 3 分钟</td></tr>
+<tr><td>PR Browser</td><td>Chrome E2E 核心 5 条 + 刚修复竞态的固定 trace</td><td>&lt; 15 分钟</td></tr>
+<tr><td>Nightly</td><td>L2 2000 seeds、L3 TLA+、L4 故障矩阵、Soak 1000 cycle</td><td>无 flaky</td></tr>
+<tr><td>Release</td><td>全 E2E、长序列、mutation score、资源泄漏、恢复与迁移</td><td>阻断发布错误</td></tr>
+</tbody></table>
+<h3>建议命令</h3>
+<pre>npm run test:state
+npm run test:state:deep
+npm run test:chrome:fault
+npm run test:e2e
+npm run test:soak
+npm run test:coverage</pre>
+</section>
+<section id="gaps">
+<h2>10. 当前覆盖评估与实施顺序</h2>
+<table><thead><tr><th>区域</th><th>现状</th><th>优先级</th></tr></thead><tbody>
+<tr><td>Task/Input/Lifecycle</td><td><span class="status">属性覆盖较好</span></td><td>保持</td></tr>
+<tr><td>TabSessionRegistry</td><td><span class="status mid">顺序场景</span></td><td>P0：参考模型</td></tr>
+<tr><td>Chrome 事件交错</td><td><span class="status gap">覆盖不足</span></td><td>P0：顺序矩阵 + 故障注入</td></tr>
+<tr><td>UI Projection 切换</td><td><span class="status mid">若干 E2E</span></td><td>P1：状态组合</td></tr>
+<tr><td>Persistence/Recovery</td><td><span class="status mid">基础覆盖</span></td><td>P1：故障恢复</td></tr>
+<tr><td>Sandbox</td><td><span class="status mid">平台正常路径</span></td><td>P1：异常与 soak</td></tr>
+<tr><td>代码/分支覆盖率</td><td><span class="status gap">当前未配置</span></td><td>P1：coverage-v8</td></tr>
+<tr><td>Mutation testing</td><td><span class="status gap">未配置</span></td><td>P2：Nightly</td></tr>
+</tbody></table>
+<h3>推荐实施顺序</h3>
+<ol><li>建立 Workspace 纯参考模型和 INV-01 至 INV-12。</li><li>完成 3 Tab / 2 Group / 5 步事件的有界穷举。</li><li>加入 Chrome API 故障注入和固定顺序矩阵。</li><li>建立 Projection/UI 组合生成器。</li><li>接入覆盖率、mutation 和夜间 soak。</li><li>引入 TLA+ 验证并发控制面。</li></ol>
+<div class="rule">完成标准：不只是“测试数量增加”，而是新竞态能被状态生成器或模型检查主动发现；失败能靠 seed/trace 稳定重放；关键不变量在每一步事件后都成立。</div>
+</section>
+</div>
+</body>
+</html>
