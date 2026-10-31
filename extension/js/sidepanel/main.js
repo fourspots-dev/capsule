@@ -102,6 +102,15 @@
     return '<div class="wb-rt-tablewrap"><table class="wb-rt-table"><thead><tr>' + head.map((cell) => `<th class="wb-rt-th">${inline(cell)}</th>`).join("") + "</tr></thead><tbody>" + body.map((row) => `<tr>${row.map((cell) => `<td class="wb-rt-td">${inline(cell)}</td>`).join("")}</tr>`).join("") + "</tbody></table></div>";
   }
 
+  // src/platform/workspace-edit-prompt.ts
+  var workspaceEditPrompt = [
+    "When editing workspace files, use apply_patch with *** Begin Patch / *** End Patch for multi-line or multi-file changes.",
+    "Every Update hunk starts with @@ or @@ anchor text; context lines start with a space, removals with -, additions with +.",
+    "Do not calculate unified-diff line counts or send ---/+++ headers to apply_patch.",
+    "Use apply_unified_diff only when explicitly handling a strict Git unified diff.",
+    "After PATCH_CONTEXT_NOT_FOUND, PATCH_CONTEXT_AMBIGUOUS, PATCH_STALE_FILE or TOOL_RETRY_BLOCKED, re-read the target before retrying."
+  ].join("\n");
+
   // src/adapters/chrome-prompts.ts
   var baseSystemPrompt = [
     "You are tinyai, an AI agent operating the user's real Chrome browser.",
@@ -118,6 +127,9 @@
     "- To read content or locate elements, use read_page / snapshot / find \u2014 not screenshots.",
     "- To act on an element, target it by an @ref from snapshot/find, or a CSS selector.",
     "- Screenshot only when the task genuinely needs visual appearance.",
+    "",
+    "Editing workspace files:",
+    workspaceEditPrompt,
     "",
     "When tabs are grouped as the current workspace, use list_tabs / switch_tab only within that group. Never operate on tabs outside the active workspace.",
     "Keep answers concise and in the user's language."

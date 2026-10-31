@@ -122,9 +122,20 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <tr><td>PATCH-18</td><td>同一失败 Patch 重复提交</td><td>达到阈值后阻止重试并要求重读或重规划</td><td><span class="tag">Integration</span></td></tr>
 <tr><td>PATCH-19</td><td>Tool schema 与 Parser 一致性</td><td>工具名、描述、示例和实际接受的协议完全一致</td><td><span class="tag">Contract</span></td></tr>
 <tr><td>PATCH-20</td><td>真实模型 Patch Benchmark</td><td>Begin/Update/Add/Delete 成功率达标；hunk count 类失败为 0</td><td><span class="tag">Benchmark</span></td></tr>
+<tr><td>PATCH-21</td><td>TUI VirtualFileSystem Adapter</td><td>Add/Update/Delete/Move 全部使用共享协议</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PATCH-22</td><td>Chrome VirtualFileSystem Adapter</td><td>与 TUI 使用相同 ToolPack 和行为</td><td><span class="tag">Integration</span></td></tr>
+<tr><td>PATCH-23</td><td>SandboxProvider Adapter</td><td>ContextPatch 和严格 unified diff 在真实 Sandbox port 上均可用</td><td><span class="tag risk">Integration</span></td></tr>
+<tr><td>PATCH-24</td><td>跨宿主 PromptProfile</td><td>TUI/Chrome/Sandbox 都说明 ContextPatch 选择与失败后重读规则</td><td><span class="tag">Contract</span></td></tr>
 </tbody></table>
 <div class="warn rule">回归样本必须包含当前已观测到的失败：<code>*** End Patch</code> 混入 strict unified diff、hunk count 手算错误、空白 context 丢前缀、零匹配、多匹配和 stale file。修复后这些输入应根据新协议成功，或返回可纠正的结构化错误。</div>
 </section>
+<h3>5.2 PatchToolPack 跨宿主测试</h3>
+<table><thead><tr><th>Adapter</th><th>挂载点</th><th>必须复用</th></tr></thead><tbody>
+<tr><td>TUI Virtual Workspace</td><td><code>createVirtualWorkspaceTools</code></td><td>PatchToolPack、Prompt policy、失败熔断</td></tr>
+<tr><td>Chrome Virtual Workspace</td><td><code>chrome-runtime</code> additionalTools</td><td>与 TUI 相同 ToolPack 和 schema</td></tr>
+<tr><td>Sandbox CLI / Remote</td><td><code>createSandboxTools</code></td><td>相同协议；只替换 PatchFileSystem Adapter</td></tr>
+</tbody></table>
+<p>禁止为某个宿主单独实现第二套 apply_patch Parser。Adapter 只负责 read/write/stat/remove 的语义映射。</p>
 <section id="workspace">
 <h2>6. Workspace 与 Sandbox</h2>
 <table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>

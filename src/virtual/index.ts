@@ -10,5 +10,6 @@ export * from './jobs';
 export * from './search';
 export * from './patch';
 export * from './context-patch';
+export * from './patch-port';
 export * from './sync';
 export * from './workspace';

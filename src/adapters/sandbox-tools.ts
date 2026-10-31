@@ -1,6 +1,8 @@
 import { AgentError } from '../core/errors';
 import type { SandboxProvider, WorkspaceLease } from '../core/sandbox-provider';
 import type { JsonValue, ToolDefinition, ToolInvocation } from '../core/types';
+import { createPatchTools } from './patch-tools';
+import { SandboxPatchFileSystem } from './sandbox-patch-fs';
 
 type ObjectInput = Record<string, JsonValue>;
 
@@ -9,6 +11,9 @@ export function createSandboxTools(
   lease: WorkspaceLease
 ): ToolDefinition[] {
   const ptys = new Map<string, import('../core/sandbox-provider').PtySession>();
+  const patchTools = createPatchTools(
+    new SandboxPatchFileSystem(provider, lease)
+  );
   return [
     tool(
       'read_file',
@@ -48,6 +53,7 @@ export function createSandboxTools(
         return { path: file.path, bytes: file.data.byteLength, modifiedAt: file.modifiedAt };
       }
     ),
+    ...patchTools,
     tool(
       'list_files',
       'List files below a sandbox directory.',

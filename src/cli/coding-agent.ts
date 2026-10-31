@@ -15,6 +15,7 @@ import { Verifier, type VerificationCommand } from '../core/verifier';
 import { DockerAllowlistSidecar } from '../node/network-sidecar';
 import type { SandboxProvider, WorkspaceLease } from '../core/sandbox-provider';
 import { MacOSSeatbeltSandbox } from '../node/macos-sandbox';
+import { workspaceEditPrompt } from '../platform/workspace-edit-prompt';
 
 interface CliOptions {
   workspace: string;
@@ -117,6 +118,7 @@ async function main(): Promise<void> {
       systemPrompt: [
         `You are tinyai, a coding agent operating inside an isolated ${sandboxKind === 'local' ? 'macOS Seatbelt' : 'Docker'} workspace.`,
         'Inspect files before editing. Prefer small, reversible changes.',
+        workspaceEditPrompt,
         'Run relevant tests and type checks before declaring completion.',
         'All commands run inside a network-restricted sandbox. Report missing dependencies instead of disabling security.',
         'Your final answer must summarize changes and verification evidence.',

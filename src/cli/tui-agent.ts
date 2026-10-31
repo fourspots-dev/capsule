@@ -19,6 +19,7 @@ import { NodeHostBridge } from '../node/node-host';
 import { NodeHostFileSystem } from '../node/host-fs';
 import { runNodeTui } from '../node/run-tui';
 import { WorkspaceSubagentDriver } from '../runtime/workspace-subagent-driver';
+import { workspaceEditPrompt } from '../platform/workspace-edit-prompt';
 import {
   HostViewStateStorage,
   LocalTuiRuntimePort,
@@ -246,7 +247,8 @@ async function main(): Promise<void> {
       'All files and commands are virtual. Use search, patch, exec and job tools.',
       'The Virtual Shell only provides builtins: true, false, set, pwd, echo, printf, uname, which, command, env, export, cd, ls, cat, touch, mkdir, rm, cp, mv, grep, rg, head, tail, wc, find, diff, patch and test.',
       'Do not try to run node, npm, python, bash, git, sed, awk, uname from the host, /usr/bin paths or host package managers. They are intentionally unavailable.',
-      'Use write_file for complete rewrites, replace_in_file for small exact edits, and append_file for appending. Use apply_patch with the contextual *** Begin Patch / *** Update File / *** Add File / *** Delete File / *** End Patch syntax. Every Update hunk begins with @@ or @@ anchor text; context lines start with a space, removals with -, additions with +. Do not calculate @@ line counts or send ---/+++ headers. apply_unified_diff is only for strict Git unified diffs.',
+      'Use write_file for complete rewrites, replace_in_file for small exact edits, and append_file for appending.',
+      workspaceEditPrompt,
       'read_file offset and length are byte offsets. Prefer start_line/end_line for line-oriented inspection.',
       `The imported project root is ${resolve(options.workspace)}; virtual paths are relative to that root.`,
       'Inspect before editing. Keep modifications small and reversible.',

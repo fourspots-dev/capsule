@@ -1,7 +1,7 @@
 import { AgentError } from '../core/errors';
 import { normalizeVirtualPath } from './path';
 import { decodeVirtualText, hashVirtualBytes } from './search';
-import type { VirtualFileSystem } from './types';
+import type { PatchFileSystem } from './patch-port';
 
 export interface VirtualPatchOptions {
   expectedVersions?: Readonly<Record<string, number>>;
@@ -48,7 +48,7 @@ interface OriginalFile {
 }
 
 export async function applyUnifiedPatch(
-  vfs: VirtualFileSystem,
+  vfs: PatchFileSystem,
   patch: string,
   options: VirtualPatchOptions = {}
 ): Promise<VirtualPatchResult> {
@@ -254,7 +254,7 @@ function applyHunks(
 }
 
 async function remember(
-  vfs: VirtualFileSystem,
+  vfs: PatchFileSystem,
   path: string,
   originals: Map<string, OriginalFile>
 ): Promise<OriginalFile | undefined> {
@@ -275,7 +275,7 @@ async function remember(
 }
 
 async function rollback(
-  vfs: VirtualFileSystem,
+  vfs: PatchFileSystem,
   originals: Map<string, OriginalFile>
 ): Promise<void> {
   for (const original of originals.values()) {

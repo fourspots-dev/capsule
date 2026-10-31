@@ -8,6 +8,8 @@
   reasoning presentation, bounded rendering and incremental terminal frames.
 - `REQ-PATCH-001`: ContextPatch editing protocol with transactional updates,
   structured diagnostics, version guards and a separate strict unified-diff tool.
+- `REQ-PATCH-002`: host-neutral PatchToolPack shared by TUI, Chrome and isolated
+  sandbox workspaces.
 - `REQ-ENG-001`: semantic versioning, requirement registry, design/testing
   traceability, commit message validation and release policy.
 

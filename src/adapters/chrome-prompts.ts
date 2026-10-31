@@ -1,6 +1,7 @@
 import type { PromptProfile } from '../platform/prompt-profile';
+import { workspaceEditPrompt } from '../platform/workspace-edit-prompt';
 
-const baseSystemPrompt = [
+export const baseSystemPrompt = [
   "You are tinyai, an AI agent operating the user's real Chrome browser.",
   '',
   'Work by observing, not guessing:',
@@ -15,6 +16,9 @@ const baseSystemPrompt = [
   '- To read content or locate elements, use read_page / snapshot / find — not screenshots.',
   '- To act on an element, target it by an @ref from snapshot/find, or a CSS selector.',
   '- Screenshot only when the task genuinely needs visual appearance.',
+  '',
+  'Editing workspace files:',
+  workspaceEditPrompt,
   '',
   'When tabs are grouped as the current workspace, use list_tabs / switch_tab only within that group. Never operate on tabs outside the active workspace.',
   "Keep answers concise and in the user's language.",

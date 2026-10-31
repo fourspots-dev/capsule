@@ -195,6 +195,17 @@ interface PatchResult {
 <tr><td><code>apply_patch</code></td><td>ContextPatch DSL</td><td>模型默认的多行、多文件编辑入口</td></tr>
 <tr><td><code>apply_unified_diff</code></td><td>标准 Git unified diff</td><td>外部补丁、测试 fixture、高级兼容入口</td></tr>
 </tbody></table>
+<h4 id="host-neutral-patch">宿主无关 PatchToolPack</h4>
+<div class="grid">
+<div class="card"><h3>核心边界</h3><p><code>PatchToolPack</code> 只依赖 <code>PatchFileSystem</code>：read、write、stat、remove。协议、匹配、版本检查、事务与错误完全位于共享 ToolPack。</p></div>
+<div class="card"><h3>Adapter</h3><p>VirtualFileSystem Adapter 服务 TUI 和 Chrome；SandboxProvider Adapter 服务隔离 CLI/remote runner。Adapter 不复制 Parser 或 Patch 语义。</p></div>
+<div class="card"><h3>Prompts</h3><p>TUI、Chrome 和 Sandbox Coding Prompt 使用同一行为规则；工具 schema 描述仍是协议权威，Prompt 只负责工具选择策略。</p></div>
+</div>
+<pre>PatchToolPack(PatchFileSystem)
+  ├── TuiVirtualWorkspace.fs
+  ├── ChromeVirtualWorkspace.fs
+  └── SandboxPatchFileSystem(SandboxProvider, WorkspaceLease)</pre>
+<p>能力可见性由组合根决定，不由客户端类型硬编码：只要宿主提供文件读写与删除端口，就必须能装配相同 Patch ToolPack。</p>
 <div class="warn rule">不能再把“名称为 apply_patch、实际只接受 strict unified diff”的接口暴露给模型。工具名称、schema、描述和实际 Parser 必须遵循同一协议。</div>
 <h4>结构化错误</h4>
 <pre>{

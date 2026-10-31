@@ -1,8 +1,9 @@
 import { AgentError } from '../core/errors';
 import type { JsonValue } from '../core/types';
+import type { PatchFileSystem } from './patch-port';
 import { normalizeVirtualPath } from './path';
 import { decodeVirtualText, hashVirtualBytes } from './search';
-import type { VirtualFileSystem, VirtualFileInfo } from './types';
+import type { VirtualFileInfo } from './types';
 import { unifiedDiff } from './vcs';
 
 export type ContextPatchLineKind = 'context' | 'add' | 'remove';
@@ -250,7 +251,7 @@ export function parseContextPatch(source: string): ContextPatch {
 }
 
 export async function applyContextPatch(
-  vfs: VirtualFileSystem,
+  vfs: PatchFileSystem,
   source: string,
   options: ContextPatchOptions = {}
 ): Promise<ContextPatchResult> {
@@ -538,7 +539,7 @@ function findLineSequence(lines: readonly string[], sequence: readonly string[])
 }
 
 async function remember(
-  vfs: VirtualFileSystem,
+  vfs: PatchFileSystem,
   path: string,
   originals: Map<string, OriginalFile>
 ): Promise<OriginalFile> {
@@ -601,7 +602,7 @@ function assertExpected(
 }
 
 async function rollback(
-  vfs: VirtualFileSystem,
+  vfs: PatchFileSystem,
   originals: Map<string, OriginalFile>
 ): Promise<void> {
   for (const original of originals.values()) {

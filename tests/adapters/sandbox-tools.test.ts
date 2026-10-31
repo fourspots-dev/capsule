@@ -71,7 +71,84 @@ describe('sandbox tool adapter', () => {
       effect: 'execute',
       risk: 'dangerous',
     });
+    expect(tools.find((tool) => tool.name === 'apply_patch')).toMatchObject({
+      effect: 'write',
+      risk: 'write',
+      executionMode: 'sequential',
+    });
+    expect(tools.find((tool) => tool.name === 'apply_unified_diff')).toBeDefined();
     expect(tools.find((tool) => tool.name === 'terminal_open')).toBeDefined();
+  });
+
+  it('applies contextual and unified patches through the sandbox host', async () => {
+    const provider = new InMemorySandbox({ now: (() => {
+      let now = 10;
+      return () => ++now;
+    })() });
+    const lease = await provider.createWorkspace({ sessionId: 'session_patch' });
+    const executor = new ToolExecutor(
+      createSandboxTools(provider, lease),
+      new FakeApproval(true)
+    );
+    await executor.execute({
+      sessionId: 's',
+      taskId: 't',
+      signal: new AbortController().signal,
+      call: {
+        id: 'write',
+        name: 'write_file',
+        arguments: JSON.stringify({ path: 'a.txt', text: 'old\n' }),
+      },
+    });
+    await expect(
+      executor.execute({
+        sessionId: 's',
+        taskId: 't',
+        signal: new AbortController().signal,
+        call: {
+          id: 'patch',
+          name: 'apply_patch',
+          arguments: JSON.stringify({
+            patch: [
+              '*** Begin Patch',
+              '*** Update File: a.txt',
+              '@@',
+              '-old',
+              '+new',
+              '*** End Patch',
+            ].join('\n'),
+          }),
+        },
+      })
+    ).resolves.toMatchObject({ status: 'succeeded' });
+    expect(
+      new TextDecoder().decode((await provider.readFile(lease, 'a.txt')).data)
+    ).toBe('new\n');
+
+    await expect(
+      executor.execute({
+        sessionId: 's',
+        taskId: 't',
+        signal: new AbortController().signal,
+        call: {
+          id: 'unified',
+          name: 'apply_unified_diff',
+          arguments: JSON.stringify({
+            patch: [
+              '--- a/a.txt',
+              '+++ b/a.txt',
+              '@@ -1 +1 @@',
+              '-new',
+              '+unified',
+              '',
+            ].join('\n'),
+          }),
+        },
+      })
+    ).resolves.toMatchObject({ status: 'succeeded' });
+    expect(
+      new TextDecoder().decode((await provider.readFile(lease, 'a.txt')).data)
+    ).toBe('unified\n');
   });
 
   it('drives a persistent PTY through terminal tools', async () => {
