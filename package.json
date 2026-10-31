@@ -24,6 +24,8 @@
     "test:live": "vitest run tests/live/deepseek-smoke.test.ts",
     "test:soak": "TINYAI_SOAK=1 vitest run tests/soak/production.test.ts",
     "test:soak:8h": "TINYAI_SOAK=1 TINYAI_SOAK_DURATION_MS=28800000 vitest run tests/soak/production.test.ts",
+    "test:large": "TINYAI_LARGE_WORKSPACE=1 vitest run tests/soak/large-workspace.test.ts",
+    "test:large:1gb": "TINYAI_LARGE_WORKSPACE=1 TINYAI_LARGE_WORKSPACE_MB=1024 vitest run tests/soak/large-workspace.test.ts",
     "test:acceptance": "npm run typecheck && npm run typecheck:tests && npm run typecheck:core && npm run check:boundaries && npm test && npm run test:e2e",
     "test:watch": "vitest",
     "test:e2e": "npm run build && vitest run --config vitest.e2e.config.mts",

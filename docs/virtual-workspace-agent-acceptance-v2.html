@@ -24,7 +24,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <small>TINYAI / VIRTUAL WORKSPACE CODING AGENT / ACCEPTANCE V2</small>
 <h1>V2 七阶段<br>实现与验收报告</h1>
 <p>本报告以当前 worktree、自动化测试、真实 PTY 和 Chrome E2E 为证据。实现代码已覆盖 P1–P7；生产发布门禁中的 live LLM 与长时 Soak 被单独标记，不能由确定性测试代替。</p>
-<div class="chips"><span class="chip">280 tests passed</span><span class="chip">5 Chrome E2E passed</span><span class="chip">Core boundary clean</span><span class="chip">TUI PTY verified</span><span class="chip">Build passed</span></div>
+<div class="chips"><span class="chip">282 tests passed</span><span class="chip">1GB Workspace passed</span><span class="chip">5 Chrome E2E passed</span><span class="chip">Core boundary clean</span><span class="chip">TUI PTY verified</span></div>
 </header>
 <nav><a href="#summary">结论</a><a href="#matrix">阶段矩阵</a><a href="#p1">P1</a><a href="#p2">P2</a><a href="#p3">P3</a><a href="#p4">P4</a><a href="#p5">P5</a><a href="#p6">P6</a><a href="#p7">P7</a><a href="#commands">命令</a><a href="#open">未关闭项</a></nav>
 
@@ -32,9 +32,9 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <h2>1. 验收结论</h2>
 <div class="grid">
 <div class="card"><h3 class="ok">实现验收：通过</h3><p>P1–P7 都已有可执行实现、自动化测试和端到端证据；没有只存在于接口或文档中的阶段交付。</p></div>
-<div class="card"><h3>生产发布：有条件</h3><p>当前环境没有 <code>DEEPSEEK_API_KEY</code>，live smoke 被跳过；8 小时 Soak 已启动但尚未结束，1GB 级仓库压力测试尚未执行。</p></div>
+<div class="card"><h3>生产发布：有条件</h3><p>当前环境没有 <code>DEEPSEEK_API_KEY</code>，live smoke 被跳过；8 小时 Soak 已启动但尚未结束。1GB Workspace 的范围读取与内存上限验收已通过。</p></div>
 </div>
-<div class="rule">最新确定性结果：77 个常规测试文件通过、2 个 opt-in 文件跳过，共 280 个测试通过；短时 Soak 另行执行 60 秒并完成 587 个生产节奏循环，堆增长约 2MB。Chrome E2E：5 个测试通过。完整构建产出 Chrome 扩展、TUI、CLI、Remote Runner 和 allowlist proxy。</div>
+<div class="rule">最新确定性结果：78 个常规测试文件通过、3 个 opt-in 文件跳过，共 282 个测试通过；短时 Soak 另行执行 60 秒并完成 587 个生产节奏循环，堆增长约 2MB；1GB Workspace 范围读取通过且 RSS 增量低于 256MB。Chrome E2E：5 个测试通过。</div>
 </section>
 
 <section id="matrix">
@@ -125,16 +125,16 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <div class="grid3">
 <div class="card"><h3>Verification Gate</h3><p>Runtime 可注入 CompletionGuard。TUI 在有文件写入但没有成功 exec/job verification 时返回 VERIFICATION_REQUIRED。</p></div>
 <div class="card"><h3>Coding Benchmark</h3><p>无宿主 Bash/FS 的 fixture 完成 Search → Patch → Verify → Final，且最终文件与工具证据都正确。</p></div>
-<div class="card"><h3>Bounded Soak</h3><p>100 checkpoints、50 并发 Job、10k 文件 Search、10k Projection update 在预算内完成。</p></div>
+<div class="card"><h3>Large Workspace</h3><p>NodeHostFileSystem 对 1GB 稀疏 Workspace 做范围读取，不整体载入；Search 按文件大小预算跳过超大内容，RSS 增量低于 256MB。</p></div>
 </div>
-<div class="warn rule">P7 标记为 CONDITIONAL：真实模型 smoke 需要环境凭据；8 小时 Soak 与 1GB Workspace 属于发布前长测，本轮只执行了加速、有界版本。</div>
+<div class="warn rule">P7 标记为 CONDITIONAL：真实模型 smoke 需要环境凭据；8 小时 Soak 正在执行。1GB Workspace 已通过。</div>
 </section>
 
 <section id="commands">
 <h2>10. 验收命令与结果</h2>
 <pre>npm test
-  77 files passed, 2 opt-in files skipped
-  280 tests passed, live + soak skipped
+  78 files passed, 3 opt-in files skipped
+  282 tests passed, live + soak + large skipped
 
 npm run typecheck
 npm run typecheck:tests
@@ -154,7 +154,10 @@ npm run build
   tinyai-extension.zip
 
 npm run test:live
-  requires DEEPSEEK_API_KEY; current process environment is unset, therefore skipped</pre>
+  requires DEEPSEEK_API_KEY; current process environment is unset, therefore skipped
+
+npm run test:large:1gb
+  1GB sparse workspace range-read acceptance passed</pre>
 <p>另外执行了 <code>TINYAI_SOAK=1 TINYAI_SOAK_DURATION_MS=60000 TINYAI_SOAK_INTERVAL_MS=100</code>：60.05 秒内完成 587 个生产节奏循环，堆增长约 2MB，低于 512MB 有界门限。</p>
 </section>
 
@@ -163,7 +166,7 @@ npm run test:live
 <table><thead><tr><th>项目</th><th>当前状态</th><th>关闭条件</th></tr></thead><tbody>
 <tr><td>DeepSeek live smoke</td><td><span class="pill pending">PENDING</span> 当前环境无凭据</td><td>在 shell 中安全设置 <code>DEEPSEEK_API_KEY</code>，运行 <code>npm run test:live</code></td></tr>
 <tr><td>8 小时 Soak</td><td><span class="pill pending">RUNNING</span> 生产节奏 harness 正在运行，已有 60s / 587 循环通过</td><td>8h 进程正常退出并满足堆/状态/Job/Session 不变量</td></tr>
-<tr><td>1GB Workspace</td><td><span class="pill pending">NOT RUN</span> 已有 10k 文件搜索测试</td><td>大仓库数据集运行内存、句柄、启动与搜索性能</td></tr>
+<tr><td>1GB Workspace</td><td><span class="pill">PASSED</span> HostFileSystem 范围读取；RSS 增量低于 256MB</td><td>已关闭</td></tr>
 </tbody></table>
 <p>已提供 opt-in Soak harness：<code>npm run test:soak</code> 与 <code>npm run test:soak:8h</code>。8 小时配置默认每秒一个完整工作循环，监测 Workspace、VCS、Job、Session 和堆增长；本次仍未实际等待 8 小时结束。</p>
 <div class="rule">在这些外部/长时项关闭前，可以宣称“V2 七阶段实现验收完成”，但不能宣称“生产发布门禁全部通过”。</div>

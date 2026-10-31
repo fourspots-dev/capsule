@@ -231,6 +231,14 @@ The 8-hour profile defaults to one workload cycle per second. For a shorter
 smoke run, set `TINYAI_SOAK_DURATION_MS` and optionally
 `TINYAI_SOAK_INTERVAL_MS`.
 
+Large-workspace acceptance uses the optional native `HostFileSystem` provider,
+which performs fenced byte-range reads instead of loading the whole project:
+
+```bash
+npm run test:large
+npm run test:large:1gb
+```
+
 ## Compatibility migration
 
 On first startup, tinyai performs a one-time migration from the removed legacy runtime:

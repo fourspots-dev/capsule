@@ -12,6 +12,7 @@ export interface VirtualSearchOptions {
   exclude?: readonly string[];
   contextLines?: number;
   maxResults?: number;
+  maxFileBytes?: number;
   signal?: AbortSignal;
 }
 
@@ -52,6 +53,7 @@ export async function searchVirtualFiles(
       throw new AgentError('SEARCH_ABORTED', 'Virtual search was cancelled');
     }
     if (file.kind !== 'file') continue;
+    if (file.size > (options.maxFileBytes ?? 5 * 1024 * 1024)) continue;
     if (include.length && !include.some((matcher) => matcher.test(file.path))) continue;
     if (exclude.some((matcher) => matcher.test(file.path))) continue;
     const text = decodeText(await vfs.read(file.path, { signal: options.signal }));
