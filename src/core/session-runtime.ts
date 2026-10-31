@@ -108,6 +108,10 @@ export class SessionRuntime {
   private running = false;
   private abort?: AbortController;
   private persistTail: Promise<void> = Promise.resolve();
+  private persistRequested = false;
+  private persistActive = false;
+  private persistTimer?: unknown;
+  private persistedRevision = 0;
   private persistenceError?: StructuredError;
   private readonly overflowRetries = new Set<string>();
   private readonly toolSpans = new Map<string, string>();
@@ -267,7 +271,18 @@ export class SessionRuntime {
   }
 
   async flushPersistence(): Promise<void> {
-    await this.persistTail;
+    if (!this.sessionStore) return;
+    const targetRevision = this.revision;
+    while (this.persistedRevision < targetRevision) {
+      this.cancelPersistTimer();
+      this.persistRequested = true;
+      this.enqueuePersistence();
+      const pending = this.persistTail;
+      await pending;
+      if (this.persistedRevision < targetRevision && !this.persistRequested) {
+        break;
+      }
+    }
     if (this.persistenceError) {
       throw new AgentError(
         this.persistenceError.code,
@@ -933,15 +948,46 @@ export class SessionRuntime {
 
   private schedulePersist(): void {
     if (!this.sessionStore) return;
+    this.persistRequested = true;
+    if (this.persistActive || this.persistTimer !== undefined) return;
+    this.persistTimer = this.options.clock.setTimeout(() => {
+      this.persistTimer = undefined;
+      this.enqueuePersistence();
+    }, 100);
+  }
+
+  private enqueuePersistence(): void {
+    if (
+      !this.sessionStore ||
+      !this.persistRequested ||
+      this.persistActive
+    ) {
+      return;
+    }
+    this.persistRequested = false;
+    this.persistActive = true;
     const snapshot = this.snapshot();
     this.persistTail = this.persistTail.then(async () => {
       try {
         await this.sessionStore!.save(snapshot);
+        this.persistedRevision = Math.max(
+          this.persistedRevision,
+          snapshot.revision
+        );
         this.persistenceError = undefined;
       } catch (error) {
         this.persistenceError = toStructuredError(error, 'PERSISTENCE_FAILED');
+      } finally {
+        this.persistActive = false;
+        if (this.persistRequested) this.schedulePersist();
       }
     });
+  }
+
+  private cancelPersistTimer(): void {
+    if (this.persistTimer === undefined) return;
+    this.options.clock.clearTimeout(this.persistTimer);
+    this.persistTimer = undefined;
   }
 
   private snapshot(): SessionSnapshot {

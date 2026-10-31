@@ -567,7 +567,7 @@ flowchart TB
     TOOL["ToolExecutor"]
     SUB["SubagentCoordinator"]
   end
-  subgraph POLICY["Policy & Data"]
+  subgraph POLICY["Policy &amp; Data"]
     POLICY_ENGINE["PolicyEngine<br/>capabilities · approval"]
     REPO["TaskRepository<br/>snapshot · event log"]
     ART["ArtifactStore"]
@@ -1407,7 +1407,8 @@ interface EvalCase {
               <pre><code>interface SandboxProvider extends ExecutionProvider {
   createWorkspace(taskId: string, template: WorkspaceTemplate): Promise&lt;WorkspaceRef&gt;;
   readFile(path: string): Promise&lt;FileChunk&gt;;
-  writePatch(patch: UnifiedPatch): Promise&lt;PatchResult&gt;;
+  applyContextPatch(patch: ContextPatch): Promise&lt;PatchResult&gt;;
+  applyUnifiedDiff(patch: UnifiedPatch): Promise&lt;PatchResult&gt;;
   search(query: SearchQuery): Promise&lt;SearchResult[]&gt;;
   startProcess(spec: ProcessSpec): Promise&lt;ProcessHandle&gt;;
   runTests(spec: TestSpec, signal: AbortSignal): Promise&lt;TestReport&gt;;
@@ -1417,7 +1418,7 @@ interface EvalCase {
             </div>
           </div>
           <h4>交互</h4>
-          <p>ToolExecutor 将 fs/process/test 调用路由到 SandboxProvider；PolicyEngine 检查工作区根、网络和命令能力；Verifier 读取 TestReport；ArtifactStore 接收 diff、日志和截图。TaskRuntime 不感知容器实现。</p>
+          <p>ToolExecutor 将 fs/process/test 调用路由到 SandboxProvider；模型默认通过 ContextPatch DSL 编辑，工具内部生成 unified diff；外部补丁走独立 <code>applyUnifiedDiff</code> 入口。PolicyEngine 检查工作区根、网络和命令能力；Verifier 读取 TestReport；ArtifactStore 接收 diff、日志和截图。TaskRuntime 不感知容器实现。</p>
           <h4>借鉴与增强</h4>
           <p>上游 BrowserProvider 已经把执行、标签、取消和结果封装得很好；沙盒遵循同样模式，但使用独立进程和资源限制。不要把宿主权限交给浏览器扩展，也不要复用网页浏览器 Profile 作为代码执行环境。</p>
           <h4>验收</h4>

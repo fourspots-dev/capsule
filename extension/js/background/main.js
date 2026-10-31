@@ -21,16 +21,16 @@
       };
     }
   };
-  function toStructuredError(error, fallbackCode = "INTERNAL_ERROR") {
-    if (error instanceof AgentError) return error.toStructured();
+  function toStructuredError(error2, fallbackCode = "INTERNAL_ERROR") {
+    if (error2 instanceof AgentError) return error2.toStructured();
     return {
       code: fallbackCode,
-      message: error instanceof Error ? error.message : String(error),
+      message: error2 instanceof Error ? error2.message : String(error2),
       retryable: false
     };
   }
-  function isAbortError(error) {
-    return error instanceof Error && error.name === "AbortError" || error instanceof AgentError && error.code === "TASK_CANCELLED";
+  function isAbortError(error2) {
+    return error2 instanceof Error && error2.name === "AbortError" || error2 instanceof AgentError && error2.code === "TASK_CANCELLED";
   }
 
   // src/adapters/chrome-browser.ts
@@ -242,16 +242,16 @@
         try {
           await this.detach(tabId);
           detachedTabs.push(tabId);
-        } catch (error) {
-          errors.push(toStructuredError(error, "BROWSER_DETACH_FAILED"));
+        } catch (error2) {
+          errors.push(toStructuredError(error2, "BROWSER_DETACH_FAILED"));
         }
       }
       for (const tabId of binding.ownedTabs) {
         try {
           await this.tabs.remove(Number(tabId));
           closedTabs.push(tabId);
-        } catch (error) {
-          errors.push(toStructuredError(error, "BROWSER_TAB_CLOSE_FAILED"));
+        } catch (error2) {
+          errors.push(toStructuredError(error2, "BROWSER_TAB_CLOSE_FAILED"));
         }
       }
       this.sessions.delete(sessionId);
@@ -597,8 +597,8 @@
       try {
         await this.debuggerApi.attach(target, "1.3");
         await this.debuggerApi.sendCommand(target, "Page.enable");
-      } catch (error) {
-        if (!(error instanceof Error) || !/already attached/i.test(error.message)) throw error;
+      } catch (error2) {
+        if (!(error2 instanceof Error) || !/already attached/i.test(error2.message)) throw error2;
         await this.debuggerApi.sendCommand(target, "Page.enable").catch(() => void 0);
       }
       this.attachedTabs.add(tabId);
@@ -1354,12 +1354,12 @@
           }),
           signal: request.signal
         });
-      } catch (error) {
+      } catch (error2) {
         yield {
           type: "error",
           error: {
             code: request.signal.aborted ? "MODEL_ABORTED" : "MODEL_TRANSPORT_FAILED",
-            message: error instanceof Error ? error.message : String(error),
+            message: error2 instanceof Error ? error2.message : String(error2),
             retryable: !request.signal.aborted
           }
         };
@@ -1471,15 +1471,15 @@
         }
         if (!emittedCalls) yield* emitToolCalls(calls, request.taskId);
         if (!emittedFinish) yield { type: "finish", reason: "stop" };
-      } catch (error) {
-        if (request.signal.aborted || error instanceof AgentError && error.code === "MODEL_ABORTED") {
-          throw error;
+      } catch (error2) {
+        if (request.signal.aborted || error2 instanceof AgentError && error2.code === "MODEL_ABORTED") {
+          throw error2;
         }
         yield {
           type: "error",
           error: {
             code: "MODEL_STREAM_FAILED",
-            message: error instanceof Error ? error.message : String(error),
+            message: error2 instanceof Error ? error2.message : String(error2),
             retryable: true
           }
         };
@@ -1928,10 +1928,10 @@
     if (options.regex) {
       try {
         return new RegExp(options.pattern, flags);
-      } catch (error) {
+      } catch (error2) {
         throw new AgentError(
           "SEARCH_REGEX_INVALID",
-          error instanceof Error ? error.message : String(error)
+          error2 instanceof Error ? error2.message : String(error2)
         );
       }
     }
@@ -1944,543 +1944,6 @@
   }
   function escapeRegExp(value) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  }
-
-  // src/virtual/patch.ts
-  async function applyUnifiedPatch(vfs, patch, options = {}) {
-    const parsed = parseUnifiedPatch(patch);
-    const originals = /* @__PURE__ */ new Map();
-    const writes = /* @__PURE__ */ new Map();
-    const deletes = /* @__PURE__ */ new Set();
-    let additions = 0;
-    let deletions = 0;
-    for (const file of parsed) {
-      if (options.signal?.aborted) throw cancelled();
-      const oldPath = file.oldPath;
-      const newPath = file.newPath;
-      const target = newPath ?? oldPath;
-      if (!oldPath && newPath && await vfs.stat(newPath, options.signal)) {
-        throw new AgentError("PATCH_TARGET_EXISTS", `Patch target already exists: ${newPath}`);
-      }
-      const before = oldPath === void 0 ? new Uint8Array() : await vfs.read(oldPath, { signal: options.signal });
-      const beforeInfo = oldPath ? await vfs.stat(oldPath, options.signal) : void 0;
-      if (oldPath && !beforeInfo) {
-        throw new AgentError("PATCH_FILE_MISSING", `Patch target is missing: ${oldPath}`);
-      }
-      if (beforeInfo && oldPath && options.expectedVersions?.[oldPath] !== void 0) {
-        if (beforeInfo.version !== options.expectedVersions[oldPath]) {
-          throw conflict(oldPath, "version");
-        }
-      }
-      if (beforeInfo && oldPath && options.expectedHashes?.[oldPath]) {
-        if (hashVirtualBytes(before) !== options.expectedHashes[oldPath]) {
-          throw conflict(oldPath, "hash");
-        }
-      }
-      const beforeText = decodeVirtualText(before);
-      if (beforeText === void 0) {
-        throw new AgentError("PATCH_BINARY_UNSUPPORTED", `Binary patch is not supported: ${oldPath}`);
-      }
-      const applied = applyHunks(beforeText, file.hunks);
-      additions += applied.additions;
-      deletions += applied.deletions;
-      const oldOriginal = oldPath ? await remember(vfs, oldPath, originals) : void 0;
-      const newOriginal = await remember(vfs, target, originals);
-      if (oldPath === target && !oldOriginal?.existed && !newOriginal?.existed) {
-        originals.set(target, { path: target, existed: false, version: 0 });
-      }
-      if (newPath) {
-        writes.set(target, {
-          data: new TextEncoder().encode(applied.text),
-          ...oldOriginal?.mode === void 0 ? {} : { mode: oldOriginal.mode }
-        });
-      } else {
-        deletes.add(target);
-      }
-      if (oldPath && newPath && oldPath !== newPath) deletes.add(oldPath);
-    }
-    try {
-      for (const [path, write] of writes) {
-        await vfs.write(path, write.data, {
-          ...write.mode === void 0 ? {} : { mode: write.mode },
-          signal: options.signal
-        });
-      }
-      for (const path of deletes) {
-        await vfs.remove(path, { recursive: true });
-      }
-    } catch (error) {
-      await rollback(vfs, originals);
-      throw error;
-    }
-    const resultFiles = [];
-    for (const file of parsed) {
-      const path = file.newPath ?? file.oldPath;
-      const original = originals.get(path);
-      const after = file.newPath ? await vfs.stat(path) : void 0;
-      resultFiles.push({
-        path,
-        status: !file.oldPath ? "added" : !file.newPath ? "deleted" : "modified",
-        beforeVersion: original?.existed ? original.version : 0,
-        afterVersion: after?.version ?? 0
-      });
-    }
-    return { files: resultFiles, additions, deletions };
-  }
-  function parseUnifiedPatch(patch) {
-    const lines = patch.replaceAll("\r\n", "\n").split("\n");
-    const files = [];
-    let current;
-    let hunk;
-    for (let index = 0; index < lines.length; index += 1) {
-      const line = lines[index];
-      if (line.startsWith("--- ")) {
-        if (current) {
-          if (hunk) current.hunks.push(hunk);
-          files.push(current);
-        }
-        const oldPath = parseHeaderPath(line.slice(4));
-        const next = lines[index + 1];
-        if (!next?.startsWith("+++ ")) {
-          throw invalid("Patch file header must be followed by +++");
-        }
-        current = {
-          ...oldPath ? { oldPath } : {},
-          newPath: parseHeaderPath(next.slice(4)) ?? void 0,
-          hunks: []
-        };
-        hunk = void 0;
-        index += 1;
-        continue;
-      }
-      if (!current) {
-        if (!line.trim()) continue;
-        throw invalid("Patch must start with a file header");
-      }
-      const match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
-      if (match) {
-        if (hunk) current.hunks.push(hunk);
-        hunk = {
-          oldStart: Number(match[1]),
-          oldCount: Number(match[2] ?? 1),
-          newStart: Number(match[3]),
-          newCount: Number(match[4] ?? 1),
-          lines: []
-        };
-        continue;
-      }
-      if (line.startsWith("\\ No newline at end of file")) continue;
-      if (!hunk) continue;
-      if (line.startsWith("+")) hunk.lines.push({ kind: "add", text: line.slice(1) });
-      else if (line.startsWith("-")) hunk.lines.push({ kind: "remove", text: line.slice(1) });
-      else if (line.startsWith(" ")) hunk.lines.push({ kind: "context", text: line.slice(1) });
-      else if (line !== "") throw invalid(`Unknown patch line: ${line.slice(0, 20)}`);
-    }
-    if (current) {
-      if (hunk) current.hunks.push(hunk);
-      files.push(current);
-    }
-    if (!files.length) throw invalid("Patch contains no file changes");
-    for (const file of files) {
-      if (!file.hunks.length) throw invalid("Patch file contains no hunks");
-      if (!file.oldPath && !file.newPath) throw invalid("Patch must identify a path");
-    }
-    return files;
-  }
-  function applyHunks(before, hunks) {
-    const lines = before ? before.split("\n") : [];
-    const hadFinalNewline = before.endsWith("\n");
-    if (hadFinalNewline) lines.pop();
-    const output = [];
-    let cursor = 0;
-    let additions = 0;
-    let deletions = 0;
-    for (const hunk of hunks) {
-      const start = hunk.oldStart === 0 ? 0 : hunk.oldStart - 1;
-      if (start < cursor || start > lines.length) throw invalid("Patch hunk overlaps or is out of range");
-      output.push(...lines.slice(cursor, start));
-      cursor = start;
-      let oldSeen = 0;
-      let newSeen = 0;
-      for (const line of hunk.lines) {
-        if (line.kind === "add") {
-          output.push(line.text);
-          newSeen += 1;
-          additions += 1;
-        } else if (line.kind === "remove") {
-          if (lines[cursor] !== line.text) throw conflictLine(cursor + 1);
-          cursor += 1;
-          oldSeen += 1;
-          deletions += 1;
-        } else {
-          if (lines[cursor] !== line.text) throw conflictLine(cursor + 1);
-          output.push(line.text);
-          cursor += 1;
-          oldSeen += 1;
-          newSeen += 1;
-        }
-      }
-      if (oldSeen !== hunk.oldCount || newSeen !== hunk.newCount) {
-        throw invalid("Patch hunk line counts do not match its header");
-      }
-    }
-    output.push(...lines.slice(cursor));
-    return {
-      text: `${output.join("\n")}${hadFinalNewline || before === "" ? "\n" : ""}`,
-      additions,
-      deletions
-    };
-  }
-  async function remember(vfs, path, originals) {
-    const existing = originals.get(path);
-    if (existing) return existing;
-    const info2 = await vfs.stat(path);
-    const original = info2 ? {
-      path,
-      existed: true,
-      data: await vfs.read(path),
-      mode: info2.mode,
-      version: info2.version
-    } : { path, existed: false, version: 0 };
-    originals.set(path, original);
-    return original;
-  }
-  async function rollback(vfs, originals) {
-    for (const original of originals.values()) {
-      if (original.existed) {
-        await vfs.write(original.path, original.data, {
-          ...original.mode === void 0 ? {} : { mode: original.mode }
-        });
-      } else {
-        await vfs.remove(original.path, { recursive: true });
-      }
-    }
-  }
-  function parseHeaderPath(value) {
-    const path = value.split("	")[0].trim();
-    if (!path || path === "/dev/null") return void 0;
-    return normalizeVirtualPath(path.replace(/^[ab]\//, ""));
-  }
-  function conflict(path, kind) {
-    return new AgentError(
-      "PATCH_CONFLICT",
-      `Patch expected ${kind} does not match current file: ${path}`
-    );
-  }
-  function conflictLine(line) {
-    return new AgentError(
-      "PATCH_CONTEXT_MISMATCH",
-      `Patch context does not match at line ${line}`
-    );
-  }
-  function invalid(message) {
-    return new AgentError("PATCH_INVALID", message);
-  }
-  function cancelled() {
-    return new AgentError("PATCH_CANCELLED", "Virtual patch was cancelled");
-  }
-
-  // src/adapters/virtual-workspace-tools.ts
-  function createVirtualWorkspaceTools(workspace) {
-    return [
-      tool2(
-        "read_file",
-        "Read a UTF-8 or base64 file from the virtual workspace.",
-        schema2(
-          {
-            path: { type: "string" },
-            encoding: { type: "string", enum: ["utf8", "base64"] },
-            offset: { type: "integer" },
-            length: { type: "integer" }
-          },
-          ["path"]
-        ),
-        "read",
-        "read",
-        async (input, invocation) => {
-          const path = requiredString2(input, "path");
-          const data = await workspace.fs.read(path, {
-            signal: invocation.signal,
-            ...optionalNumber(input, "offset") === void 0 ? {} : { offset: optionalNumber(input, "offset") },
-            ...optionalNumber(input, "length") === void 0 ? {} : { length: optionalNumber(input, "length") }
-          });
-          return {
-            path,
-            bytes: data.byteLength,
-            ...input.encoding === "base64" ? { dataBase64: bytesToBase642(data) } : { text: new TextDecoder().decode(data) }
-          };
-        }
-      ),
-      tool2(
-        "write_file",
-        "Atomically write a UTF-8 or base64 file in the virtual workspace.",
-        schema2(
-          {
-            path: { type: "string" },
-            text: { type: "string" },
-            dataBase64: { type: "string" },
-            expected_version: { type: "integer" },
-            mode: { type: "integer" }
-          },
-          ["path"]
-        ),
-        "write",
-        "write",
-        async (input, invocation) => {
-          const path = requiredString2(input, "path");
-          const text = optionalString2(input, "text");
-          const base64 = optionalString2(input, "dataBase64");
-          if (text === void 0 && base64 === void 0) {
-            throw new AgentError(
-              "TOOL_ARGUMENTS_INVALID",
-              "write_file requires text or dataBase64"
-            );
-          }
-          const expected = optionalNumber(input, "expected_version");
-          return workspace.fs.write(
-            path,
-            base64 === void 0 ? new TextEncoder().encode(text) : base64ToBytes2(base64),
-            {
-              signal: invocation.signal,
-              ...expected === void 0 ? {} : { expectedVersion: expected },
-              ...optionalNumber(input, "mode") === void 0 ? {} : { mode: optionalNumber(input, "mode") }
-            }
-          );
-        }
-      ),
-      tool2(
-        "list_files",
-        "List files and directories in the virtual workspace.",
-        schema2({
-          path: { type: "string" },
-          recursive: { type: "boolean" }
-        }),
-        "read",
-        "read",
-        async (input, invocation) => workspace.fs.list(optionalString2(input, "path") ?? "", {
-          recursive: input.recursive === true,
-          signal: invocation.signal
-        })
-      ),
-      tool2(
-        "delete_file",
-        "Delete a file or directory tree in the virtual workspace.",
-        schema2({
-          path: { type: "string" },
-          recursive: { type: "boolean" }
-        }, ["path"]),
-        "write",
-        "write",
-        async (input, invocation) => ({
-          deleted: await workspace.fs.remove(requiredString2(input, "path"), {
-            recursive: input.recursive === true
-          })
-        })
-      ),
-      tool2(
-        "search",
-        "Search text in virtual files with optional regex, glob and context filters.",
-        schema2(
-          {
-            pattern: { type: "string" },
-            path: { type: "string" },
-            regex: { type: "boolean" },
-            case_sensitive: { type: "boolean" },
-            whole_word: { type: "boolean" },
-            include: { type: "array", items: { type: "string" } },
-            exclude: { type: "array", items: { type: "string" } },
-            context_lines: { type: "integer" },
-            max_results: { type: "integer" }
-          },
-          ["pattern"]
-        ),
-        "read",
-        "read",
-        async (input, invocation) => searchVirtualFiles(workspace.fs, {
-          pattern: requiredString2(input, "pattern"),
-          signal: invocation.signal,
-          caseSensitive: input.case_sensitive === true,
-          regex: input.regex === true,
-          wholeWord: input.whole_word === true,
-          ...optionalString2(input, "path") ? { path: optionalString2(input, "path") } : {},
-          ...stringArray(input.include) ? { include: stringArray(input.include) } : {},
-          ...stringArray(input.exclude) ? { exclude: stringArray(input.exclude) } : {},
-          ...optionalNumber(input, "context_lines") === void 0 ? {} : { contextLines: optionalNumber(input, "context_lines") },
-          ...optionalNumber(input, "max_results") === void 0 ? {} : { maxResults: optionalNumber(input, "max_results") }
-        })
-      ),
-      tool2(
-        "glob",
-        "Find virtual files using one or more glob patterns.",
-        schema2(
-          {
-            patterns: { type: "array", items: { type: "string" } },
-            path: { type: "string" },
-            exclude: { type: "array", items: { type: "string" } }
-          },
-          ["patterns"]
-        ),
-        "read",
-        "read",
-        async (input, invocation) => {
-          const patterns = stringArray(input.patterns);
-          if (!patterns) {
-            throw new AgentError("TOOL_ARGUMENTS_INVALID", "patterns must be an array");
-          }
-          return globVirtualFiles(workspace.fs, patterns, {
-            signal: invocation.signal,
-            ...optionalString2(input, "path") ? { path: optionalString2(input, "path") } : {},
-            ...stringArray(input.exclude) ? { exclude: stringArray(input.exclude) } : {}
-          });
-        }
-      ),
-      tool2(
-        "apply_patch",
-        "Validate and atomically apply a unified diff to virtual files.",
-        schema2(
-          {
-            patch: { type: "string" },
-            expected_versions: { type: "object" },
-            expected_hashes: { type: "object" }
-          },
-          ["patch"]
-        ),
-        "write",
-        "write",
-        async (input, invocation) => applyUnifiedPatch(
-          workspace.fs,
-          requiredString2(input, "patch"),
-          {
-            signal: invocation.signal,
-            ...numberRecord(input.expected_versions) ? { expectedVersions: numberRecord(input.expected_versions) } : {},
-            ...stringRecord(input.expected_hashes) ? { expectedHashes: stringRecord(input.expected_hashes) } : {}
-          }
-        )
-      ),
-      tool2(
-        "exec",
-        "Execute the supported Virtual Shell subset without host Bash.",
-        schema2(
-          {
-            script: { type: "string" },
-            stdin: { type: "string" }
-          },
-          ["script"]
-        ),
-        "dangerous",
-        "execute",
-        async (input, invocation) => workspace.shell.execute(requiredString2(input, "script"), {
-          signal: invocation.signal,
-          ...optionalString2(input, "stdin") === void 0 ? {} : { stdin: optionalString2(input, "stdin") }
-        })
-      ),
-      tool2(
-        "job_start",
-        "Start a cancellable background Virtual Shell job.",
-        schema2({
-          script: { type: "string" },
-          stdin: { type: "string" }
-        }, ["script"]),
-        "dangerous",
-        "execute",
-        async (input) => workspace.jobs.start(requiredString2(input, "script"), {
-          ...optionalString2(input, "stdin") === void 0 ? {} : { stdin: optionalString2(input, "stdin") }
-        })
-      ),
-      tool2(
-        "job_read",
-        "Read a background job status and captured output.",
-        schema2({ job_id: { type: "string" } }, ["job_id"]),
-        "read",
-        "read",
-        async (input) => workspace.jobs.read(requiredString2(input, "job_id"))
-      ),
-      tool2(
-        "job_list",
-        "List background jobs newest first.",
-        schema2({}),
-        "read",
-        "read",
-        async () => workspace.jobs.list()
-      ),
-      tool2(
-        "job_cancel",
-        "Cancel a queued or running background job.",
-        schema2({ job_id: { type: "string" } }, ["job_id"]),
-        "dangerous",
-        "execute",
-        async (input) => workspace.jobs.cancel(requiredString2(input, "job_id"))
-      )
-    ];
-  }
-  function tool2(name, description, parameters, risk, effect, execute) {
-    return {
-      name,
-      description,
-      parameters,
-      risk,
-      effect,
-      capabilities: [
-        `workspace:${effect}`,
-        ...name.startsWith("job_") ? ["workspace:jobs"] : []
-      ],
-      executionMode: effect === "read" ? "parallel" : "sequential",
-      replay: effect === "read" ? "safe" : "never",
-      timeoutMs: name === "exec" ? 3e5 : 12e4,
-      execute: async (input, invocation) => await execute(asObject2(input), invocation)
-    };
-  }
-  function schema2(properties, required = []) {
-    return { type: "object", properties, ...required.length ? { required } : {} };
-  }
-  function asObject2(value) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      throw new AgentError("TOOL_ARGUMENTS_INVALID", "Tool input must be an object");
-    }
-    return value;
-  }
-  function requiredString2(input, key) {
-    const value = input[key];
-    if (typeof value !== "string" || !value.trim()) {
-      throw new AgentError("TOOL_ARGUMENTS_INVALID", `${key} must be a non-empty string`);
-    }
-    return value;
-  }
-  function optionalString2(input, key) {
-    const value = input[key];
-    return typeof value === "string" && value ? value : void 0;
-  }
-  function optionalNumber(input, key) {
-    const value = input[key];
-    return typeof value === "number" && Number.isFinite(value) ? value : void 0;
-  }
-  function stringArray(value) {
-    return Array.isArray(value) ? value.filter((item) => typeof item === "string") : void 0;
-  }
-  function numberRecord(value) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return void 0;
-    return Object.fromEntries(
-      Object.entries(value).filter((entry) => typeof entry[1] === "number")
-    );
-  }
-  function stringRecord(value) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return void 0;
-    return Object.fromEntries(
-      Object.entries(value).filter((entry) => typeof entry[1] === "string")
-    );
-  }
-  function bytesToBase642(value) {
-    let binary = "";
-    for (const byte of value) binary += String.fromCharCode(byte);
-    return btoa(binary);
-  }
-  function base64ToBytes2(value) {
-    const binary = atob(value);
-    const result = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) {
-      result[index] = binary.charCodeAt(index);
-    }
-    return result;
   }
 
   // src/virtual/memory-fs.ts
@@ -2725,8 +2188,8 @@
       if (this.deleted.has(normalized)) throw notFound(normalized);
       try {
         return await this.overlay.read(normalized, options);
-      } catch (error) {
-        if (!(error instanceof AgentError) || error.code !== "VFS_NOT_FOUND") throw error;
+      } catch (error2) {
+        if (!(error2 instanceof AgentError) || error2.code !== "VFS_NOT_FOUND") throw error2;
         return this.base.read(normalized, options);
       }
     }
@@ -2836,335 +2299,6 @@
   };
   function notFound(path) {
     return new AgentError("VFS_NOT_FOUND", `Virtual file not found: ${path}`);
-  }
-
-  // src/virtual/persistent-fs.ts
-  var PersistentFileSystem = class {
-    constructor(storage, storageKey = "tinyai:vfs:v1", now = () => Date.now()) {
-      this.storage = storage;
-      this.storageKey = storageKey;
-      this.memory = new MemoryFileSystem(now);
-    }
-    storage;
-    storageKey;
-    memory;
-    loaded;
-    mutationTail = Promise.resolve();
-    async read(path, options = {}) {
-      await this.ensureLoaded();
-      await this.mutationTail;
-      return this.memory.read(path, options);
-    }
-    async write(path, data, options = {}) {
-      await this.ensureLoaded();
-      return this.mutate(async () => {
-        const info2 = await this.memory.write(path, data, options);
-        await this.persist();
-        return info2;
-      });
-    }
-    async list(path = "", options = {}) {
-      await this.ensureLoaded();
-      await this.mutationTail;
-      return this.memory.list(path, options);
-    }
-    async stat(path, signal) {
-      await this.ensureLoaded();
-      await this.mutationTail;
-      return this.memory.stat(path, signal);
-    }
-    async mkdir(path, options = {}) {
-      await this.ensureLoaded();
-      await this.mutate(async () => {
-        await this.memory.mkdir(path, options);
-        await this.persist();
-      });
-    }
-    async remove(path, options = {}) {
-      await this.ensureLoaded();
-      return this.mutate(async () => {
-        const removed = await this.memory.remove(path, options);
-        if (removed) await this.persist();
-        return removed;
-      });
-    }
-    async rename(from, to) {
-      await this.ensureLoaded();
-      await this.mutate(async () => {
-        await this.memory.rename(from, to);
-        await this.persist();
-      });
-    }
-    async copy(from, to) {
-      await this.ensureLoaded();
-      await this.mutate(async () => {
-        await this.memory.copy(from, to);
-        await this.persist();
-      });
-    }
-    watch(listener) {
-      return this.memory.watch(listener);
-    }
-    async ensureLoaded() {
-      this.loaded ??= this.load();
-      await this.loaded;
-    }
-    mutate(operation) {
-      const current = this.mutationTail.then(operation);
-      this.mutationTail = current.then(
-        () => void 0,
-        () => void 0
-      );
-      return current;
-    }
-    async load() {
-      const raw = await this.storage.get(this.storageKey);
-      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
-      const manifest = raw;
-      if (manifest.schemaVersion !== 1) {
-        throw new AgentError(
-          "VFS_SCHEMA_UNSUPPORTED",
-          `Unsupported VFS schema: ${String(manifest.schemaVersion)}`
-        );
-      }
-      for (const directory of manifest.directories ?? []) {
-        await this.memory.mkdir(normalizeVirtualPath(directory), { recursive: true });
-      }
-      for (const file of manifest.files ?? []) {
-        const path = normalizeVirtualPath(file.path);
-        await this.memory.write(path, base64ToBytes3(file.data), {
-          mode: file.mode
-        });
-      }
-    }
-    async persist() {
-      const items = await this.memory.list("", { recursive: true });
-      const manifest = {
-        schemaVersion: 1,
-        directories: items.filter((item) => item.kind === "directory").map((item) => item.path),
-        files: []
-      };
-      for (const item of items) {
-        if (item.kind !== "file") continue;
-        manifest.files.push({
-          path: item.path,
-          data: bytesToBase643(await this.memory.read(item.path)),
-          mode: item.mode,
-          modifiedAt: item.modifiedAt,
-          version: item.version
-        });
-      }
-      await this.storage.set(this.storageKey, manifest);
-    }
-  };
-  function bytesToBase643(value) {
-    let binary = "";
-    for (const byte of value) binary += String.fromCharCode(byte);
-    return btoa(binary);
-  }
-  function base64ToBytes3(value) {
-    const binary = atob(value);
-    const result = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) {
-      result[index] = binary.charCodeAt(index);
-    }
-    return result;
-  }
-
-  // src/virtual/archive-fs.ts
-  var WORKSPACE_BUNDLE_FORMAT = "tinyai.workspace.bundle";
-  var WORKSPACE_BUNDLE_SCHEMA_VERSION = 1;
-  var ArchiveFileSystem = class {
-    bundle;
-    source;
-    loading;
-    constructor(bundle, now = () => 0) {
-      this.bundle = parseWorkspaceBundle(bundle);
-      this.source = new MemoryFileSystem(now);
-      this.loading = this.load();
-    }
-    async read(path, options = {}) {
-      await this.ready();
-      return this.source.read(path, options);
-    }
-    async list(path = "", options = {}) {
-      await this.ready();
-      return this.source.list(path, options);
-    }
-    async stat(path, signal) {
-      await this.ready();
-      return this.source.stat(path, signal);
-    }
-    async write(_path, _data, _options = {}) {
-      throw readOnly();
-    }
-    async mkdir(_path, _options = {}) {
-      throw readOnly();
-    }
-    async remove(_path, _options = {}) {
-      throw readOnly();
-    }
-    async rename(_from, _to) {
-      throw readOnly();
-    }
-    async copy(_from, _to) {
-      throw readOnly();
-    }
-    watch(_listener) {
-      return () => void 0;
-    }
-    exportBundle() {
-      return cloneBundle(this.bundle);
-    }
-    async load() {
-      for (const directory of this.bundle.directories) {
-        await this.source.mkdir(directory, { recursive: true });
-      }
-      for (const file of this.bundle.files) {
-        await this.source.write(
-          file.path,
-          base64ToBytes4(file.dataBase64, file.path),
-          { ...file.mode === void 0 ? {} : { mode: file.mode } }
-        );
-      }
-    }
-    async ready() {
-      await this.loading;
-    }
-  };
-  function parseWorkspaceBundle(input) {
-    const value = input instanceof Uint8Array ? parseJson(input) : input;
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      throw invalidBundle("Bundle must be an object");
-    }
-    const candidate = value;
-    if (candidate.format !== WORKSPACE_BUNDLE_FORMAT) {
-      throw invalidBundle(`Unsupported workspace bundle format: ${String(candidate.format)}`);
-    }
-    if (candidate.schemaVersion !== WORKSPACE_BUNDLE_SCHEMA_VERSION) {
-      throw invalidBundle(
-        `Unsupported workspace bundle schema: ${String(candidate.schemaVersion)}`
-      );
-    }
-    if (!Array.isArray(candidate.files) || !Array.isArray(candidate.directories)) {
-      throw invalidBundle("Bundle directories and files must be arrays");
-    }
-    const paths = /* @__PURE__ */ new Set();
-    const directories = candidate.directories.map((directory) => {
-      const normalized = normalizeVirtualPath(directory);
-      if (!normalized) {
-        throw invalidBundle("Bundle root directory is implicit");
-      }
-      if (paths.has(normalized)) {
-        throw invalidBundle(`Duplicate bundle path: ${normalized}`);
-      }
-      paths.add(normalized);
-      return normalized;
-    });
-    const files = candidate.files.map((file) => {
-      if (!file || typeof file.path !== "string" || typeof file.dataBase64 !== "string") {
-        throw invalidBundle("Bundle file entry is invalid");
-      }
-      const path = normalizeVirtualPath(file.path);
-      if (!path) throw invalidBundle("Bundle file path cannot be empty");
-      if (paths.has(path)) {
-        throw invalidBundle(`Duplicate bundle path: ${path}`);
-      }
-      paths.add(path);
-      const mode = file.mode === void 0 ? void 0 : Number.isInteger(file.mode) && file.mode >= 0 ? file.mode : invalidBundle(`Invalid file mode: ${path}`);
-      base64ToBytes4(file.dataBase64, path);
-      return {
-        path,
-        dataBase64: file.dataBase64,
-        ...mode === void 0 ? {} : { mode },
-        ...Number.isFinite(file.modifiedAt) ? { modifiedAt: Number(file.modifiedAt) } : {}
-      };
-    });
-    validateBundleHierarchy(directories, files);
-    return {
-      format: WORKSPACE_BUNDLE_FORMAT,
-      schemaVersion: WORKSPACE_BUNDLE_SCHEMA_VERSION,
-      ...Number.isFinite(candidate.createdAt) ? { createdAt: Number(candidate.createdAt) } : {},
-      ...typeof candidate.revision === "string" ? { revision: candidate.revision } : {},
-      ...candidate.metadata ? { metadata: sanitizeMetadata(candidate.metadata) } : {},
-      directories: [...new Set(directories)].sort(),
-      files: files.sort((left, right) => left.path.localeCompare(right.path))
-    };
-  }
-  function validateBundleHierarchy(directories, files) {
-    const directorySet = new Set(directories);
-    const fileSet = new Set(files.map((file) => file.path));
-    for (const path of fileSet) {
-      let parent = parentPath(path);
-      while (parent) {
-        if (fileSet.has(parent)) {
-          throw invalidBundle(`Bundle file cannot contain another path: ${parent}`);
-        }
-        parent = parentPath(parent);
-      }
-    }
-    for (const path of directorySet) {
-      let parent = parentPath(path);
-      while (parent) {
-        if (fileSet.has(parent)) {
-          throw invalidBundle(`Bundle file cannot contain another path: ${parent}`);
-        }
-        parent = parentPath(parent);
-      }
-    }
-  }
-  function parentPath(path) {
-    const index = path.lastIndexOf("/");
-    return index < 0 ? "" : path.slice(0, index);
-  }
-  function serializeWorkspaceBundle(bundle) {
-    return new TextEncoder().encode(JSON.stringify(parseWorkspaceBundle(bundle)));
-  }
-  function cloneBundle(bundle) {
-    return {
-      ...bundle,
-      ...bundle.metadata ? { metadata: { ...bundle.metadata } } : {},
-      directories: [...bundle.directories],
-      files: bundle.files.map((file) => ({ ...file }))
-    };
-  }
-  function parseJson(value) {
-    try {
-      return JSON.parse(new TextDecoder().decode(value));
-    } catch {
-      throw invalidBundle("Workspace bundle is not valid JSON");
-    }
-  }
-  function sanitizeMetadata(value) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      throw invalidBundle("Bundle metadata must be an object");
-    }
-    const result = {};
-    for (const [key, item] of Object.entries(value)) {
-      if (typeof item !== "string") {
-        throw invalidBundle(`Bundle metadata value must be a string: ${key}`);
-      }
-      result[key] = item;
-    }
-    return result;
-  }
-  function base64ToBytes4(value, path) {
-    try {
-      const binary = atob(value);
-      const result = new Uint8Array(binary.length);
-      for (let index = 0; index < binary.length; index += 1) {
-        result[index] = binary.charCodeAt(index);
-      }
-      return result;
-    } catch {
-      throw invalidBundle(`Invalid base64 data: ${path}`);
-    }
-  }
-  function readOnly() {
-    return new AgentError("VFS_READ_ONLY", "Archive workspace is read-only");
-  }
-  function invalidBundle(message) {
-    throw new AgentError("VFS_BUNDLE_INVALID", message);
   }
 
   // src/virtual/vcs.ts
@@ -3316,7 +2450,7 @@
       this.head = state.head;
       for (const snapshot of state.snapshots) this.snapshots.set(snapshot.id, snapshot);
       for (const [id, encoded] of Object.entries(state.objects)) {
-        this.objects.set(id, base64ToBytes5(encoded));
+        this.objects.set(id, base64ToBytes2(encoded));
       }
     }
     async persist() {
@@ -3332,7 +2466,7 @@
           )
         })),
         objects: Object.fromEntries(
-          [...this.objects].map(([id, data]) => [id, bytesToBase644(data)])
+          [...this.objects].map(([id, data]) => [id, bytesToBase642(data)])
         )
       };
       await this.storage.set(this.storageKey, state);
@@ -3435,18 +2569,1559 @@
     if (left.byteLength !== right.byteLength) return false;
     return left.every((byte, index) => byte === right[index]);
   }
-  function bytesToBase644(value) {
+  function bytesToBase642(value) {
     let binary = "";
     for (const byte of value) binary += String.fromCharCode(byte);
     return btoa(binary);
   }
-  function base64ToBytes5(value) {
+  function base64ToBytes2(value) {
     const binary = atob(value);
     const result = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) {
       result[index] = binary.charCodeAt(index);
     }
     return result;
+  }
+
+  // src/virtual/context-patch.ts
+  function parseContextPatch(source) {
+    const lines = source.replace(/\r\n/g, "\n").split("\n");
+    if (lines[0]?.trim() !== "*** Begin Patch") {
+      if (lines.some((line) => line.startsWith("--- "))) {
+        throw invalid(
+          "apply_patch accepts ContextPatch, not a raw unified diff; use apply_unified_diff instead",
+          { suggestion: "Use *** Begin Patch / *** End Patch or apply_unified_diff" }
+        );
+      }
+      throw invalid("Patch must start with *** Begin Patch");
+    }
+    const operations = [];
+    let operation;
+    let hunk;
+    let ended = false;
+    const finishHunk = () => {
+      if (!operation || operation.kind !== "update" || !hunk) return;
+      if (!hunk.lines.length && !hunk.endOfFile) {
+        throw invalid("Update hunk must contain context, remove or add lines");
+      }
+      operation.hunks.push(hunk);
+      hunk = void 0;
+    };
+    const finishOperation = () => {
+      finishHunk();
+      if (!operation) return;
+      if (operation.kind === "update" && !operation.hunks.length && !operation.moveTo) {
+        throw invalid(`Update File requires a hunk or Move to: ${operation.path}`);
+      }
+      operations.push(operation);
+      operation = void 0;
+    };
+    for (let index = 1; index < lines.length; index += 1) {
+      const line = lines[index];
+      if (line === "*** Begin Patch") {
+        throw invalid(`Nested *** Begin Patch at line ${index + 1}`);
+      }
+      if (line === "*** End Patch") {
+        if (ended) throw invalid("Patch contains multiple *** End Patch markers");
+        finishOperation();
+        ended = true;
+        if (lines.slice(index + 1).some((remaining) => remaining.trim())) {
+          throw invalid("Content found after *** End Patch");
+        }
+        break;
+      }
+      if (ended) continue;
+      if (line.startsWith("*** Update File: ")) {
+        finishOperation();
+        operation = {
+          kind: "update",
+          path: safePath(line.slice("*** Update File: ".length), index),
+          hunks: []
+        };
+        continue;
+      }
+      if (line.startsWith("*** Add File: ")) {
+        finishOperation();
+        operation = {
+          kind: "add",
+          path: safePath(line.slice("*** Add File: ".length), index),
+          lines: []
+        };
+        continue;
+      }
+      if (line.startsWith("*** Delete File: ")) {
+        finishOperation();
+        operation = {
+          kind: "delete",
+          path: safePath(line.slice("*** Delete File: ".length), index)
+        };
+        continue;
+      }
+      if (line.startsWith("*** Move to: ")) {
+        if (!operation || operation.kind !== "update") {
+          throw invalid(`Move to must follow Update File at line ${index + 1}`);
+        }
+        if (operation.moveTo) {
+          throw invalid(`Update File contains multiple Move to directives: ${operation.path}`);
+        }
+        operation.moveTo = safePath(
+          line.slice("*** Move to: ".length),
+          index
+        );
+        continue;
+      }
+      if (line === "*** End of File") {
+        if (!operation || operation.kind !== "update" || !hunk) {
+          throw invalid(`End of File must close an update hunk at line ${index + 1}`);
+        }
+        hunk.endOfFile = true;
+        finishHunk();
+        continue;
+      }
+      if (!operation) {
+        if (!line.trim()) continue;
+        throw invalid(`Unknown patch directive at line ${index + 1}: ${line.slice(0, 40)}`);
+      }
+      if (operation.kind === "add") {
+        if (line === "") {
+          continue;
+        }
+        if (line.startsWith("+")) {
+          operation.lines.push(line.slice(1));
+        } else {
+          throw invalid(`Add File line must start with '+': line ${index + 1}`);
+        }
+        continue;
+      }
+      if (operation.kind === "delete") {
+        if (line.trim()) {
+          throw invalid(`Delete File does not accept content: line ${index + 1}`);
+        }
+        continue;
+      }
+      if (line.startsWith("@@")) {
+        if (/^@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@/.test(line)) {
+          throw invalid(
+            "ContextPatch hunks must not contain unified-diff line counts; use @@ or @@ anchor",
+            { suggestion: "Remove line numbers, or use apply_unified_diff" }
+          );
+        }
+        finishHunk();
+        hunk = {
+          ...line.slice(2).trim() ? { anchor: line.slice(2).trim() } : {},
+          lines: []
+        };
+        continue;
+      }
+      if (!hunk) {
+        if (!line.trim()) continue;
+        throw invalid(`Update File content must follow @@: line ${index + 1}`);
+      }
+      if (line === "" && (lines.slice(index + 1).find((candidate) => candidate.trim())?.startsWith(
+        "***"
+      ) || lines.slice(index + 1).find((candidate) => candidate.trim())?.startsWith(
+        "@@"
+      ))) {
+        continue;
+      }
+      if (line.startsWith(" ")) {
+        hunk.lines.push({ kind: "context", text: line.slice(1) });
+      } else if (line.startsWith("-")) {
+        hunk.lines.push({ kind: "remove", text: line.slice(1) });
+      } else if (line.startsWith("+")) {
+        hunk.lines.push({ kind: "add", text: line.slice(1) });
+      } else if (line === "") {
+        hunk.lines.push({ kind: "context", text: "" });
+      } else {
+        throw invalid(`Unknown patch line at ${index + 1}: ${line.slice(0, 40)}`);
+      }
+    }
+    if (!ended) throw invalid("Patch is missing *** End Patch");
+    if (!operations.length) throw invalid("Patch contains no file operations");
+    return { operations };
+  }
+  async function applyContextPatch(vfs, source, options = {}) {
+    const patch = parseContextPatch(source);
+    const originals = /* @__PURE__ */ new Map();
+    const claimedPaths = /* @__PURE__ */ new Set();
+    const prepared = [];
+    for (const [operationIndex, operation] of patch.operations.entries()) {
+      if (options.signal?.aborted) throw cancelled();
+      if (claimedPaths.has(operation.path)) {
+        throw invalid(`Patch operates on the same path more than once: ${operation.path}`, {
+          operation: operationIndex,
+          path: operation.path
+        });
+      }
+      claimedPaths.add(operation.path);
+      const beforeInfo = await vfs.stat(operation.path, options.signal);
+      const before = await remember(vfs, operation.path, originals);
+      assertExpected(operation.path, beforeInfo, before, options, operationIndex);
+      if (operation.kind === "add") {
+        if (beforeInfo) {
+          throw error(
+            "PATCH_TARGET_EXISTS",
+            `Patch target already exists: ${operation.path}`,
+            { operation: operationIndex, path: operation.path, suggestion: "Use Update File or choose a new path" }
+          );
+        }
+        const text = operation.lines.length ? `${operation.lines.join("\n")}
+` : "";
+        prepared.push({
+          operation,
+          path: operation.path,
+          before,
+          after: { data: new TextEncoder().encode(text) },
+          additions: operation.lines.length,
+          deletions: 0
+        });
+        continue;
+      }
+      if (!beforeInfo || beforeInfo.kind !== "file") {
+        throw error(
+          "PATCH_FILE_MISSING",
+          `Patch target is missing or not a file: ${operation.path}`,
+          { operation: operationIndex, path: operation.path }
+        );
+      }
+      if (operation.kind === "delete") {
+        prepared.push({
+          operation,
+          path: operation.path,
+          before,
+          additions: 0,
+          deletions: textLineCount(before.data)
+        });
+        continue;
+      }
+      const targetPath = operation.moveTo ? safeOperationPath(operation.moveTo, operationIndex) : operation.path;
+      if (operation.moveTo) {
+        if (claimedPaths.has(targetPath)) {
+          throw invalid(`Move target is used more than once: ${targetPath}`, {
+            operation: operationIndex,
+            path: targetPath
+          });
+        }
+        claimedPaths.add(targetPath);
+        if (await vfs.stat(targetPath, options.signal)) {
+          throw error(
+            "PATCH_TARGET_EXISTS",
+            `Move target already exists: ${targetPath}`,
+            { operation: operationIndex, path: targetPath, suggestion: "Delete or move the target first" }
+          );
+        }
+        await remember(vfs, targetPath, originals);
+      }
+      const beforeText = decodeVirtualText(before.data);
+      if (beforeText === void 0) {
+        throw error(
+          "PATCH_BINARY_UNSUPPORTED",
+          `ContextPatch cannot edit binary files: ${operation.path}`,
+          { operation: operationIndex, path: operation.path }
+        );
+      }
+      const applied = applyContextHunks(
+        beforeText,
+        operation.hunks,
+        operation.path,
+        operationIndex
+      );
+      prepared.push({
+        operation,
+        path: targetPath,
+        oldPath: operation.path,
+        before,
+        after: {
+          data: new TextEncoder().encode(applied.text),
+          ...before.mode === void 0 ? {} : { mode: before.mode }
+        },
+        additions: applied.additions,
+        deletions: applied.deletions
+      });
+    }
+    const writes = prepared.filter(
+      (item) => item.after !== void 0
+    );
+    const deletes = new Set(
+      prepared.filter((item) => !item.after).map((item) => item.path)
+    );
+    for (const item of prepared) {
+      if (item.oldPath && item.oldPath !== item.path) deletes.add(item.oldPath);
+    }
+    try {
+      for (const item of writes.sort((left, right) => left.path.localeCompare(right.path))) {
+        await vfs.write(item.path, item.after.data, {
+          ...item.after.mode === void 0 ? {} : { mode: item.after.mode },
+          signal: options.signal
+        });
+      }
+      for (const path of [...deletes].sort()) {
+        await vfs.remove(path, { recursive: false });
+      }
+    } catch (failure) {
+      await rollback(vfs, originals);
+      throw failure;
+    }
+    const files = [];
+    const patchParts = [];
+    let additions = 0;
+    let deletions = 0;
+    for (const item of prepared) {
+      if (options.signal?.aborted) {
+        await rollback(vfs, originals);
+        throw cancelled();
+      }
+      additions += item.additions;
+      deletions += item.deletions;
+      const after = item.after ? await vfs.stat(item.path) : void 0;
+      files.push({
+        path: item.path,
+        ...item.oldPath && item.oldPath !== item.path ? { oldPath: item.oldPath } : {},
+        status: item.operation.kind === "add" ? "added" : item.operation.kind === "delete" ? "deleted" : item.oldPath && item.oldPath !== item.path ? "moved" : "modified",
+        beforeVersion: item.before.existed ? item.before.version : 0,
+        afterVersion: after?.version ?? 0
+      });
+      patchParts.push(
+        renderOperationDiff(
+          item.operation,
+          item.before.data,
+          item.after?.data
+        )
+      );
+    }
+    return {
+      protocolVersion: 1,
+      files,
+      unifiedDiff: patchParts.filter(Boolean).join("\n"),
+      additions,
+      deletions
+    };
+  }
+  function applyContextHunks(before, hunks, path, operation) {
+    const usesCrlf = before.includes("\r\n");
+    const normalized = usesCrlf ? before.replace(/\r\n/g, "\n") : before;
+    const hadFinalNewline = normalized.endsWith("\n");
+    let working = splitTextLines(normalized);
+    let additions = 0;
+    let deletions = 0;
+    for (const [hunkIndex, hunk] of hunks.entries()) {
+      const oldLines = hunk.lines.filter((line) => line.kind !== "add").map((line) => line.text);
+      let candidates = oldLines.length === 0 ? [working.length] : findLineSequence(working, oldLines);
+      if (hunk.anchor) {
+        const anchorLines = working.map((line, index) => line.includes(hunk.anchor) ? index : -1).filter((index) => index >= 0);
+        if (anchorLines.length === 0) {
+          candidates = [];
+        } else if (oldLines.length === 0) {
+          candidates = anchorLines.map((index) => index + 1);
+        } else {
+          candidates = candidates.filter(
+            (start2) => anchorLines.some((anchorIndex) => anchorIndex <= start2)
+          );
+        }
+      }
+      if (hunk.endOfFile) {
+        candidates = candidates.filter(
+          (start2) => start2 + oldLines.length === working.length
+        );
+      }
+      if (candidates.length === 0) {
+        throw error(
+          "PATCH_CONTEXT_NOT_FOUND",
+          `Patch context was not found in ${path}`,
+          {
+            operation,
+            hunk: hunkIndex,
+            path,
+            ...hunk.anchor ? { anchor: hunk.anchor } : {},
+            candidates: [],
+            suggestion: "Read the latest file and submit a smaller context block"
+          }
+        );
+      }
+      if (candidates.length > 1) {
+        throw error(
+          "PATCH_CONTEXT_AMBIGUOUS",
+          `Patch context matches ${candidates.length} locations in ${path}`,
+          {
+            operation,
+            hunk: hunkIndex,
+            path,
+            ...hunk.anchor ? { anchor: hunk.anchor } : {},
+            candidates: candidates.map((index) => index + 1),
+            suggestion: "Add a unique @@ anchor or more surrounding context"
+          }
+        );
+      }
+      const start = candidates[0];
+      const replacement = [];
+      for (const line of hunk.lines) {
+        if (line.kind === "context") replacement.push(line.text);
+        else if (line.kind === "add") {
+          replacement.push(line.text);
+          additions += 1;
+        } else {
+          deletions += 1;
+        }
+      }
+      working.splice(start, oldLines.length, ...replacement);
+    }
+    const output = working.join("\n") + (hadFinalNewline || working.length === 0 ? "\n" : "");
+    return {
+      text: usesCrlf ? output.replace(/\n/g, "\r\n") : output,
+      additions,
+      deletions
+    };
+  }
+  function findLineSequence(lines, sequence) {
+    const matches = [];
+    for (let start = 0; start + sequence.length <= lines.length; start += 1) {
+      let matched = true;
+      for (let index = 0; index < sequence.length; index += 1) {
+        if (lines[start + index] !== sequence[index]) {
+          matched = false;
+          break;
+        }
+      }
+      if (matched) matches.push(start);
+    }
+    return matches;
+  }
+  async function remember(vfs, path, originals) {
+    const existing = originals.get(path);
+    if (existing) return existing;
+    const info2 = await vfs.stat(path);
+    const original = info2 ? {
+      path,
+      existed: true,
+      data: await vfs.read(path),
+      mode: info2.mode,
+      version: info2.version
+    } : { path, existed: false, version: 0 };
+    originals.set(path, original);
+    return original;
+  }
+  function assertExpected(path, info2, original, options, operation) {
+    const expectedVersion = options.expectedVersions?.[path];
+    if (expectedVersion !== void 0 && (info2?.version ?? 0) !== expectedVersion) {
+      throw error(
+        "PATCH_STALE_FILE",
+        `Patch expected version ${expectedVersion} for ${path}, current version is ${info2?.version ?? 0}`,
+        {
+          operation,
+          path,
+          expectedVersion,
+          actualVersion: info2?.version ?? 0,
+          suggestion: "Read the latest file and retry with fresh context"
+        }
+      );
+    }
+    const expectedHash = options.expectedHashes?.[path];
+    if (expectedHash !== void 0 && (!original.data || hashVirtualBytes(original.data) !== expectedHash)) {
+      throw error(
+        "PATCH_STALE_FILE",
+        `Patch expected hash does not match current file: ${path}`,
+        {
+          operation,
+          path,
+          expectedHash,
+          suggestion: "Read the latest file and retry with fresh context"
+        }
+      );
+    }
+  }
+  async function rollback(vfs, originals) {
+    for (const original of originals.values()) {
+      if (original.existed) {
+        await vfs.write(original.path, original.data, {
+          ...original.mode === void 0 ? {} : { mode: original.mode }
+        });
+      } else {
+        await vfs.remove(original.path, { recursive: true });
+      }
+    }
+  }
+  function renderOperationDiff(operation, before, after) {
+    if (operation.kind === "update" && !operation.moveTo) {
+      return unifiedDiff(before ?? new Uint8Array(), after ?? new Uint8Array(), operation.path).patch ?? "";
+    }
+    if (operation.kind === "add") {
+      return renderWholeFileDiff("", after ?? new Uint8Array(), operation.path, "add");
+    }
+    if (operation.kind === "delete") {
+      return renderWholeFileDiff(before ?? new Uint8Array(), "", operation.path, "delete");
+    }
+    return [
+      renderWholeFileDiff(before ?? new Uint8Array(), "", operation.path, "delete"),
+      renderWholeFileDiff("", after ?? new Uint8Array(), operation.moveTo, "add")
+    ].filter(Boolean).join("\n");
+  }
+  function renderWholeFileDiff(before, after, path, kind) {
+    const bytes = kind === "add" ? after : before;
+    const text = typeof bytes === "string" ? bytes : decodeVirtualText(bytes);
+    if (text === void 0) return "";
+    const lines = splitTextLines(text);
+    const prefix = kind === "add" ? "+" : "-";
+    return [
+      kind === "add" ? "--- /dev/null" : `--- a/${path}`,
+      kind === "add" ? `+++ b/${path}` : "+++ /dev/null",
+      kind === "add" ? `@@ -0,0 +1,${lines.length} @@` : `@@ -1,${lines.length} +0,0 @@`,
+      ...lines.map((line) => `${prefix}${line}`)
+    ].join("\n");
+  }
+  function splitTextLines(text) {
+    if (!text) return [];
+    const lines = text.split("\n");
+    if (text.endsWith("\n")) lines.pop();
+    return lines;
+  }
+  function textLineCount(data) {
+    if (!data) return 0;
+    const text = decodeVirtualText(data);
+    return text === void 0 ? 1 : splitTextLines(text).length;
+  }
+  function safePath(value, line) {
+    const path = value.trim();
+    if (!path) {
+      throw invalid(`Patch path is empty at line ${line + 1}`);
+    }
+    return safeOperationPath(path, line);
+  }
+  function safeOperationPath(value, operation) {
+    if (value.startsWith("/") || /^[a-zA-Z]:/.test(value) || value.includes("\0") || /[\u0001-\u001f\u007f]/.test(value)) {
+      throw error("PATCH_PATH_INVALID", `Patch path is invalid: ${value}`, {
+        operation,
+        path: value
+      });
+    }
+    const path = normalizeVirtualPath(value);
+    if (!path) {
+      throw invalid("Patch path is empty", { operation, path: value });
+    }
+    return path;
+  }
+  function invalid(message, details) {
+    return error("PATCH_PROTOCOL_INVALID", message, details);
+  }
+  function error(code, message, details) {
+    return new AgentError(code, message, {
+      ...details ? { details } : {}
+    });
+  }
+  function cancelled() {
+    return new AgentError("PATCH_CANCELLED", "Virtual context patch was cancelled");
+  }
+
+  // src/virtual/patch.ts
+  async function applyUnifiedPatch(vfs, patch, options = {}) {
+    const parsed = parseUnifiedPatch(patch);
+    const originals = /* @__PURE__ */ new Map();
+    const writes = /* @__PURE__ */ new Map();
+    const deletes = /* @__PURE__ */ new Set();
+    let additions = 0;
+    let deletions = 0;
+    for (const file of parsed) {
+      if (options.signal?.aborted) throw cancelled2();
+      const oldPath = file.oldPath;
+      const newPath = file.newPath;
+      const target = newPath ?? oldPath;
+      if (!oldPath && newPath && await vfs.stat(newPath, options.signal)) {
+        throw new AgentError("PATCH_TARGET_EXISTS", `Patch target already exists: ${newPath}`);
+      }
+      const before = oldPath === void 0 ? new Uint8Array() : await vfs.read(oldPath, { signal: options.signal });
+      const beforeInfo = oldPath ? await vfs.stat(oldPath, options.signal) : void 0;
+      if (oldPath && !beforeInfo) {
+        throw new AgentError("PATCH_FILE_MISSING", `Patch target is missing: ${oldPath}`);
+      }
+      if (beforeInfo && oldPath && options.expectedVersions?.[oldPath] !== void 0) {
+        if (beforeInfo.version !== options.expectedVersions[oldPath]) {
+          throw conflict(oldPath, "version");
+        }
+      }
+      if (beforeInfo && oldPath && options.expectedHashes?.[oldPath]) {
+        if (hashVirtualBytes(before) !== options.expectedHashes[oldPath]) {
+          throw conflict(oldPath, "hash");
+        }
+      }
+      const beforeText = decodeVirtualText(before);
+      if (beforeText === void 0) {
+        throw new AgentError("PATCH_BINARY_UNSUPPORTED", `Binary patch is not supported: ${oldPath}`);
+      }
+      const applied = applyHunks(beforeText, file.hunks);
+      additions += applied.additions;
+      deletions += applied.deletions;
+      const oldOriginal = oldPath ? await remember2(vfs, oldPath, originals) : void 0;
+      const newOriginal = await remember2(vfs, target, originals);
+      if (oldPath === target && !oldOriginal?.existed && !newOriginal?.existed) {
+        originals.set(target, { path: target, existed: false, version: 0 });
+      }
+      if (newPath) {
+        writes.set(target, {
+          data: new TextEncoder().encode(applied.text),
+          ...oldOriginal?.mode === void 0 ? {} : { mode: oldOriginal.mode }
+        });
+      } else {
+        deletes.add(target);
+      }
+      if (oldPath && newPath && oldPath !== newPath) deletes.add(oldPath);
+    }
+    try {
+      for (const [path, write] of writes) {
+        await vfs.write(path, write.data, {
+          ...write.mode === void 0 ? {} : { mode: write.mode },
+          signal: options.signal
+        });
+      }
+      for (const path of deletes) {
+        await vfs.remove(path, { recursive: true });
+      }
+    } catch (error2) {
+      await rollback2(vfs, originals);
+      throw error2;
+    }
+    const resultFiles = [];
+    for (const file of parsed) {
+      const path = file.newPath ?? file.oldPath;
+      const original = originals.get(path);
+      const after = file.newPath ? await vfs.stat(path) : void 0;
+      resultFiles.push({
+        path,
+        status: !file.oldPath ? "added" : !file.newPath ? "deleted" : "modified",
+        beforeVersion: original?.existed ? original.version : 0,
+        afterVersion: after?.version ?? 0
+      });
+    }
+    return { files: resultFiles, additions, deletions };
+  }
+  function parseUnifiedPatch(patch) {
+    const lines = patch.replaceAll("\r\n", "\n").split("\n");
+    const files = [];
+    let current;
+    let hunk;
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index];
+      if (line.startsWith("--- ")) {
+        if (current) {
+          if (hunk) current.hunks.push(hunk);
+          files.push(current);
+        }
+        const oldPath = parseHeaderPath(line.slice(4));
+        const next = lines[index + 1];
+        if (!next?.startsWith("+++ ")) {
+          throw invalid2("Patch file header must be followed by +++");
+        }
+        current = {
+          ...oldPath ? { oldPath } : {},
+          newPath: parseHeaderPath(next.slice(4)) ?? void 0,
+          hunks: []
+        };
+        hunk = void 0;
+        index += 1;
+        continue;
+      }
+      if (!current) {
+        if (!line.trim()) continue;
+        throw invalid2("Patch must start with a file header");
+      }
+      const match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+      if (match) {
+        if (hunk) current.hunks.push(hunk);
+        hunk = {
+          oldStart: Number(match[1]),
+          oldCount: Number(match[2] ?? 1),
+          newStart: Number(match[3]),
+          newCount: Number(match[4] ?? 1),
+          lines: []
+        };
+        continue;
+      }
+      if (line.startsWith("\\ No newline at end of file")) continue;
+      if (!hunk) continue;
+      if (line.startsWith("+")) hunk.lines.push({ kind: "add", text: line.slice(1) });
+      else if (line.startsWith("-")) hunk.lines.push({ kind: "remove", text: line.slice(1) });
+      else if (line.startsWith(" ")) hunk.lines.push({ kind: "context", text: line.slice(1) });
+      else if (line !== "") throw invalid2(`Unknown patch line: ${line.slice(0, 20)}`);
+    }
+    if (current) {
+      if (hunk) current.hunks.push(hunk);
+      files.push(current);
+    }
+    if (!files.length) throw invalid2("Patch contains no file changes");
+    for (const file of files) {
+      if (!file.hunks.length) throw invalid2("Patch file contains no hunks");
+      if (!file.oldPath && !file.newPath) throw invalid2("Patch must identify a path");
+    }
+    return files;
+  }
+  function applyHunks(before, hunks) {
+    const lines = before ? before.split("\n") : [];
+    const hadFinalNewline = before.endsWith("\n");
+    if (hadFinalNewline) lines.pop();
+    const output = [];
+    let cursor = 0;
+    let additions = 0;
+    let deletions = 0;
+    for (const hunk of hunks) {
+      const start = hunk.oldStart === 0 ? 0 : hunk.oldStart - 1;
+      if (start < cursor || start > lines.length) throw invalid2("Patch hunk overlaps or is out of range");
+      output.push(...lines.slice(cursor, start));
+      cursor = start;
+      let oldSeen = 0;
+      let newSeen = 0;
+      for (const line of hunk.lines) {
+        if (line.kind === "add") {
+          output.push(line.text);
+          newSeen += 1;
+          additions += 1;
+        } else if (line.kind === "remove") {
+          if (lines[cursor] !== line.text) throw conflictLine(cursor + 1);
+          cursor += 1;
+          oldSeen += 1;
+          deletions += 1;
+        } else {
+          if (lines[cursor] !== line.text) throw conflictLine(cursor + 1);
+          output.push(line.text);
+          cursor += 1;
+          oldSeen += 1;
+          newSeen += 1;
+        }
+      }
+      if (oldSeen !== hunk.oldCount || newSeen !== hunk.newCount) {
+        throw invalid2(
+          `Patch hunk line counts do not match its header (old ${oldSeen}/${hunk.oldCount}, new ${newSeen}/${hunk.newCount})`
+        );
+      }
+    }
+    output.push(...lines.slice(cursor));
+    return {
+      text: `${output.join("\n")}${hadFinalNewline || before === "" ? "\n" : ""}`,
+      additions,
+      deletions
+    };
+  }
+  async function remember2(vfs, path, originals) {
+    const existing = originals.get(path);
+    if (existing) return existing;
+    const info2 = await vfs.stat(path);
+    const original = info2 ? {
+      path,
+      existed: true,
+      data: await vfs.read(path),
+      mode: info2.mode,
+      version: info2.version
+    } : { path, existed: false, version: 0 };
+    originals.set(path, original);
+    return original;
+  }
+  async function rollback2(vfs, originals) {
+    for (const original of originals.values()) {
+      if (original.existed) {
+        await vfs.write(original.path, original.data, {
+          ...original.mode === void 0 ? {} : { mode: original.mode }
+        });
+      } else {
+        await vfs.remove(original.path, { recursive: true });
+      }
+    }
+  }
+  function parseHeaderPath(value) {
+    const path = value.split("	")[0].trim();
+    if (!path || path === "/dev/null") return void 0;
+    return normalizeVirtualPath(path.replace(/^[ab]\//, ""));
+  }
+  function conflict(path, kind) {
+    return new AgentError(
+      "PATCH_CONFLICT",
+      `Patch expected ${kind} does not match current file: ${path}`
+    );
+  }
+  function conflictLine(line) {
+    return new AgentError(
+      "PATCH_CONTEXT_MISMATCH",
+      `Patch context does not match at line ${line}`
+    );
+  }
+  function invalid2(message) {
+    return new AgentError("PATCH_INVALID", message);
+  }
+  function cancelled2() {
+    return new AgentError("PATCH_CANCELLED", "Virtual patch was cancelled");
+  }
+
+  // src/adapters/virtual-workspace-tools.ts
+  function createVirtualWorkspaceTools(workspace) {
+    return [
+      tool2(
+        "read_file",
+        "Read a UTF-8 or base64 file from the virtual workspace.",
+        schema2(
+          {
+            path: { type: "string" },
+            encoding: { type: "string", enum: ["utf8", "base64"] },
+            offset: {
+              type: "integer",
+              description: "UTF-8 byte offset, not a line number"
+            },
+            length: { type: "integer", description: "Maximum bytes to read" },
+            start_line: { type: "integer", description: "1-based inclusive line" },
+            end_line: { type: "integer", description: "1-based inclusive line" }
+          },
+          ["path"]
+        ),
+        "read",
+        "read",
+        async (input, invocation) => {
+          const path = requiredString2(input, "path");
+          let data = await workspace.fs.read(path, {
+            signal: invocation.signal,
+            ...optionalNumber(input, "offset") === void 0 ? {} : { offset: optionalNumber(input, "offset") },
+            ...optionalNumber(input, "length") === void 0 ? {} : { length: optionalNumber(input, "length") }
+          });
+          const startLine = optionalNumber(input, "start_line");
+          const endLine = optionalNumber(input, "end_line");
+          if (startLine !== void 0 || endLine !== void 0) {
+            const lines = new TextDecoder().decode(data).split("\n");
+            const start = Math.max(1, startLine ?? 1) - 1;
+            const end = endLine === void 0 ? lines.length : Math.max(start + 1, endLine);
+            data = new TextEncoder().encode(lines.slice(start, end).join("\n"));
+          }
+          return {
+            path,
+            bytes: data.byteLength,
+            ...input.encoding === "base64" ? { dataBase64: bytesToBase643(data) } : { text: new TextDecoder().decode(data) }
+          };
+        }
+      ),
+      tool2(
+        "write_file",
+        "Atomically write a UTF-8 or base64 file in the virtual workspace.",
+        schema2(
+          {
+            path: { type: "string" },
+            text: { type: "string" },
+            dataBase64: { type: "string" },
+            expected_version: { type: "integer" },
+            mode: { type: "integer" }
+          },
+          ["path"]
+        ),
+        "write",
+        "write",
+        async (input, invocation) => {
+          const path = requiredString2(input, "path");
+          const text = optionalString2(input, "text");
+          const base64 = optionalString2(input, "dataBase64");
+          if (text === void 0 && base64 === void 0) {
+            throw new AgentError(
+              "TOOL_ARGUMENTS_INVALID",
+              "write_file requires text or dataBase64"
+            );
+          }
+          const expected = optionalNumber(input, "expected_version");
+          return workspace.fs.write(
+            path,
+            base64 === void 0 ? new TextEncoder().encode(text) : base64ToBytes3(base64),
+            {
+              signal: invocation.signal,
+              ...expected === void 0 ? {} : { expectedVersion: expected },
+              ...optionalNumber(input, "mode") === void 0 ? {} : { mode: optionalNumber(input, "mode") }
+            }
+          );
+        }
+      ),
+      tool2(
+        "replace_in_file",
+        "Replace an exact text occurrence in a UTF-8 file. Prefer this for small reliable edits.",
+        schema2(
+          {
+            path: { type: "string" },
+            old_text: { type: "string" },
+            new_text: { type: "string" },
+            replace_all: { type: "boolean" },
+            expected_version: { type: "integer" }
+          },
+          ["path", "old_text", "new_text"]
+        ),
+        "write",
+        "write",
+        async (input, invocation) => {
+          const path = requiredString2(input, "path");
+          const oldText = requiredString2(input, "old_text");
+          const newText = typeof input.new_text === "string" ? input.new_text : "";
+          const info2 = await workspace.fs.stat(path, invocation.signal);
+          if (!info2 || info2.kind !== "file") {
+            throw new AgentError("VFS_NOT_FOUND", `Virtual file not found: ${path}`);
+          }
+          const text = new TextDecoder().decode(
+            await workspace.fs.read(path, { signal: invocation.signal })
+          );
+          const first = text.indexOf(oldText);
+          if (first < 0) {
+            throw new AgentError(
+              "EDIT_TEXT_NOT_FOUND",
+              `old_text was not found in ${path}`
+            );
+          }
+          const occurrences = text.split(oldText).length - 1;
+          if (occurrences > 1 && input.replace_all !== true) {
+            throw new AgentError(
+              "EDIT_TEXT_AMBIGUOUS",
+              `old_text occurs ${occurrences} times in ${path}; pass replace_all or provide more context`
+            );
+          }
+          const updated = input.replace_all === true ? text.split(oldText).join(newText) : `${text.slice(0, first)}${newText}${text.slice(first + oldText.length)}`;
+          const expected = optionalNumber(input, "expected_version");
+          return workspace.fs.write(path, new TextEncoder().encode(updated), {
+            signal: invocation.signal,
+            expectedVersion: expected ?? info2.version
+          });
+        }
+      ),
+      tool2(
+        "append_file",
+        "Append UTF-8 text to a file, creating it when absent.",
+        schema2(
+          {
+            path: { type: "string" },
+            text: { type: "string" },
+            expected_version: { type: "integer" }
+          },
+          ["path", "text"]
+        ),
+        "write",
+        "write",
+        async (input, invocation) => {
+          const path = requiredString2(input, "path");
+          const info2 = await workspace.fs.stat(path, invocation.signal);
+          const existing = info2 ? new TextDecoder().decode(
+            await workspace.fs.read(path, { signal: invocation.signal })
+          ) : "";
+          const expected = optionalNumber(input, "expected_version");
+          return workspace.fs.write(
+            path,
+            new TextEncoder().encode(
+              `${existing}${typeof input.text === "string" ? input.text : ""}`
+            ),
+            {
+              signal: invocation.signal,
+              ...expected !== void 0 ? { expectedVersion: expected } : info2 ? { expectedVersion: info2.version } : {}
+            }
+          );
+        }
+      ),
+      tool2(
+        "list_files",
+        "List files and directories in the virtual workspace.",
+        schema2({
+          path: { type: "string" },
+          recursive: { type: "boolean" }
+        }),
+        "read",
+        "read",
+        async (input, invocation) => workspace.fs.list(optionalString2(input, "path") ?? "", {
+          recursive: input.recursive === true,
+          signal: invocation.signal
+        })
+      ),
+      tool2(
+        "delete_file",
+        "Delete a file or directory tree in the virtual workspace.",
+        schema2({
+          path: { type: "string" },
+          recursive: { type: "boolean" }
+        }, ["path"]),
+        "write",
+        "write",
+        async (input, invocation) => ({
+          deleted: await workspace.fs.remove(requiredString2(input, "path"), {
+            recursive: input.recursive === true
+          })
+        })
+      ),
+      tool2(
+        "search",
+        "Search text in virtual files with optional regex, glob and context filters.",
+        schema2(
+          {
+            pattern: { type: "string" },
+            path: { type: "string" },
+            regex: { type: "boolean" },
+            case_sensitive: { type: "boolean" },
+            whole_word: { type: "boolean" },
+            include: { type: "array", items: { type: "string" } },
+            exclude: { type: "array", items: { type: "string" } },
+            context_lines: { type: "integer" },
+            max_results: { type: "integer" }
+          },
+          ["pattern"]
+        ),
+        "read",
+        "read",
+        async (input, invocation) => searchVirtualFiles(workspace.fs, {
+          pattern: requiredString2(input, "pattern"),
+          signal: invocation.signal,
+          caseSensitive: input.case_sensitive === true,
+          regex: input.regex === true,
+          wholeWord: input.whole_word === true,
+          ...optionalString2(input, "path") ? { path: optionalString2(input, "path") } : {},
+          ...stringArray(input.include) ? { include: stringArray(input.include) } : {},
+          ...stringArray(input.exclude) ? { exclude: stringArray(input.exclude) } : {},
+          ...optionalNumber(input, "context_lines") === void 0 ? {} : { contextLines: optionalNumber(input, "context_lines") },
+          ...optionalNumber(input, "max_results") === void 0 ? {} : { maxResults: optionalNumber(input, "max_results") }
+        })
+      ),
+      tool2(
+        "glob",
+        "Find virtual files using one or more glob patterns.",
+        schema2(
+          {
+            patterns: { type: "array", items: { type: "string" } },
+            path: { type: "string" },
+            exclude: { type: "array", items: { type: "string" } }
+          },
+          ["patterns"]
+        ),
+        "read",
+        "read",
+        async (input, invocation) => {
+          const patterns = stringArray(input.patterns);
+          if (!patterns) {
+            throw new AgentError("TOOL_ARGUMENTS_INVALID", "patterns must be an array");
+          }
+          return globVirtualFiles(workspace.fs, patterns, {
+            signal: invocation.signal,
+            ...optionalString2(input, "path") ? { path: optionalString2(input, "path") } : {},
+            ...stringArray(input.exclude) ? { exclude: stringArray(input.exclude) } : {}
+          });
+        }
+      ),
+      tool2(
+        "apply_patch",
+        "Apply a contextual patch to one or more virtual files. Use *** Begin Patch ... *** End Patch with Update File, Add File, Delete File and Move to directives. Every Update File hunk starts with @@ or @@ anchor text. Context lines use a leading space, removed lines use -, added lines use +. Do not provide unified-diff hunk counts or ---/+++ headers; use apply_unified_diff for those.",
+        schema2(
+          {
+            patch: {
+              type: "string",
+              description: "ContextPatch text beginning with *** Begin Patch and ending with *** End Patch. Do not use unified-diff headers or hunk line counts."
+            },
+            expected_versions: { type: "object" },
+            expected_hashes: { type: "object" }
+          },
+          ["patch"]
+        ),
+        "write",
+        "write",
+        async (input, invocation) => applyContextPatch(
+          workspace.fs,
+          requiredString2(input, "patch"),
+          {
+            signal: invocation.signal,
+            ...numberRecord(input.expected_versions) ? { expectedVersions: numberRecord(input.expected_versions) } : {},
+            ...stringRecord(input.expected_hashes) ? { expectedHashes: stringRecord(input.expected_hashes) } : {}
+          }
+        )
+      ),
+      tool2(
+        "apply_unified_diff",
+        "Apply a strict Git-style unified diff with ---/+++ headers and exact @@ hunk counts to virtual files. Use this only for standard unified diffs; prefer apply_patch for model-authored edits.",
+        schema2(
+          {
+            patch: {
+              type: "string",
+              description: "Strict Git unified diff with ---/+++ headers and exact @@ hunk counts."
+            },
+            expected_versions: { type: "object" },
+            expected_hashes: { type: "object" }
+          },
+          ["patch"]
+        ),
+        "write",
+        "write",
+        async (input, invocation) => applyUnifiedPatch(
+          workspace.fs,
+          requiredString2(input, "patch"),
+          {
+            signal: invocation.signal,
+            ...numberRecord(input.expected_versions) ? { expectedVersions: numberRecord(input.expected_versions) } : {},
+            ...stringRecord(input.expected_hashes) ? { expectedHashes: stringRecord(input.expected_hashes) } : {}
+          }
+        )
+      ),
+      tool2(
+        "exec",
+        "Execute the supported Virtual Shell subset without host Bash.",
+        schema2(
+          {
+            script: { type: "string" },
+            command: { type: "string" },
+            args: { type: "array", items: { type: "string" } },
+            cwd: { type: "string" },
+            stdin: { type: "string" }
+          }
+        ),
+        "dangerous",
+        "execute",
+        async (input, invocation) => {
+          const script = optionalString2(input, "script") ?? buildCommandScript(input);
+          if (!script) {
+            throw new AgentError(
+              "TOOL_ARGUMENTS_INVALID",
+              "exec requires script or command"
+            );
+          }
+          return workspace.shell.execute(script, {
+            signal: invocation.signal,
+            ...optionalString2(input, "stdin") === void 0 ? {} : { stdin: optionalString2(input, "stdin") }
+          });
+        }
+      ),
+      tool2(
+        "job_start",
+        "Start a cancellable background Virtual Shell job.",
+        schema2({
+          script: { type: "string" },
+          stdin: { type: "string" }
+        }, ["script"]),
+        "dangerous",
+        "execute",
+        async (input) => workspace.jobs.start(requiredString2(input, "script"), {
+          ...optionalString2(input, "stdin") === void 0 ? {} : { stdin: optionalString2(input, "stdin") }
+        })
+      ),
+      tool2(
+        "job_read",
+        "Read a background job status and captured output.",
+        schema2({ job_id: { type: "string" } }, ["job_id"]),
+        "read",
+        "read",
+        async (input) => workspace.jobs.read(requiredString2(input, "job_id"))
+      ),
+      tool2(
+        "job_list",
+        "List background jobs newest first.",
+        schema2({}),
+        "read",
+        "read",
+        async () => workspace.jobs.list()
+      ),
+      tool2(
+        "job_cancel",
+        "Cancel a queued or running background job.",
+        schema2({ job_id: { type: "string" } }, ["job_id"]),
+        "dangerous",
+        "execute",
+        async (input) => workspace.jobs.cancel(requiredString2(input, "job_id"))
+      )
+    ];
+  }
+  function tool2(name, description, parameters, risk, effect, execute) {
+    return {
+      name,
+      description,
+      parameters,
+      risk,
+      effect,
+      capabilities: [
+        `workspace:${effect}`,
+        ...name.startsWith("job_") ? ["workspace:jobs"] : []
+      ],
+      executionMode: effect === "read" ? "parallel" : "sequential",
+      replay: effect === "read" ? "safe" : "never",
+      timeoutMs: name === "exec" ? 3e5 : 12e4,
+      execute: async (input, invocation) => await execute(asObject2(input), invocation)
+    };
+  }
+  function schema2(properties, required = []) {
+    return { type: "object", properties, ...required.length ? { required } : {} };
+  }
+  function asObject2(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new AgentError("TOOL_ARGUMENTS_INVALID", "Tool input must be an object");
+    }
+    return value;
+  }
+  function requiredString2(input, key) {
+    const value = input[key];
+    if (typeof value !== "string" || !value.trim()) {
+      throw new AgentError("TOOL_ARGUMENTS_INVALID", `${key} must be a non-empty string`);
+    }
+    return value;
+  }
+  function optionalString2(input, key) {
+    const value = input[key];
+    return typeof value === "string" && value ? value : void 0;
+  }
+  function optionalNumber(input, key) {
+    const value = input[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : void 0;
+  }
+  function stringArray(value) {
+    return Array.isArray(value) ? value.filter((item) => typeof item === "string") : void 0;
+  }
+  function numberRecord(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return void 0;
+    return Object.fromEntries(
+      Object.entries(value).filter((entry) => typeof entry[1] === "number")
+    );
+  }
+  function stringRecord(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return void 0;
+    return Object.fromEntries(
+      Object.entries(value).filter((entry) => typeof entry[1] === "string")
+    );
+  }
+  function bytesToBase643(value) {
+    let binary = "";
+    for (const byte of value) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  }
+  function base64ToBytes3(value) {
+    const binary = atob(value);
+    const result = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      result[index] = binary.charCodeAt(index);
+    }
+    return result;
+  }
+  function buildCommandScript(input) {
+    const command = optionalString2(input, "command");
+    if (!command) return void 0;
+    const args = stringArray(input.args) ?? [];
+    const cwd = optionalString2(input, "cwd");
+    const invocation = [command, ...args].map(shellQuote).join(" ");
+    return cwd ? `cd ${shellQuote(cwd)}; ${invocation}` : invocation;
+  }
+  function shellQuote(value) {
+    if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) return value;
+    return `'${value.replaceAll("'", "'\\''")}'`;
+  }
+
+  // src/virtual/persistent-fs.ts
+  var PersistentFileSystem = class {
+    constructor(storage, storageKey = "tinyai:vfs:v1", now = () => Date.now()) {
+      this.storage = storage;
+      this.storageKey = storageKey;
+      this.memory = new MemoryFileSystem(now);
+    }
+    storage;
+    storageKey;
+    memory;
+    loaded;
+    mutationTail = Promise.resolve();
+    async read(path, options = {}) {
+      await this.ensureLoaded();
+      await this.mutationTail;
+      return this.memory.read(path, options);
+    }
+    async write(path, data, options = {}) {
+      await this.ensureLoaded();
+      return this.mutate(async () => {
+        const info2 = await this.memory.write(path, data, options);
+        await this.persist();
+        return info2;
+      });
+    }
+    async list(path = "", options = {}) {
+      await this.ensureLoaded();
+      await this.mutationTail;
+      return this.memory.list(path, options);
+    }
+    async stat(path, signal) {
+      await this.ensureLoaded();
+      await this.mutationTail;
+      return this.memory.stat(path, signal);
+    }
+    async mkdir(path, options = {}) {
+      await this.ensureLoaded();
+      await this.mutate(async () => {
+        await this.memory.mkdir(path, options);
+        await this.persist();
+      });
+    }
+    async remove(path, options = {}) {
+      await this.ensureLoaded();
+      return this.mutate(async () => {
+        const removed = await this.memory.remove(path, options);
+        if (removed) await this.persist();
+        return removed;
+      });
+    }
+    async rename(from, to) {
+      await this.ensureLoaded();
+      await this.mutate(async () => {
+        await this.memory.rename(from, to);
+        await this.persist();
+      });
+    }
+    async copy(from, to) {
+      await this.ensureLoaded();
+      await this.mutate(async () => {
+        await this.memory.copy(from, to);
+        await this.persist();
+      });
+    }
+    watch(listener) {
+      return this.memory.watch(listener);
+    }
+    async ensureLoaded() {
+      this.loaded ??= this.load();
+      await this.loaded;
+    }
+    mutate(operation) {
+      const current = this.mutationTail.then(operation);
+      this.mutationTail = current.then(
+        () => void 0,
+        () => void 0
+      );
+      return current;
+    }
+    async load() {
+      const raw = await this.storage.get(this.storageKey);
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
+      const manifest = raw;
+      if (manifest.schemaVersion !== 1) {
+        throw new AgentError(
+          "VFS_SCHEMA_UNSUPPORTED",
+          `Unsupported VFS schema: ${String(manifest.schemaVersion)}`
+        );
+      }
+      for (const directory of manifest.directories ?? []) {
+        await this.memory.mkdir(normalizeVirtualPath(directory), { recursive: true });
+      }
+      for (const file of manifest.files ?? []) {
+        const path = normalizeVirtualPath(file.path);
+        await this.memory.write(path, base64ToBytes4(file.data), {
+          mode: file.mode
+        });
+      }
+    }
+    async persist() {
+      const items = await this.memory.list("", { recursive: true });
+      const manifest = {
+        schemaVersion: 1,
+        directories: items.filter((item) => item.kind === "directory").map((item) => item.path),
+        files: []
+      };
+      for (const item of items) {
+        if (item.kind !== "file") continue;
+        manifest.files.push({
+          path: item.path,
+          data: bytesToBase644(await this.memory.read(item.path)),
+          mode: item.mode,
+          modifiedAt: item.modifiedAt,
+          version: item.version
+        });
+      }
+      await this.storage.set(this.storageKey, manifest);
+    }
+  };
+  function bytesToBase644(value) {
+    let binary = "";
+    for (const byte of value) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  }
+  function base64ToBytes4(value) {
+    const binary = atob(value);
+    const result = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      result[index] = binary.charCodeAt(index);
+    }
+    return result;
+  }
+
+  // src/virtual/archive-fs.ts
+  var WORKSPACE_BUNDLE_FORMAT = "tinyai.workspace.bundle";
+  var WORKSPACE_BUNDLE_SCHEMA_VERSION = 1;
+  var ArchiveFileSystem = class {
+    bundle;
+    source;
+    loading;
+    constructor(bundle, now = () => 0) {
+      this.bundle = parseWorkspaceBundle(bundle);
+      this.source = new MemoryFileSystem(now);
+      this.loading = this.load();
+    }
+    async read(path, options = {}) {
+      await this.ready();
+      return this.source.read(path, options);
+    }
+    async list(path = "", options = {}) {
+      await this.ready();
+      return this.source.list(path, options);
+    }
+    async stat(path, signal) {
+      await this.ready();
+      return this.source.stat(path, signal);
+    }
+    async write(_path, _data, _options = {}) {
+      throw readOnly();
+    }
+    async mkdir(_path, _options = {}) {
+      throw readOnly();
+    }
+    async remove(_path, _options = {}) {
+      throw readOnly();
+    }
+    async rename(_from, _to) {
+      throw readOnly();
+    }
+    async copy(_from, _to) {
+      throw readOnly();
+    }
+    watch(_listener) {
+      return () => void 0;
+    }
+    exportBundle() {
+      return cloneBundle(this.bundle);
+    }
+    async load() {
+      for (const directory of this.bundle.directories) {
+        await this.source.mkdir(directory, { recursive: true });
+      }
+      for (const file of this.bundle.files) {
+        await this.source.write(
+          file.path,
+          base64ToBytes5(file.dataBase64, file.path),
+          { ...file.mode === void 0 ? {} : { mode: file.mode } }
+        );
+      }
+    }
+    async ready() {
+      await this.loading;
+    }
+  };
+  function parseWorkspaceBundle(input) {
+    const value = input instanceof Uint8Array ? parseJson(input) : input;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw invalidBundle("Bundle must be an object");
+    }
+    const candidate = value;
+    if (candidate.format !== WORKSPACE_BUNDLE_FORMAT) {
+      throw invalidBundle(`Unsupported workspace bundle format: ${String(candidate.format)}`);
+    }
+    if (candidate.schemaVersion !== WORKSPACE_BUNDLE_SCHEMA_VERSION) {
+      throw invalidBundle(
+        `Unsupported workspace bundle schema: ${String(candidate.schemaVersion)}`
+      );
+    }
+    if (!Array.isArray(candidate.files) || !Array.isArray(candidate.directories)) {
+      throw invalidBundle("Bundle directories and files must be arrays");
+    }
+    const paths = /* @__PURE__ */ new Set();
+    const directories = candidate.directories.map((directory) => {
+      const normalized = normalizeVirtualPath(directory);
+      if (!normalized) {
+        throw invalidBundle("Bundle root directory is implicit");
+      }
+      if (paths.has(normalized)) {
+        throw invalidBundle(`Duplicate bundle path: ${normalized}`);
+      }
+      paths.add(normalized);
+      return normalized;
+    });
+    const files = candidate.files.map((file) => {
+      if (!file || typeof file.path !== "string" || typeof file.dataBase64 !== "string") {
+        throw invalidBundle("Bundle file entry is invalid");
+      }
+      const path = normalizeVirtualPath(file.path);
+      if (!path) throw invalidBundle("Bundle file path cannot be empty");
+      if (paths.has(path)) {
+        throw invalidBundle(`Duplicate bundle path: ${path}`);
+      }
+      paths.add(path);
+      const mode = file.mode === void 0 ? void 0 : Number.isInteger(file.mode) && file.mode >= 0 ? file.mode : invalidBundle(`Invalid file mode: ${path}`);
+      base64ToBytes5(file.dataBase64, path);
+      return {
+        path,
+        dataBase64: file.dataBase64,
+        ...mode === void 0 ? {} : { mode },
+        ...Number.isFinite(file.modifiedAt) ? { modifiedAt: Number(file.modifiedAt) } : {}
+      };
+    });
+    validateBundleHierarchy(directories, files);
+    return {
+      format: WORKSPACE_BUNDLE_FORMAT,
+      schemaVersion: WORKSPACE_BUNDLE_SCHEMA_VERSION,
+      ...Number.isFinite(candidate.createdAt) ? { createdAt: Number(candidate.createdAt) } : {},
+      ...typeof candidate.revision === "string" ? { revision: candidate.revision } : {},
+      ...candidate.metadata ? { metadata: sanitizeMetadata(candidate.metadata) } : {},
+      directories: [...new Set(directories)].sort(),
+      files: files.sort((left, right) => left.path.localeCompare(right.path))
+    };
+  }
+  function validateBundleHierarchy(directories, files) {
+    const directorySet = new Set(directories);
+    const fileSet = new Set(files.map((file) => file.path));
+    for (const path of fileSet) {
+      let parent = parentPath(path);
+      while (parent) {
+        if (fileSet.has(parent)) {
+          throw invalidBundle(`Bundle file cannot contain another path: ${parent}`);
+        }
+        parent = parentPath(parent);
+      }
+    }
+    for (const path of directorySet) {
+      let parent = parentPath(path);
+      while (parent) {
+        if (fileSet.has(parent)) {
+          throw invalidBundle(`Bundle file cannot contain another path: ${parent}`);
+        }
+        parent = parentPath(parent);
+      }
+    }
+  }
+  function parentPath(path) {
+    const index = path.lastIndexOf("/");
+    return index < 0 ? "" : path.slice(0, index);
+  }
+  function serializeWorkspaceBundle(bundle) {
+    return new TextEncoder().encode(JSON.stringify(parseWorkspaceBundle(bundle)));
+  }
+  function cloneBundle(bundle) {
+    return {
+      ...bundle,
+      ...bundle.metadata ? { metadata: { ...bundle.metadata } } : {},
+      directories: [...bundle.directories],
+      files: bundle.files.map((file) => ({ ...file }))
+    };
+  }
+  function parseJson(value) {
+    try {
+      return JSON.parse(new TextDecoder().decode(value));
+    } catch {
+      throw invalidBundle("Workspace bundle is not valid JSON");
+    }
+  }
+  function sanitizeMetadata(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw invalidBundle("Bundle metadata must be an object");
+    }
+    const result = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (typeof item !== "string") {
+        throw invalidBundle(`Bundle metadata value must be a string: ${key}`);
+      }
+      result[key] = item;
+    }
+    return result;
+  }
+  function base64ToBytes5(value, path) {
+    try {
+      const binary = atob(value);
+      const result = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) {
+        result[index] = binary.charCodeAt(index);
+      }
+      return result;
+    } catch {
+      throw invalidBundle(`Invalid base64 data: ${path}`);
+    }
+  }
+  function readOnly() {
+    return new AgentError("VFS_READ_ONLY", "Archive workspace is read-only");
+  }
+  function invalidBundle(message) {
+    throw new AgentError("VFS_BUNDLE_INVALID", message);
   }
 
   // src/virtual/shell.ts
@@ -3519,7 +4194,8 @@
           continue;
         }
         if (parsed.redirectIn) {
-          stdin = decode(await this.vfs.read(this.resolve(parsed.redirectIn), { signal }));
+          const redirectPath = this.resolve(parsed.redirectIn);
+          stdin = redirectPath === "dev/null" ? "" : decode(await this.vfs.read(redirectPath, { signal }));
         }
         let result;
         if (BUILTINS.has(parsed.args[0])) {
@@ -3550,12 +4226,14 @@
         exitCode = result.exitCode;
         if (parsed.redirectOut) {
           const redirectPath = this.resolve(parsed.redirectOut.path);
-          const previous = parsed.redirectOut.append ? decode(await this.vfs.read(redirectPath, { signal }).catch(() => new Uint8Array())) : "";
-          await this.vfs.write(
-            redirectPath,
-            encode(previous + result.stdout),
-            { signal }
-          );
+          if (redirectPath !== "dev/null") {
+            const previous = parsed.redirectOut.append ? decode(await this.vfs.read(redirectPath, { signal }).catch(() => new Uint8Array())) : "";
+            await this.vfs.write(
+              redirectPath,
+              encode(previous + result.stdout),
+              { signal }
+            );
+          }
           stdout = "";
         }
         stdin = result.stdout;
@@ -3572,10 +4250,25 @@
       });
       if (command === "true") return ok();
       if (command === "false") return fail("", 1);
+      if (command === "set") return ok();
       if (command === "pwd") return ok(`${this.cwd || "."}
 `);
       if (command === "echo") return ok(`${args.join(" ")}
 `);
+      if (command === "printf") return ok(decodeEscapes(args.join(" ")));
+      if (command === "uname") return ok("tinyai-virtual\n");
+      if (command === "which" || command === "command" && args[0] === "-v") {
+        const names = command === "which" ? args : args.slice(1);
+        const found = names.filter(
+          (name) => BUILTINS.has(name) || this.providers.some((provider) => provider.canExecute(name))
+        );
+        return {
+          exitCode: found.length === names.length ? 0 : 1,
+          stdout: found.map((name) => `${name}
+`).join(""),
+          stderr: ""
+        };
+      }
       if (command === "env") {
         return ok(
           Object.entries(env).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}=${value}`).join("\n") + "\n"
@@ -3602,6 +4295,9 @@
       if (command === "ls") {
         const recursive = args.includes("-R");
         const pathArg = args.find((item) => !item.startsWith("-")) ?? this.cwd;
+        const virtual = this.resolve(pathArg);
+        if (virtual === "dev") return ok("null\n");
+        if (virtual === "dev/null") return ok("null\n");
         const items = await this.vfs.list(pathArg, { recursive, signal });
         const prefix = normalizeVirtualPath(pathArg);
         return ok(
@@ -3615,9 +4311,20 @@
         if (!args.length) return ok(stdin);
         const output = [];
         for (const path of args) {
+          if (this.resolve(path) === "dev/null") continue;
           output.push(decode(await this.vfs.read(this.resolve(path), { signal })));
         }
         return ok(output.join(""));
+      }
+      if (command === "touch") {
+        for (const path of args) {
+          const resolved = this.resolve(path);
+          if (resolved === "dev/null") continue;
+          if (!await this.vfs.stat(resolved, signal)) {
+            await this.vfs.write(resolved, new Uint8Array(), { signal });
+          }
+        }
+        return ok();
       }
       if (command === "mkdir") {
         const recursive = args.includes("-p");
@@ -3631,6 +4338,12 @@
         for (const path of paths) await this.vfs.remove(this.resolve(path), { recursive });
         return ok();
       }
+      if (command === "rmdir") {
+        for (const path of args.filter((item) => !item.startsWith("-"))) {
+          await this.vfs.remove(this.resolve(path), { recursive: false });
+        }
+        return ok();
+      }
       if (command === "cp" || command === "mv") {
         if (args.length !== 2) return fail(`${command}: source and destination required`);
         const from = this.resolve(args[0]);
@@ -3641,8 +4354,13 @@
       }
       if (command === "grep" || command === "rg") {
         if (!args.length) return fail(`${command}: pattern required`);
-        const pattern = args[0];
-        const paths = args.slice(1);
+        let flagIndex = 0;
+        while (flagIndex < args.length && args[flagIndex].startsWith("-") && args[flagIndex] !== "-") {
+          flagIndex += 1;
+        }
+        const pattern = args[flagIndex];
+        if (!pattern) return fail(`${command}: pattern required`);
+        const paths = args.slice(flagIndex + 1);
         if (!paths.length && stdin) {
           const output2 = stdin.split("\n").map((line, index) => ({ line, index })).filter(({ line }) => line.includes(pattern)).map(({ line, index }) => `${index + 1}:${line}`);
           return {
@@ -3665,6 +4383,40 @@
         return { exitCode: output.length ? 0 : 1, stdout: output.length ? `${output.join("\n")}
 ` : "", stderr: "" };
       }
+      if (command === "head" || command === "tail") {
+        const optionIndex = args.findIndex((item) => item === "-n");
+        const count = optionIndex >= 0 && args[optionIndex + 1] ? Math.max(0, Number(args[optionIndex + 1])) : 10;
+        const paths = args.filter(
+          (item, index) => optionIndex >= 0 ? index !== optionIndex && index !== optionIndex + 1 : !item.startsWith("-")
+        );
+        const source = paths.length ? (await Promise.all(
+          paths.map(
+            async (path) => this.resolve(path) === "dev/null" ? "" : decode(await this.vfs.read(this.resolve(path), { signal }))
+          )
+        )).join("") : stdin;
+        const lines = source.split("\n");
+        if (lines.at(-1) === "") lines.pop();
+        const selected = command === "head" ? lines.slice(0, count) : lines.slice(-count);
+        return ok(selected.length ? `${selected.join("\n")}
+` : "");
+      }
+      if (command === "wc") {
+        const countLines = args.includes("-l");
+        const paths = args.filter((item) => !item.startsWith("-"));
+        const sources2 = paths.length ? await Promise.all(
+          paths.map(async (path) => ({
+            path,
+            text: this.resolve(path) === "dev/null" ? "" : decode(await this.vfs.read(this.resolve(path), { signal }))
+          }))
+        ) : [{ path: "", text: stdin }];
+        return ok(
+          sources2.map(({ path, text }) => {
+            const lines = text ? text.split("\n").length - (text.endsWith("\n") ? 1 : 0) : 0;
+            const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+            return `${countLines ? lines : `${lines} ${words} ${encode(text).byteLength}`}${path ? ` ${path}` : ""}`;
+          }).join("\n") + "\n"
+        );
+      }
       if (command === "find") {
         const path = this.resolve(args[0] ?? "");
         return ok(
@@ -3672,10 +4424,11 @@
         );
       }
       if (command === "diff") {
-        if (args.length !== 2) return fail("diff: two files required");
-        const before = await this.vfs.read(this.resolve(args[0]), { signal });
-        const after = await this.vfs.read(this.resolve(args[1]), { signal });
-        const result = unifiedDiff(before, after, `${args[0]} -> ${args[1]}`);
+        const paths = args.filter((item) => !item.startsWith("-"));
+        if (paths.length !== 2) return fail("diff: two files required");
+        const before = await this.vfs.read(this.resolve(paths[0]), { signal });
+        const after = await this.vfs.read(this.resolve(paths[1]), { signal });
+        const result = unifiedDiff(before, after, `${paths[0]} -> ${paths[1]}`);
         return {
           exitCode: result.patch ? 1 : 0,
           stdout: result.patch ?? (result.status === "binary" ? "Binary files differ\n" : ""),
@@ -3691,14 +4444,24 @@
             `patched ${result.files.length} file(s) (+${result.additions}/-${result.deletions})
 `
           );
-        } catch (error) {
+        } catch (error2) {
           return fail(
-            error instanceof Error ? `patch: ${error.message}` : "patch: failed"
+            error2 instanceof Error ? `patch: ${error2.message}` : "patch: failed"
           );
         }
       }
-      if (command === "test") {
-        return args[0] === "-e" && args[1] && await this.vfs.stat(this.resolve(args[1]), signal) ? ok() : fail("", 1);
+      if (command === "test" || command === "[") {
+        const values = args[0] === "[" ? args.slice(0, -1) : args;
+        if (values[0] && values[1]) {
+          const target = this.resolve(values[1]);
+          if (target === "dev/null" && ["-e", "-f"].includes(values[0])) return ok();
+          const info2 = await this.vfs.stat(target, signal);
+          if (values[0] === "-e" && info2) return ok();
+          if (values[0] === "-f" && info2?.kind === "file") return ok();
+          if (values[0] === "-d" && info2?.kind === "directory") return ok();
+          if (values[0] === "=" && values[1] === values[2]) return ok();
+        }
+        return fail("", 1);
       }
       return fail(`${command}: builtin not implemented`, 127);
     }
@@ -3710,23 +4473,34 @@
   var BUILTINS = /* @__PURE__ */ new Set([
     "true",
     "false",
+    "set",
     "pwd",
     "echo",
+    "printf",
+    "uname",
+    "which",
+    "command",
     "env",
     "export",
     "cd",
     "ls",
     "cat",
+    "touch",
     "mkdir",
     "rm",
+    "rmdir",
     "cp",
     "mv",
     "grep",
     "rg",
+    "head",
+    "tail",
+    "wc",
     "find",
     "diff",
     "patch",
-    "test"
+    "test",
+    "["
   ]);
   function parseCommand(tokens, env, lastExitCode) {
     const args = [];
@@ -3776,7 +4550,11 @@
         continue;
       }
       if (char === "\\" && quote !== "'") {
-        escaped = true;
+        if (quote === '"' && !["$", "`", '"', "\\", "\n"].includes(value[index + 1] ?? "")) {
+          current += "\\";
+        } else {
+          escaped = true;
+        }
         continue;
       }
       if (quote) {
@@ -3825,8 +4603,12 @@
         continue;
       }
       if (char === "\\" && quote !== "'") {
-        current += char;
-        escaped = true;
+        if (quote === '"' && !["$", "`", '"', "\\", "\n"].includes(value[index + 1] ?? "")) {
+          current += "\\";
+        } else {
+          current += char;
+          escaped = true;
+        }
         continue;
       }
       if (quote) {
@@ -3873,6 +4655,18 @@
   function truncate(value, max) {
     return value.length > max ? `${value.slice(0, max)}
 \u2026(truncated)` : value;
+  }
+  function decodeEscapes(value) {
+    return value.replace(
+      /\\(n|r|t|\\|x([0-9a-fA-F]{2}))/g,
+      (_match, token, hex) => {
+        if (token === "n") return "\n";
+        if (token === "r") return "\r";
+        if (token === "t") return "	";
+        if (token === "\\") return "\\";
+        return String.fromCharCode(Number.parseInt(hex, 16));
+      }
+    );
   }
   function assertSupportedSyntax(value) {
     let quote;
@@ -4031,11 +4825,11 @@
           signal: controller.signal
         });
         applyResult(job, result, this.now(), this.maxOutputChars);
-      } catch (error) {
-        const cancelled3 = controller.signal.aborted;
-        finish(job, cancelled3 ? "cancelled" : "failed", this.now(), {
-          exitCode: cancelled3 ? 130 : 1,
-          error: error instanceof Error ? error.message : String(error)
+      } catch (error2) {
+        const cancelled4 = controller.signal.aborted;
+        finish(job, cancelled4 ? "cancelled" : "failed", this.now(), {
+          exitCode: cancelled4 ? 130 : 1,
+          error: error2 instanceof Error ? error2.message : String(error2)
         });
       } finally {
         this.controllers.delete(item.id);
@@ -4362,12 +5156,12 @@
   }
   function assertHostCapabilities(host, required) {
     const report = inspectHostCapabilities(host);
-    const invalid2 = report.diagnostics.find(
+    const invalid3 = report.diagnostics.find(
       (diagnostic) => diagnostic.severity === "error"
     );
-    if (invalid2) {
-      throw new AgentError(invalid2.code, invalid2.message, {
-        details: { capability: invalid2.capability }
+    if (invalid3) {
+      throw new AgentError(invalid3.code, invalid3.message, {
+        details: { capability: invalid3.capability }
       });
     }
     const missing = required.filter(
@@ -5031,11 +5825,11 @@
             { ...context, event: "PreToolUse", input },
             signal
           );
-        } catch (error) {
+        } catch (error2) {
           return {
             decision: "deny",
             input,
-            reason: `PreToolUse hook ${registration.definition.name} failed: ${error instanceof Error ? error.message : String(error)}`
+            reason: `PreToolUse hook ${registration.definition.name} failed: ${error2 instanceof Error ? error2.message : String(error2)}`
           };
         }
         if (result.decision === "deny") {
@@ -5071,8 +5865,8 @@
             signal
           );
           if (outcome.decision === "context") record.contexts.push(outcome.content);
-        } catch (error) {
-          record.errors.push(toStructuredError(error, "HOOK_POST_FAILED"));
+        } catch (error2) {
+          record.errors.push(toStructuredError(error2, "HOOK_POST_FAILED"));
         }
         records.push(record);
       }
@@ -5164,9 +5958,9 @@
     let parsed;
     try {
       parsed = JSON.parse(source);
-    } catch (error) {
+    } catch (error2) {
       throw new AgentError("TOOL_ARGUMENTS_INVALID", "Tool arguments must be valid JSON", {
-        details: { cause: error instanceof Error ? error.message : String(error) }
+        details: { cause: error2 instanceof Error ? error2.message : String(error2) }
       });
     }
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -5325,13 +6119,13 @@
       if (!isTerminal2(task.status)) {
         this.controllers.get(taskId)?.abort();
         await this.options.driver.stop(taskId);
-        const cancelled3 = {
+        const cancelled4 = {
           status: "cancelled",
           summary: "Cancelled by parent",
           artifacts: [],
           unresolved: []
         };
-        this.finish(task, cancelled3);
+        this.finish(task, cancelled4);
       }
     }
     list(parentTaskId) {
@@ -5381,28 +6175,28 @@
         if (profile?.resultSchema) {
           try {
             validateJsonValue(profile.resultSchema, result.output ?? result.summary, "result");
-          } catch (error) {
-            const invalid2 = {
+          } catch (error2) {
+            const invalid3 = {
               ...result,
               status: "failed",
               summary: "Child result failed schema validation",
               unresolved: [
                 ...result.unresolved,
-                error instanceof Error ? error.message : String(error)
+                error2 instanceof Error ? error2.message : String(error2)
               ],
               error: {
                 code: "CHILD_RESULT_SCHEMA_INVALID",
-                message: error instanceof Error ? error.message : String(error),
+                message: error2 instanceof Error ? error2.message : String(error2),
                 retryable: false
               }
             };
-            this.finish(task, invalid2);
-            return completionCopy(invalid2);
+            this.finish(task, invalid3);
+            return completionCopy(invalid3);
           }
         }
         this.finish(task, result);
         return completionCopy(result);
-      }).catch((error) => {
+      }).catch((error2) => {
         const result = {
           status: controller.signal.aborted ? "cancelled" : "failed",
           summary: controller.signal.aborted ? "Cancelled" : "Child task failed",
@@ -5410,7 +6204,7 @@
           unresolved: [],
           error: {
             code: controller.signal.aborted ? "CHILD_CANCELLED" : "CHILD_FAILED",
-            message: error instanceof Error ? error.message : String(error),
+            message: error2 instanceof Error ? error2.message : String(error2),
             retryable: false
           }
         };
@@ -5518,13 +6312,13 @@
       this.spans.push(span);
       return { ...span, attributes: { ...span.attributes } };
     }
-    end(spanId, attributes = {}, error) {
+    end(spanId, attributes = {}, error2) {
       const span = this.spans.find((candidate) => candidate.spanId === spanId);
       if (!span) throw new Error(`Trace span not found: ${spanId}`);
       span.endedAt = this.now();
       span.durationMs = span.endedAt - span.startedAt;
       span.attributes = { ...span.attributes, ...attributes };
-      if (error) span.error = { ...error };
+      if (error2) span.error = { ...error2 };
       return structuredClone(span);
     }
     list() {
@@ -5720,10 +6514,10 @@
               continue;
             }
             return;
-          } catch (error) {
+          } catch (error2) {
             lastError = {
               code: request.signal.aborted ? "MODEL_ABORTED" : "MODEL_TARGET_FAILED",
-              message: error instanceof Error ? error.message : String(error),
+              message: error2 instanceof Error ? error2.message : String(error2),
               retryable: !request.signal.aborted,
               details: { targetId: target.id, attempt: attempt + 1 }
             };
@@ -6176,12 +6970,12 @@ ${skillListing}` : ""
           "RUNTIME_REQUEST_UNSUPPORTED",
           `Unsupported runtime request: ${request.type}`
         );
-      } catch (error) {
+      } catch (error2) {
         port.postMessage({
           type: "response",
           requestId,
           ok: false,
-          error: toStructuredError(error, "RUNTIME_REQUEST_FAILED")
+          error: toStructuredError(error2, "RUNTIME_REQUEST_FAILED")
         });
       }
     }
@@ -6229,9 +7023,9 @@ ${skillListing}` : ""
       port.postMessage(response);
     }
     async ensureRuntime() {
-      this.runtime ??= this.createBundle().catch((error) => {
+      this.runtime ??= this.createBundle().catch((error2) => {
         this.runtime = void 0;
-        throw error;
+        throw error2;
       });
       return this.runtime;
     }
@@ -6274,6 +7068,7 @@ ${skillListing}` : ""
     approval;
     options;
     tools;
+    repeatedFailures = /* @__PURE__ */ new Map();
     descriptors() {
       return [...this.tools.values()].map(({ name, description, parameters }) => ({
         name,
@@ -6302,8 +7097,8 @@ ${skillListing}` : ""
         input = parseToolArguments(invocation.call.arguments);
         validateToolInput(tool4.parameters, input);
         this.assertActive(invocation.signal);
-      } catch (error) {
-        return { ...base, status: "failed", error: toStructuredError(error, "TOOL_VALIDATION_FAILED") };
+      } catch (error2) {
+        return { ...base, status: "failed", error: toStructuredError(error2, "TOOL_VALIDATION_FAILED") };
       }
       let hookRequiresApproval = false;
       if (this.options.hooks) {
@@ -6331,13 +7126,33 @@ ${skillListing}` : ""
         input = hook.input;
         try {
           validateToolInput(tool4.parameters, input);
-        } catch (error) {
+        } catch (error2) {
           return {
             ...base,
             status: "failed",
-            error: toStructuredError(error, "TOOL_HOOK_INPUT_INVALID")
+            error: toStructuredError(error2, "TOOL_HOOK_INPUT_INVALID")
           };
         }
+      }
+      const failureKey = tool4.risk === "read" ? void 0 : this.failureKey(invocation, tool4.name, input);
+      const repeated = failureKey ? this.repeatedFailures.get(failureKey) : void 0;
+      if (failureKey && repeated && repeated.count >= 3) {
+        return {
+          ...base,
+          status: "failed",
+          error: new AgentError(
+            "TOOL_RETRY_BLOCKED",
+            `Blocked repeated ${tool4.name} call after ${repeated.count} identical failures. Re-read current state or change the request before retrying.`,
+            {
+              details: {
+                tool: tool4.name,
+                retryCount: repeated.count,
+                lastCode: repeated.lastCode,
+                suggestion: "Re-read the current file and submit a smaller or corrected operation"
+              }
+            }
+          ).toStructured()
+        };
       }
       let policyRequiresApproval = false;
       let actionDigest;
@@ -6383,8 +7198,8 @@ ${skillListing}` : ""
             },
             invocation.signal
           );
-        } catch (error) {
-          return { ...base, status: "failed", error: toStructuredError(error, "TOOL_APPROVAL_FAILED") };
+        } catch (error2) {
+          return { ...base, status: "failed", error: toStructuredError(error2, "TOOL_APPROVAL_FAILED") };
         }
         if (!approved) {
           return {
@@ -6401,16 +7216,40 @@ ${skillListing}` : ""
         const output = await this.artifactize(rawOutput, invocation);
         const result = { ...base, status: "succeeded", output };
         await this.runPostHooks(invocation, input, result);
+        if (failureKey) this.repeatedFailures.delete(failureKey);
         return result;
-      } catch (error) {
+      } catch (error2) {
+        const structured = toStructuredError(error2, "TOOL_EXECUTION_FAILED");
         const result = {
           ...base,
           status: "failed",
-          error: toStructuredError(error, "TOOL_EXECUTION_FAILED")
+          error: structured
         };
+        if (failureKey) {
+          this.recordFailure(failureKey, structured.code);
+        }
         await this.runPostHooks(invocation, input, result);
         return result;
       }
+    }
+    failureKey(invocation, toolName, input) {
+      return [
+        invocation.sessionId,
+        invocation.taskId,
+        toolName,
+        String(hashString(JSON.stringify(input)))
+      ].join(":");
+    }
+    recordFailure(key, code) {
+      const previous = this.repeatedFailures.get(key);
+      if (this.repeatedFailures.size >= 1e3 && !previous) {
+        const oldest = this.repeatedFailures.keys().next().value;
+        if (oldest) this.repeatedFailures.delete(oldest);
+      }
+      this.repeatedFailures.set(key, {
+        count: (previous?.count ?? 0) + 1,
+        lastCode: code
+      });
     }
     assertActive(signal) {
       if (signal.aborted) throw new AgentError("TASK_CANCELLED", "Task was cancelled");
@@ -6479,6 +7318,14 @@ ${skillListing}` : ""
       };
     }
   };
+  function hashString(value) {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+  }
   function toolResultText(result) {
     if (result.status === "succeeded") {
       if (result.output === void 0) return "(no output)";
@@ -6660,9 +7507,9 @@ ${skillListing}` : ""
           await request.onEvent?.({ type: "turn_end", taskId: request.taskId, turn });
         }
         throw new AgentError("AGENT_MAX_STEPS", `Agent exceeded ${this.maxSteps} turns`);
-      } catch (error) {
-        const status = isAbortError(error) || request.signal.aborted ? "cancelled" : "failed";
-        const structured = status === "cancelled" ? new AgentError("TASK_CANCELLED", "Task was cancelled").toStructured() : toStructuredError(error, "AGENT_LOOP_FAILED");
+      } catch (error2) {
+        const status = isAbortError(error2) || request.signal.aborted ? "cancelled" : "failed";
+        const structured = status === "cancelled" ? new AgentError("TASK_CANCELLED", "Task was cancelled").toStructured() : toStructuredError(error2, "AGENT_LOOP_FAILED");
         await request.onEvent?.({ type: "run_end", taskId: request.taskId, status });
         return { status, messages, error: structured };
       }
@@ -7326,9 +8173,9 @@ ${stringContent(item.content)}`
         this.transition("ready");
         this.snapshot.generation += 1;
         this.emit();
-      } catch (error) {
-        this.fault("ensureReady", error);
-        throw error;
+      } catch (error2) {
+        this.fault("ensureReady", error2);
+        throw error2;
       } finally {
         this.operation = void 0;
         this.clearOperation();
@@ -7340,9 +8187,9 @@ ${stringContent(item.content)}`
       try {
         await close();
         this.transition("unloaded");
-      } catch (error) {
-        this.fault("stop", error);
-        throw error;
+      } catch (error2) {
+        this.fault("stop", error2);
+        throw error2;
       } finally {
         this.operation = void 0;
         this.clearOperation();
@@ -7357,7 +8204,7 @@ ${stringContent(item.content)}`
       };
       this.emit();
     }
-    fault(operation, error) {
+    fault(operation, error2) {
       if (this.snapshot.state === "faulted") return;
       this.snapshot = {
         ...this.snapshot,
@@ -7365,7 +8212,7 @@ ${stringContent(item.content)}`
         revision: this.snapshot.revision + 1,
         lastError: {
           code: "SESSION_FAULTED",
-          message: error instanceof Error ? error.message : String(error),
+          message: error2 instanceof Error ? error2.message : String(error2),
           retryable: false,
           details: { operation, at: this.clock.now() }
         }
@@ -7502,7 +8349,7 @@ ${stringContent(item.content)}`
     }
     cancelTree(taskId, reason = "cancelled") {
       const task = this.required(taskId);
-      const cancelled3 = [];
+      const cancelled4 = [];
       const visit = (current) => {
         for (const childId of current.children) {
           const child = this.tasks.get(childId);
@@ -7513,11 +8360,11 @@ ${stringContent(item.content)}`
           current.revision += 1;
           current.updatedAt = this.now();
           current.checkpoint = { reason };
-          cancelled3.push(current.taskId);
+          cancelled4.push(current.taskId);
         }
       };
       visit(task);
-      return cancelled3;
+      return cancelled4;
     }
     list() {
       return [...this.tasks.values()].map(cloneTask);
@@ -7616,6 +8463,10 @@ ${stringContent(item.content)}`
     running = false;
     abort;
     persistTail = Promise.resolve();
+    persistRequested = false;
+    persistActive = false;
+    persistTimer;
+    persistedRevision = 0;
     persistenceError;
     overflowRetries = /* @__PURE__ */ new Set();
     toolSpans = /* @__PURE__ */ new Map();
@@ -7715,7 +8566,18 @@ ${stringContent(item.content)}`
       return this.events.list();
     }
     async flushPersistence() {
-      await this.persistTail;
+      if (!this.sessionStore) return;
+      const targetRevision = this.revision;
+      while (this.persistedRevision < targetRevision) {
+        this.cancelPersistTimer();
+        this.persistRequested = true;
+        this.enqueuePersistence();
+        const pending = this.persistTail;
+        await pending;
+        if (this.persistedRevision < targetRevision && !this.persistRequested) {
+          break;
+        }
+      }
       if (this.persistenceError) {
         throw new AgentError(
           this.persistenceError.code,
@@ -7791,10 +8653,10 @@ ${stringContent(item.content)}`
       this.touch("input.admitted");
       try {
         await this.flushPersistence();
-      } catch (error) {
+      } catch (error2) {
         this.ledger.fail(inputId, "persistence_failed");
         this.status = "failed";
-        this.lastError = toStructuredError(error, "PERSISTENCE_FAILED");
+        this.lastError = toStructuredError(error2, "PERSISTENCE_FAILED");
         const row = this.rows.find((candidate) => candidate.entityId === inputId);
         if (row) row.status = "failed";
         this.touch("persistence.failed");
@@ -7835,8 +8697,8 @@ ${stringContent(item.content)}`
       this.touch("input.steered");
       try {
         await this.flushPersistence();
-      } catch (error) {
-        this.lastError = toStructuredError(error, "PERSISTENCE_FAILED");
+      } catch (error2) {
+        this.lastError = toStructuredError(error2, "PERSISTENCE_FAILED");
         return this.ack(command, "failed", "PERSISTENCE_FAILED", this.lastError.message, inputId);
       }
       return this.ack(command, "accepted", void 0, void 0, inputId, this.activeTaskId);
@@ -7849,12 +8711,12 @@ ${stringContent(item.content)}`
       }
       try {
         this.permissionModes.get(this.sessionId).setMode(payload.mode);
-      } catch (error) {
+      } catch (error2) {
         return this.ack(
           command,
           "rejected",
-          error instanceof AgentError ? error.code : "PERMISSION_MODE_REJECTED",
-          error instanceof Error ? error.message : String(error)
+          error2 instanceof AgentError ? error2.code : "PERMISSION_MODE_REJECTED",
+          error2 instanceof Error ? error2.message : String(error2)
         );
       }
       this.touch("permission_mode.changed");
@@ -7864,12 +8726,12 @@ ${stringContent(item.content)}`
       const payload = command.payload;
       try {
         await this.permissionModes.get(this.sessionId).submitPlan(String(payload?.plan ?? ""));
-      } catch (error) {
+      } catch (error2) {
         return this.ack(
           command,
           "rejected",
-          error instanceof AgentError ? error.code : "PLAN_REJECTED",
-          error instanceof Error ? error.message : String(error)
+          error2 instanceof AgentError ? error2.code : "PLAN_REJECTED",
+          error2 instanceof Error ? error2.message : String(error2)
         );
       }
       this.touch("plan.submitted");
@@ -7878,12 +8740,12 @@ ${stringContent(item.content)}`
     approvePlan(command) {
       try {
         this.permissionModes.get(this.sessionId).approvePlan();
-      } catch (error) {
+      } catch (error2) {
         return this.ack(
           command,
           "rejected",
-          error instanceof AgentError ? error.code : "PLAN_APPROVAL_REJECTED",
-          error instanceof Error ? error.message : String(error)
+          error2 instanceof AgentError ? error2.code : "PLAN_APPROVAL_REJECTED",
+          error2 instanceof Error ? error2.message : String(error2)
         );
       }
       this.touch("plan.approved");
@@ -7920,12 +8782,12 @@ ${stringContent(item.content)}`
             if (event.type === "text_delta") summary += event.text;
             if (event.type === "error") throw new AgentError(event.error.code, event.error.message);
           }
-        } catch (error) {
+        } catch (error2) {
           return this.ack(
             command,
             "failed",
             "COMPACTION_SUMMARY_FAILED",
-            error instanceof Error ? error.message : String(error)
+            error2 instanceof Error ? error2.message : String(error2)
           );
         }
       }
@@ -7949,12 +8811,12 @@ ${stringContent(item.content)}`
           text: "Context compacted",
           status: "completed"
         });
-      } catch (error) {
+      } catch (error2) {
         return this.ack(
           command,
           "rejected",
-          error instanceof AgentError ? error.code : "COMPACTION_FAILED",
-          error instanceof Error ? error.message : String(error)
+          error2 instanceof AgentError ? error2.code : "COMPACTION_FAILED",
+          error2 instanceof Error ? error2.message : String(error2)
         );
       }
       this.touch("session.compacted");
@@ -7984,9 +8846,9 @@ ${stringContent(item.content)}`
       if (!summary.trim()) throw new AgentError("COMPACTION_SUMMARY_EMPTY", "Summary was empty");
       return summary;
     }
-    isContextOverflow(error) {
-      if (!error) return false;
-      return /context|token|length|too large|maximum/i.test(`${error.code} ${error.message}`);
+    isContextOverflow(error2) {
+      if (!error2) return false;
+      return /context|token|length|too large|maximum/i.test(`${error2.code} ${error2.message}`);
     }
     stop(command) {
       const idle = !this.running && this.queue.length === 0;
@@ -8064,10 +8926,10 @@ ${stringContent(item.content)}`
                 taskId: item.taskId,
                 view: this.view()
               });
-            } catch (error) {
+            } catch (error2) {
               decision = {
                 ok: false,
-                reason: error instanceof Error ? error.message : "Completion guard failed"
+                reason: error2 instanceof Error ? error2.message : "Completion guard failed"
               };
             }
             if (!decision.ok) {
@@ -8113,8 +8975,8 @@ ${stringContent(item.content)}`
             this.touch("queue.changed");
           }
         }
-      } catch (error) {
-        this.status = isAbortError(error) ? "cancelled" : "failed";
+      } catch (error2) {
+        this.status = isAbortError(error2) ? "cancelled" : "failed";
         this.activeTaskId = void 0;
         this.cancelQueued("runtime_failed");
         this.touch("runtime.failed");
@@ -8310,15 +9172,40 @@ ${stringContent(item.content)}`
     }
     schedulePersist() {
       if (!this.sessionStore) return;
+      this.persistRequested = true;
+      if (this.persistActive || this.persistTimer !== void 0) return;
+      this.persistTimer = this.options.clock.setTimeout(() => {
+        this.persistTimer = void 0;
+        this.enqueuePersistence();
+      }, 100);
+    }
+    enqueuePersistence() {
+      if (!this.sessionStore || !this.persistRequested || this.persistActive) {
+        return;
+      }
+      this.persistRequested = false;
+      this.persistActive = true;
       const snapshot = this.snapshot();
       this.persistTail = this.persistTail.then(async () => {
         try {
           await this.sessionStore.save(snapshot);
+          this.persistedRevision = Math.max(
+            this.persistedRevision,
+            snapshot.revision
+          );
           this.persistenceError = void 0;
-        } catch (error) {
-          this.persistenceError = toStructuredError(error, "PERSISTENCE_FAILED");
+        } catch (error2) {
+          this.persistenceError = toStructuredError(error2, "PERSISTENCE_FAILED");
+        } finally {
+          this.persistActive = false;
+          if (this.persistRequested) this.schedulePersist();
         }
       });
+    }
+    cancelPersistTimer() {
+      if (this.persistTimer === void 0) return;
+      this.options.clock.clearTimeout(this.persistTimer);
+      this.persistTimer = void 0;
     }
     snapshot() {
       return cloneSnapshot({
@@ -9378,7 +10265,7 @@ ${lines.join("\n")}
         if (report.errors.length > 0) {
           throw new AgentError(
             "BROWSER_SESSION_CLEANUP_FAILED",
-            report.errors.map((error) => `${error.code}: ${error.message}`).join("; "),
+            report.errors.map((error2) => `${error2.code}: ${error2.message}`).join("; "),
             { details: report.errors }
           );
         }
@@ -9712,7 +10599,7 @@ ${lines.join("\n")}
       const child = this.child(taskId);
       const prompt = this.prompts.get(taskId);
       if (!prompt) throw new Error(`Child prompt missing: ${taskId}`);
-      if (signal.aborted) return cancelled2();
+      if (signal.aborted) return cancelled3();
       const ack = await child.runtime.command(
         this.command(child, `child_command_${this.options.ids.next("sequence")}`, prompt)
       );
@@ -9853,7 +10740,7 @@ ${lines.join("\n")}
       ...ack.error ? { error: ack.error } : {}
     };
   }
-  function cancelled2() {
+  function cancelled3() {
     return {
       status: "cancelled",
       summary: "Cancelled",
@@ -10671,8 +11558,8 @@ ${lines.join("\n")}
         await client.initialize();
         mcpTools.push(...await client.definitions());
         mcpClients.push(client);
-      } catch (error) {
-        console.warn(`tinyai MCP server ${server.name} failed to initialize`, error);
+      } catch (error2) {
+        console.warn(`tinyai MCP server ${server.name} failed to initialize`, error2);
       }
     }
     const registry = createDefaultProfileRegistry(

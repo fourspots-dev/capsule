@@ -15,7 +15,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;borde
 code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{padding:16px;overflow:auto;border-radius:11px;background:#181820;color:#edecff;font:12px/1.6 var(--mono)}
 .rule{padding:12px 14px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#f5f3ff}.warn{border-color:var(--warn);background:#fff8e8}.danger{border-color:var(--danger);background:#fff1f0}
 .tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;background:#eef8f2;color:var(--ok)}.tag.unit{background:#f0efff;color:var(--accent)}.tag.risk{background:#fff6e5;color:var(--warn)}.tag.gap{background:#fff0ef;color:var(--danger)}
-@media(max-width:850px){.grid3{grid-template-columns:1fr}}@media(max-width:720px){.grid{grid-template-columns:1fr}.hero h1{font-size:28px}.wrap{padding:20px 12px 70px}section{padding:20px}}
+@media(max-width:850px){.grid3{grid-template-columns:1fr}}@media(max-width:720px){.grid{grid-template-columns:1fr}.hero h1{font-size:28px}.wrap{padding:20px 12px 70px}section{padding:20px}table{display:block;max-width:100%;overflow-x:auto}pre{max-width:100%}}
 </style>
 </head>
 <body>
@@ -26,7 +26,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <p>用功能验收、状态空间、真实仓库、故障注入、TUI E2E、Chrome E2E、安全边界、性能与长期运行共同判断生产可用性。iOS 不测试，因为不在交付范围；只验证未来 Headless Client 扩展基线。</p>
 <div class="chips"><span class="chip">当前：187 deterministic</span><span class="chip">5 Chrome E2E</span><span class="chip">55.86% statements</span><span class="chip">目标：可信完成</span></div>
 </header>
-<nav><a href="#strategy">策略</a><a href="#levels">层级</a><a href="#trace">追踪矩阵</a><a href="#tui">TUI</a><a href="#coding">Coding</a><a href="#workspace">Workspace</a><a href="#chrome">Chrome</a><a href="#ext">扩展基线</a><a href="#subagent">子Agent</a><a href="#ops">生产加固</a><a href="#state">状态与故障</a><a href="#ci">CI门禁</a></nav>
+<nav><a href="#strategy">策略</a><a href="#levels">层级</a><a href="#trace">追踪矩阵</a><a href="#tui">TUI</a><a href="#coding">Coding</a><a href="#patch">Patch协议</a><a href="#workspace">Workspace</a><a href="#chrome">Chrome</a><a href="#ext">扩展基线</a><a href="#subagent">子Agent</a><a href="#ops">生产加固</a><a href="#state">状态与故障</a><a href="#ci">CI门禁</a></nav>
 <section id="strategy">
 <h2>1. 测试策略</h2>
 <div class="grid">
@@ -52,7 +52,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <h2>3. 需求追踪矩阵</h2>
 <table><thead><tr><th>设计需求</th><th>核心测试</th><th>发布层级</th></tr></thead><tbody>
 <tr><td>FR-TUI-01..05</td><td>TUI-01..12</td><td>P1 必须</td></tr>
-<tr><td>FR-CODE-01..06</td><td>CODE-01..18</td><td>P2 必须</td></tr>
+<tr><td>FR-CODE-01..06</td><td>CODE-01..18、PATCH-01..20</td><td>P2 必须</td></tr>
 <tr><td>FR-WS-01..04</td><td>WS-01..14</td><td>P1/P3 必须</td></tr>
 <tr><td>FR-CHROME-01..03</td><td>CHR-01..10</td><td>P4 必须</td></tr>
 <tr><td>FR-EXT-01..03</td><td>EXT-01..06</td><td>生产扩展门禁</td></tr>
@@ -84,10 +84,10 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <tr><td>CODE-02</td><td>脏工作区开始任务</td><td>记录用户 Diff，后续不覆盖</td><td><span class="tag unit">Unit</span></td></tr>
 <tr><td>CODE-03</td><td>大仓库符号/文本搜索</td><td>相关文件命中，上下文不超预算</td><td><span class="tag">E2E</span></td></tr>
 <tr><td>CODE-04</td><td>大文件分页读取</td><td>行号稳定、哈希可验证</td><td><span class="tag unit">Unit</span></td></tr>
-<tr><td>CODE-05</td><td>唯一上下文 Patch</td><td>只修改目标位置</td><td><span class="tag unit">Unit</span></td></tr>
-<tr><td>CODE-06</td><td>Patch 冲突</td><td>拒绝修改并返回冲突证据</td><td><span class="tag risk">Integration</span></td></tr>
-<tr><td>CODE-07</td><td>文件在 Agent 编辑前被外部修改</td><td>检测哈希变化并重读/中止</td><td><span class="tag risk">Integration</span></td></tr>
-<tr><td>CODE-08</td><td>新增、删除、重命名文件</td><td>Diff 完整，忽略规则正确</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>CODE-05</td><td>ContextPatch 唯一匹配</td><td>模型不填写 hunk 行数，只修改目标位置</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>CODE-06</td><td>Patch 零匹配/多匹配</td><td>拒绝修改并返回候选与修正建议</td><td><span class="tag risk">Integration</span></td></tr>
+<tr><td>CODE-07</td><td>文件在 Agent 编辑前被外部修改</td><td>检测版本/哈希变化并重读或中止</td><td><span class="tag risk">Integration</span></td></tr>
+<tr><td>CODE-08</td><td>新增、删除、移动文件</td><td>事务完整，生成 diff 与状态正确</td><td><span class="tag unit">Unit</span></td></tr>
 <tr><td>CODE-09</td><td>最小相关测试选择</td><td>覆盖受影响模块且不过度运行</td><td><span class="tag">Benchmark</span></td></tr>
 <tr><td>CODE-10</td><td>首次测试失败</td><td>进入 Repair Loop，注入失败证据</td><td><span class="tag">Integration</span></td></tr>
 <tr><td>CODE-11</td><td>修复后通过</td><td>进入最终验证和审阅</td><td><span class="tag">E2E</span></td></tr>
@@ -99,6 +99,31 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <tr><td>CODE-17</td><td>默认不 commit</td><td>任务完成后工作区保持未提交</td><td><span class="tag">E2E</span></td></tr>
 <tr><td>CODE-18</td><td>任意大输出</td><td>Artifact 化，模型只接收摘要</td><td><span class="tag unit">Unit</span></td></tr>
 </tbody></table>
+<h3 id="patch">5.1 Patch Tool 协议与可靠性</h3>
+<div class="rule">测试对象是模型协议、Parser、上下文匹配、事务提交和结构化诊断的整体，不只测试一段 unified diff 字符串。</div>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>层级</th></tr></thead><tbody>
+<tr><td>PATCH-01</td><td>标准 Begin/Update/End Patch</td><td>正确修改文件，模型不需要填写行号或 hunk count</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PATCH-02</td><td>多个 Update File</td><td>一次事务应用全部文件，返回稳定顺序与统一 Diff</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PATCH-03</td><td>Add File</td><td>创建内容、mode 和父目录；目标存在时失败</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PATCH-04</td><td>Delete File</td><td>删除文件和必要空目录；策略拒绝时不产生副作用</td><td><span class="tag risk">Integration</span></td></tr>
+<tr><td>PATCH-05</td><td>Update + Move to</td><td>内容和路径同时更新，旧路径消失，历史引用可追踪</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PATCH-06</td><td>缺 Begin/End 或不匹配边界</td><td>返回 PATCH_PROTOCOL_INVALID，不猜测修复</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PATCH-07</td><td>旧统一 diff 输入 apply_patch</td><td>明确提示改用 apply_unified_diff，不产生部分写入</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PATCH-08</td><td>上下文唯一匹配</td><td>只修改一次，保持上下文外内容逐字不变</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PATCH-09</td><td>上下文零匹配</td><td>PATCH_CONTEXT_NOT_FOUND，返回文件版本和锚点</td><td><span class="tag risk">Integration</span></td></tr>
+<tr><td>PATCH-10</td><td>上下文多处匹配</td><td>PATCH_CONTEXT_AMBIGUOUS，返回候选行号并拒绝写入</td><td><span class="tag risk">Integration</span></td></tr>
+<tr><td>PATCH-11</td><td>CRLF 文件</td><td>行定位一致；保留或规范化策略明确且稳定</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PATCH-12</td><td>空行、尾随空格和 Unicode 上下文</td><td>逐字匹配规则稳定，不静默吞掉空 context</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>PATCH-13</td><td>expectedVersion 过期</td><td>PATCH_STALE_FILE，要求重新读取，不覆盖并发修改</td><td><span class="tag risk">Integration</span></td></tr>
+<tr><td>PATCH-14</td><td>expectedHash 过期</td><td>即使版本号相同也拒绝应用</td><td><span class="tag risk">Integration</span></td></tr>
+<tr><td>PATCH-15</td><td>多文件中第二个文件失败</td><td>第一个文件回滚，版本、内容和 mode 与执行前一致</td><td><span class="tag risk">Integration</span></td></tr>
+<tr><td>PATCH-16</td><td>路径穿越、symlink 逃逸、绝对路径</td><td>在任何读写前拒绝</td><td><span class="tag risk">Security</span></td></tr>
+<tr><td>PATCH-17</td><td>应用成功</td><td>工具生成的标准 unified diff 与前后文件真实差异一致</td><td><span class="tag golden">Golden</span></td></tr>
+<tr><td>PATCH-18</td><td>同一失败 Patch 重复提交</td><td>达到阈值后阻止重试并要求重读或重规划</td><td><span class="tag">Integration</span></td></tr>
+<tr><td>PATCH-19</td><td>Tool schema 与 Parser 一致性</td><td>工具名、描述、示例和实际接受的协议完全一致</td><td><span class="tag">Contract</span></td></tr>
+<tr><td>PATCH-20</td><td>真实模型 Patch Benchmark</td><td>Begin/Update/Add/Delete 成功率达标；hunk count 类失败为 0</td><td><span class="tag">Benchmark</span></td></tr>
+</tbody></table>
+<div class="warn rule">回归样本必须包含当前已观测到的失败：<code>*** End Patch</code> 混入 strict unified diff、hunk count 手算错误、空白 context 丢前缀、零匹配、多匹配和 stale file。修复后这些输入应根据新协议成功，或返回可纠正的结构化错误。</div>
 </section>
 <section id="workspace">
 <h2>6. Workspace 与 Sandbox</h2>
@@ -202,14 +227,14 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <section id="ci">
 <h2>12. CI 分层与发布门禁</h2>
 <table><thead><tr><th>阶段</th><th>内容</th><th>时限</th></tr></thead><tbody>
-<tr><td>PR Fast</td><td>typecheck、Core boundary、state short、unit、integration</td><td>&lt; 3 min</td></tr>
+<tr><td>PR Fast</td><td>typecheck、Core boundary、state short、unit、integration、Patch protocol contract</td><td>&lt; 3 min</td></tr>
 <tr><td>PR Browser</td><td>Chrome E2E 核心路径与竞态 trace</td><td>&lt; 15 min</td></tr>
 <tr><td>PR TUI</td><td>TUI smoke、输入、中断、恢复、Diff</td><td>&lt; 10 min</td></tr>
 <tr><td>Nightly</td><td>deep state、fault matrix、Benchmark 子集、4h soak</td><td>报告趋势</td></tr>
 <tr><td>Release</td><td>全语言 Benchmark、8h soak、migration、coverage、diagnostics</td><td>阻断发布</td></tr>
 </tbody></table>
 <h3>发布前必须全绿</h3>
-<ul><li>所有确定性测试、Core boundary、覆盖率阈值。</li><li>TUI 主流程和恢复 E2E。</li><li>Chrome 跨端与标签竞态 E2E。</li><li>macOS Sandbox 越界、网络、进程清理。</li><li>测试失败不得完成。</li><li>大 Diff、大日志和长时间任务资源稳定。</li><li>Session 与配置升级兼容。</li></ul>
+<ul><li>所有确定性测试、Core boundary、覆盖率阈值。</li><li>PATCH-01..20 全绿；模型默认编辑不使用手写 hunk count。</li><li>Patch 冲突、多文件回滚和无效重试门禁通过。</li><li>TUI 主流程和恢复 E2E。</li><li>Chrome 跨端与标签竞态 E2E。</li><li>macOS Sandbox 越界、网络、进程清理。</li><li>测试失败不得完成。</li><li>大 Diff、大日志和长时间任务资源稳定。</li><li>Session 与配置升级兼容。</li></ul>
 <div class="rule">正式生产标准不是“能回答代码问题”，而是能可靠修改真实仓库、证明结果、在中断后恢复，并让用户安全审阅。</div>
 </section>
 </div>

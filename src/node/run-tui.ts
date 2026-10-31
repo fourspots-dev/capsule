@@ -1,5 +1,8 @@
 import type { TuiApp } from '../tui/app';
 import type { NodeTerminal } from './node-host';
+import { RenderScheduler } from './render-scheduler';
+import { TerminalCursorController } from './terminal-cursor';
+import { buildFrameUpdate } from './terminal-renderer';
 
 export interface RunNodeTuiOptions {
   refreshIntervalMs?: number;
@@ -11,13 +14,42 @@ export async function runNodeTui(
   options: RunNodeTuiOptions = {}
 ): Promise<void> {
   terminal.start();
+  const cursor = new TerminalCursorController(terminal);
   let pending: Promise<void> = Promise.resolve();
   let disposed = false;
+  let previousFrame: string[] = [];
+  let previousSize = '';
+  let previousCursor = '';
   const render = () => {
     const size = terminal.size();
-    const lines = app.render(size.columns, size.rows);
-    terminal.write(`\x1b[H\x1b[2J${lines.join('\n')}`);
+    const frame = app.renderFrame(size.columns, size.rows);
+    const cacheKey = `${size.columns}x${size.rows}`;
+    const update = buildFrameUpdate(
+      previousFrame,
+      frame.lines,
+      previousSize !== cacheKey
+    );
+    const cursorKey = JSON.stringify(frame.cursor);
+    if (update || cursorKey !== previousCursor) {
+      cursor.hide();
+      if (update) terminal.write(update);
+      cursor.place(frame.cursor);
+    }
+    previousFrame = frame.lines;
+    previousSize = cacheKey;
+    previousCursor = cursorKey;
   };
+  const renderSafely = () => {
+    try {
+      render();
+    } catch (error) {
+      cursor.hide(true);
+      terminal.write(
+        `\x1b[H\x1b[2J${formatFatal(error, terminal.size().columns)}`
+      );
+    }
+  };
+  const scheduler = new RenderScheduler(renderSafely);
   const stop = () => {
     if (disposed) return;
     disposed = true;
@@ -27,6 +59,8 @@ export async function runNodeTui(
     removeRender();
     process.off('SIGINT', stop);
     process.off('SIGTERM', stop);
+    scheduler.dispose();
+    cursor.dispose();
     terminal.stop();
   };
   const removeInput = terminal.onInput((data) => {
@@ -37,20 +71,24 @@ export async function runNodeTui(
           stop();
           return;
         }
-        render();
+        scheduler.schedule();
       })
       .catch((error) => {
+        cursor.hide(true);
         terminal.write(
           `\x1b[H\x1b[2J${formatFatal(error, terminal.size().columns)}`
         );
       });
   });
-  const removeResize = terminal.onResize(render);
-  const removeRender = app.onRender(render);
-  const timer = setInterval(render, options.refreshIntervalMs ?? 1_000);
+  const removeResize = terminal.onResize(() => scheduler.schedule());
+  const removeRender = app.onRender(() => scheduler.schedule());
+  const timer = setInterval(
+    () => scheduler.schedule(),
+    options.refreshIntervalMs ?? 250
+  );
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
-  render();
+  scheduler.flush();
   while (!disposed) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }

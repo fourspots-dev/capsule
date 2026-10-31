@@ -18,6 +18,7 @@ export type TuiRoute =
 export type TuiFocus = 'composer' | 'transcript' | 'overlay';
 export type TuiConnectionState = 'online' | 'reconnecting' | 'offline';
 export type AgentFilter = 'all' | 'active' | 'attention' | 'done';
+export type ReasoningMode = 'hidden' | 'preview' | 'full';
 
 export interface RuntimeSessionSummary {
   sessionId: string;

@@ -16,7 +16,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 .rule{padding:12px 14px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#f5f3ff}.warn{border-color:var(--warn);background:#fff8e8}.danger{border-color:var(--danger);background:#fff1f0}
 .phase{display:flex;align-items:center;gap:11px;margin-bottom:13px}.phase-no{display:grid;place-items:center;width:42px;height:42px;border-radius:12px;background:#efedff;color:var(--accent);font-weight:750}.phase h2{margin:0;font-size:22px}.phase p{margin:2px 0 0;color:var(--muted);font-size:12px}
 .req{display:inline-block;padding:1px 7px;border-radius:6px;background:#f0efff;color:var(--accent);font-size:11px;font-family:var(--mono)}
-@media(max-width:850px){.grid3{grid-template-columns:1fr}}@media(max-width:720px){.grid{grid-template-columns:1fr}.hero h1{font-size:28px}.wrap{padding:20px 12px 70px}section{padding:20px}}
+@media(max-width:850px){.grid3{grid-template-columns:1fr}}@media(max-width:720px){.grid{grid-template-columns:1fr}.hero h1{font-size:28px}.wrap{padding:20px 12px 70px}section{padding:20px}table{display:block;max-width:100%;overflow-x:auto}pre{max-width:100%}}
 </style>
 </head>
 <body>
@@ -27,7 +27,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <p>面向 macOS TUI 与 Chrome，支持通用语言和仓库。核心目标是让 Agent 能可靠地理解代码、修改代码、验证结果、恢复中断、审阅变更，并为未来客户端保留稳定扩展面；不实现 iOS 客户端。</p>
 <div class="chips"><span class="chip">macOS TUI</span><span class="chip">Chrome</span><span class="chip">通用仓库</span><span class="chip">可恢复执行</span><span class="chip">测试闭环</span><span class="chip">未来扩展</span></div>
 </header>
-<nav><a href="#scope">范围</a><a href="#quality">质量目标</a><a href="#arch">架构</a><a href="#states">状态机</a><a href="#flows">核心流程</a><a href="#p1">P1 TUI</a><a href="#p2">P2 Coding</a><a href="#p3">P3 Workspace</a><a href="#p4">P4 Chrome</a><a href="#p5">P5 扩展基线</a><a href="#p6">P6 子Agent</a><a href="#p7">P7 生产加固</a><a href="#data">数据</a><a href="#risks">风险</a></nav>
+<nav><a href="#scope">范围</a><a href="#quality">质量目标</a><a href="#arch">架构</a><a href="#states">状态机</a><a href="#flows">核心流程</a><a href="#p1">P1 TUI</a><a href="#p2">P2 Coding</a><a href="#patch-tool">Patch协议</a><a href="#p3">P3 Workspace</a><a href="#p4">P4 Chrome</a><a href="#p5">P5 扩展基线</a><a href="#p6">P6 子Agent</a><a href="#p7">P7 生产加固</a><a href="#data">数据</a><a href="#risks">风险</a></nav>
 <section id="scope">
 <h2>1. 产品范围</h2>
 <div class="grid3">
@@ -38,7 +38,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <h3>当前基线</h3>
 <table><thead><tr><th>能力</th><th>已有</th><th>仍需补齐</th></tr></thead><tbody>
 <tr><td>Agent Core</td><td>SessionRuntime、AgentLoop、队列、Projection、Policy、Verifier、SubagentCoordinator</td><td>完成协议、可靠恢复、上下文预算、质量闭环</td></tr>
-<tr><td>代码执行</td><td>macOS Seatbelt、Docker、文件/Exec/PTY</td><td>Patch、Search、Git、测试发现、长任务恢复</td></tr>
+<tr><td>代码执行</td><td>macOS Seatbelt、Docker、文件/Search/Patch/Exec/PTY</td><td>稳定 Git 适配、测试发现、长任务恢复</td></tr>
 <tr><td>前端</td><td>Chrome Side Panel、批处理 CLI</td><td>生产 macOS TUI</td></tr>
 <tr><td>扩展性</td><td>Browser Adapter 已剥离、Platform 端口已出现</td><td>端无关 Runtime 访问和审阅数据</td></tr>
 </tbody></table>
@@ -138,11 +138,76 @@ Platform Adapters
 <div class="grid">
 <div class="card"><h3><span class="req">FR-CODE-01</span> 通用项目理解</h3><ul><li>识别多语言源码、构建系统、测试入口和项目约定。</li><li>读取 Git 分支、脏状态和忽略规则。</li><li>自动生成项目摘要和修改范围。</li></ul><p>验收：对 Node、Python、Go、Rust、Java 等代表性仓库能发现正确验证入口。</p></div>
 <div class="card"><h3><span class="req">FR-CODE-02</span> 搜索与文件读取</h3><ul><li>文本搜索、文件匹配、行范围读取。</li><li>大文件分页和二进制识别。</li><li>读取结果标注路径、行号和哈希。</li></ul><p>验收：无需一次性加载整个大文件即可定位和修改目标。</p></div>
-<div class="card"><h3><span class="req">FR-CODE-03</span> 精确编辑</h3><ul><li>Patch/Edit 基于唯一上下文和文件版本。</li><li>冲突停止，不覆盖用户并发修改。</li><li>原子写入与编辑后语法检查。</li></ul><p>验收：多文件和并行修改中不发生静默覆盖。</p></div>
+<div class="card"><h3><span class="req">FR-CODE-03</span> 精确编辑</h3><ul><li>模型使用上下文 Patch DSL，不手算 unified diff 行号。</li><li>Patch 基于唯一上下文、文件版本或哈希，冲突时停止。</li><li>多文件事务原子应用，失败全量回滚。</li></ul><p>验收：Agent 可稳定完成多行、多文件编辑；格式错误不会形成重试风暴，也不会静默覆盖用户修改。</p></div>
 <div class="card"><h3><span class="req">FR-CODE-04</span> 测试发现与修复循环</h3><ul><li>根据改动选择最小相关测试。</li><li>失败结果形成结构化证据。</li><li>自动进入至少一轮基于证据的修复。</li></ul><p>验收：测试失败时不能标记完成。</p></div>
 <div class="card"><h3><span class="req">FR-CODE-05</span> Git 与变更审阅</h3><ul><li>Git status/diff 只读能力。</li><li>最终 Diff、未跟踪文件和风险摘要。</li><li>默认无自动 commit/push。</li></ul><p>验收：用户可以看到完整改动范围并决定后续操作。</p></div>
 <div class="card"><h3><span class="req">FR-CODE-06</span> 上下文预算</h3><ul><li>根据模型窗口管理对话和文件上下文。</li><li>主动压缩、按需重读和文件记忆。</li><li>任务目标与验证证据不因压缩丢失。</li></ul><p>验收：长任务跨上下文压缩后仍保持目标和决策。</p></div>
 </div>
+<h3 id="patch-tool">5.1 模型编辑协议与 Patch Tool</h3>
+<div class="rule">Git unified diff 是机器交换格式，不应成为模型的主要编辑输入。模型只表达“改哪里、旧内容是什么、新内容是什么”，Patch Engine 负责定位、校验、事务应用，并生成标准 unified diff 供审阅和外部工具使用。</div>
+<h4>模型协议</h4>
+<pre>*** Begin Patch
+*** Update File: src/math.ts
+@@ export function add(
+-  return a - b;
++  return a + b;
+
+*** Add File: test/math.test.ts
++import { add } from '../src/math';
++
++assert.equal(add(1, 2), 3);
+
+*** Delete File: obsolete.ts
+
+*** Update File: src/old-name.ts
+*** Move to: src/new-name.ts
+*** End Patch</pre>
+<table><thead><tr><th>元素</th><th>语义</th><th>约束</th></tr></thead><tbody>
+<tr><td><code>*** Begin Patch</code> / <code>*** End Patch</code></td><td>协议边界</td><td>必须完整；外壳由 Parser 接受，不进入文件内容</td></tr>
+<tr><td><code>*** Update File</code></td><td>修改现有文件</td><td>路径必须已存在且位于 Workspace 内</td></tr>
+<tr><td><code>*** Add File</code></td><td>创建文件</td><td>目标默认不存在；冲突时失败</td></tr>
+<tr><td><code>*** Delete File</code></td><td>删除文件</td><td>必须经过策略和审批</td></tr>
+<tr><td><code>*** Move to</code></td><td>移动或重命名</td><td>源和目标必须安全，目标不得被静默覆盖</td></tr>
+<tr><td><code>@@ anchor</code></td><td>每个 Update hunk 的起始行，anchor 文本可选</td><td>仅用于定位，不包含 old/new 行数</td></tr>
+<tr><td><code> </code> / <code>-</code> / <code>+</code></td><td>上下文、删除、新增</td><td>模型不得输出行号和 hunk count</td></tr>
+</tbody></table>
+<h4>应用语义</h4>
+<ol><li><b>读取版本：</b>模型编辑前通过 FileReadResult 获取 revision 或内容哈希。</li><li><b>解析协议：</b>严格解析 Begin/End、文件操作和 hunk，不接受未声明的混合格式。</li><li><b>定位上下文：</b>先用锚点和 context/remove 行精确匹配；归一化仅限 CRLF，默认不做忽略空白或模糊匹配。</li><li><b>唯一性：</b>匹配必须恰好一次；零次返回 CONTEXT_NOT_FOUND，多次返回 CONTEXT_AMBIGUOUS。</li><li><b>版本检查：</b>文件 revision/hash 已变化时返回 STALE_FILE，要求重新读取，不覆盖外部编辑。</li><li><b>事务：</b>所有文件先在内存计算新内容；任一失败则不写入任何文件。</li><li><b>提交：</b>按确定性路径顺序原子写入；失败时恢复原文件、mode 和版本。</li><li><b>生成证据：</b>成功后用内部 DiffEngine 生成标准 unified diff、增删统计和受影响文件列表。</li></ol>
+<pre>interface ContextPatch {
+  operations: Array<
+    | { kind: 'update'; path: string; moveTo?: string; hunks: ContextHunk[] }
+    | { kind: 'add'; path: string; lines: string[]; mode?: number }
+    | { kind: 'delete'; path: string }
+  >;
+  expectedVersions?: Record&lt;string, number&gt;;
+  expectedHashes?: Record&lt;string, string&gt;;
+}
+
+interface PatchResult {
+  files: Array&lt;{ path: string; status: 'added'|'modified'|'deleted'|'moved'; beforeVersion: number; afterVersion: number }&gt;;
+  unifiedDiff: string;
+  additions: number;
+  deletions: number;
+}</pre>
+<h4>工具边界</h4>
+<table><thead><tr><th>Tool</th><th>输入</th><th>用途</th></tr></thead><tbody>
+<tr><td><code>replace_in_file</code></td><td>path、exact old text、new text、expected hash</td><td>单处小修改，要求唯一匹配</td></tr>
+<tr><td><code>apply_patch</code></td><td>ContextPatch DSL</td><td>模型默认的多行、多文件编辑入口</td></tr>
+<tr><td><code>apply_unified_diff</code></td><td>标准 Git unified diff</td><td>外部补丁、测试 fixture、高级兼容入口</td></tr>
+</tbody></table>
+<div class="warn rule">不能再把“名称为 apply_patch、实际只接受 strict unified diff”的接口暴露给模型。工具名称、schema、描述和实际 Parser 必须遵循同一协议。</div>
+<h4>结构化错误</h4>
+<pre>{
+  code: 'PATCH_CONTEXT_AMBIGUOUS',
+  operation: 1,
+  path: 'src/math.ts',
+  anchor: 'export function add(',
+  expectedVersion: 17,
+  actualVersion: 18,
+  candidates: [42, 118],
+  suggestion: 'Read the file again and submit a smaller context block'
+}</pre>
+<ul><li>错误必须包含 operation 索引、路径、锚点、匹配次数、版本和可执行修正建议。</li><li>解析失败、冲突和权限拒绝必须区分错误码，不能统一返回“Patch failed”。</li><li>相同 Patch 原样连续失败达到阈值时，ToolExecutor 阻止重试并进入重规划。</li><li>每次 Patch 记录协议版本、文件版本、匹配方式、事务结果、耗时和生成的 diff 引用。</li></ul>
 </section>
 <section id="p3">
 <div class="phase"><div class="phase-no">P3</div><div><h2>Workspace、Sandbox 与恢复</h2><p>可靠执行基础</p></div></div>
@@ -203,6 +268,7 @@ Platform Adapters
 <tr><td>Agent 自认为完成但测试未过</td><td>Verification Gate；失败进入 Repair Loop</td></tr>
 <tr><td>TUI 崩溃导致任务丢失</td><td>Session/Workspace 持久化与后台任务</td></tr>
 <tr><td>Patch 覆盖用户修改</td><td>文件哈希、原子 Patch、冲突停止</td></tr>
+<tr><td><code>apply_patch</code> 协议与模型行为不一致</td><td>ContextPatch DSL、工具生成 unified diff、结构化错误和重复失败熔断</td></tr>
 <tr><td>长命令无法停止</td><td>进程树取消、超时、PTY 清理</td></tr>
 <tr><td>大仓库上下文溢出</td><td>搜索优先、分页读取、主动压缩</td></tr>
 <tr><td>并行子 Agent 互相污染</td><td>独立 Worktree、文件所有权、显式合并</td></tr>

@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tinyai 富终端 TUI 测试方案 V1</title>
+<style>
+:root{--bg:#f4f5f7;--paper:#fff;--text:#191a1e;--muted:#6f7179;--line:#e2e3e8;--accent:#5145d8;--accent-soft:#efedff;--ok:#137a4b;--warn:#986100;--danger:#b42318;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.72 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1220px;margin:auto;padding:36px 24px 100px}
+.hero{padding:40px;border-radius:27px;background:radial-gradient(circle at 88% 8%,#7dcfff 0,transparent 24%),linear-gradient(135deg,#10131b,#243359 58%,#3e4d99);color:#fff}.hero small{letter-spacing:.12em;opacity:.72}.hero h1{font-size:38px;line-height:1.18;margin:12px 0}.hero p{max-width:940px;margin:0;color:#e8edff}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}
+nav{position:sticky;top:0;z-index:5;display:flex;gap:14px;overflow:auto;margin:18px 0;padding:10px 14px;border:1px solid var(--line);border-radius:13px;background:#f4f5f7ed;backdrop-filter:blur(12px)}nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}
+section{margin:18px 0;padding:26px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:23px;margin:0 0 14px}h3{font-size:16px;margin:22px 0 8px}h4{font-size:14px;margin:18px 0 6px}p{color:#45464c}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafafa}.card h3,.card h4{margin:0 0 8px}.card p{margin:0}.card ul{margin:8px 0 0;padding-left:18px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafafa;color:var(--muted)}
+code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{padding:17px;overflow:auto;border-radius:12px;background:#11131a;color:#e6e8ef;font:12px/1.62 var(--mono);border:1px solid #282c3a}
+.rule{padding:13px 15px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#f5f3ff}.warn{border-color:var(--warn);background:#fff8e8}.danger{border-color:var(--danger);background:#fff1f0}
+.tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;background:#eef8f2;color:var(--ok);white-space:nowrap}.tag.unit{background:#f0efff;color:var(--accent)}.tag.risk{background:#fff6e5;color:var(--warn)}.tag.golden{background:#eaf5ff;color:#17628d}
+.pill{display:inline-block;padding:1px 8px;border-radius:999px;background:#eef8f2;color:var(--ok);font-size:11px;white-space:nowrap}
+.foot{color:var(--muted);font-size:12px}
+@media(max-width:850px){.grid3{grid-template-columns:1fr}}@media(max-width:700px){.grid{grid-template-columns:1fr}.hero h1{font-size:28px}.wrap{padding:20px 12px 70px}section{padding:20px}table{display:block;max-width:100%;overflow-x:auto}pre{max-width:100%}}
+@media print{nav{display:none}body{background:#fff}.hero{border-radius:0}.wrap{max-width:none;padding:0}section{break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+<small>TINYAI / RICH TERMINAL UI / TEST DESIGN V1</small>
+<h1>富终端 TUI<br>详细测试方案</h1>
+<p>用纯模型测试、ScreenBuffer Golden、真实 PTY、Provider reasoning 流、状态空间、性能和安全测试证明：多色彩、Panel、格式化内容与 Reasoning 展示不仅“看起来有”，而且在尺寸、主题、焦点、异常和流式更新下持续正确。</p>
+<div class="chips"><span class="chip">ANSI Grid Golden</span><span class="chip">Real PTY</span><span class="chip">Reasoning Truth</span><span class="chip">Panel State Space</span><span class="chip">NO_COLOR</span><span class="chip">Frame Diff</span></div>
+</header>
+<nav><a href="#strategy">策略</a><a href="#trace">追踪</a><a href="#layers">层级</a><a href="#harness">Harness</a><a href="#theme">Theme</a><a href="#blocks">Blocks</a><a href="#panels">Panels</a><a href="#hierarchy">层级/光标</a><a href="#format">Format</a><a href="#reasoning">Reasoning</a><a href="#pty">PTY</a><a href="#golden">Golden</a><a href="#state">状态空间</a><a href="#performance">性能</a><a href="#fault">故障</a><a href="#ci">CI</a></nav>
+
+<section id="strategy">
+<h2>1. 测试策略</h2>
+<div class="grid">
+<div class="card"><h3>核心问题</h3><ul><li>样式语义和颜色降级是否稳定。</li><li>Panel 布局、焦点、滚动和空间预算是否可组合。</li><li>Markdown/代码/Diff 在异常输入下是否安全。</li><li>Reasoning 是否只展示 Provider 可见内容，并与 Waiting 区分。</li><li>流式更新是否局部刷新、无闪烁且输入不阻塞。</li><li>真实 PTY 下鼠标码、控制序列、resize 和 IME 是否正确。</li></ul></div>
+<div class="card"><h3>测试原则</h3><ul><li>不把截图或人工目测当作唯一证据。</li><li>先断言 ScreenBuffer，再断言 ANSI 网格和真实 PTY。</li><li>Theme、Layout、Panel、Reasoning 使用纯函数/模型测试。</li><li>PTY E2E 不 mock Keymap、Composer、焦点或 Projection 对账。</li><li>Reasoning 测试必须区分 Provider-visible reasoning 与本地 Waiting。</li><li>每种视觉结论都要有可在 CI 复现的 fixture。</li></ul></div>
+</div>
+<div class="rule">分层顺序：Unit → ViewModel/Block → ScreenBuffer/Golden → Runtime Integration → Real PTY → State Space → Performance/Fault → Release。</div>
+</section>
+
+<section id="trace">
+<h2>2. 需求追踪矩阵</h2>
+<table><thead><tr><th>设计需求</th><th>主测试</th><th>必须层级</th><th>证据</th></tr></thead><tbody>
+<tr><td><code>RICH-R01</code> 多色彩主题</td><td>THM-01..12、PTY-RICH-01..07</td><td>Unit + Golden + PTY</td><td>truecolor/256/16/none 的 span 和网格一致。</td></tr>
+<tr><td><code>RICH-R02</code> Panel 系统</td><td>PNL-01..18、STA-R01</td><td>Unit + State Space + PTY</td><td>Panel Rect、焦点、裁剪、折叠和返回。</td></tr>
+<tr><td><code>RICH-R03</code> 格式化内容</td><td>FMT-01..18、GLD-01..12</td><td>Unit + Golden</td><td>Markdown、代码、命令、Diff 和异常降级。</td></tr>
+<tr><td><code>RICH-R04</code> Reasoning 展示</td><td>RSN-01..20、PTY-RICH-10..17</td><td>Integration + PTY</td><td>Waiting/streaming/complete/failed 的真实性。</td></tr>
+<tr><td><code>RICH-R05</code> 基础操作简单</td><td>PTY-RICH-18..22</td><td>PTY</td><td>输入、发送、停止在 Panel 状态下仍一致。</td></tr>
+<tr><td><code>RICH-R06</code> 紧凑空间</td><td>PNL-10..18、GLD-06..12</td><td>Golden + PTY</td><td>80×24、60×20 无永久侧栏，输入不丢。</td></tr>
+<tr><td><code>RICH-R07</code> 焦点与滚动</td><td>PNL-05..14、STA-R02</td><td>Unit + State + PTY</td><td>任意状态只有一个焦点。</td></tr>
+<tr><td><code>RICH-R08</code> 终端安全</td><td>FMT-13..18、FAULT-01..06</td><td>Security + PTY</td><td>无 ANSI/OSC 注入、无 Panel 越界。</td></tr>
+<tr><td><code>RICH-R09</code> 增量渲染</td><td>PERF-01..10</td><td>Performance</td><td>不全屏 clear，按键延迟和脏区受控。</td></tr>
+<tr><td><code>RICH-R10</code> 扩展预算</td><td>PNL-15..18</td><td>Unit + PTY</td><td>扩展不能永久占屏或抢焦点。</td></tr>
+<tr><td><code>RICH-R11</code> 可访问降级</td><td>THM-08..12、PTY-RICH-23..26</td><td>PTY + Golden</td><td>NO_COLOR、reduced motion、Unicode、resize。</td></tr>
+<tr><td><code>RICH-R12</code> 多会话与 Agent Board</td><td>PTY-RICH-31..37、STA-R03</td><td>Integration + PTY</td><td>Session 隔离、后台继续、通用 Profile、进入/返回和合并预览。</td></tr>
+<tr><td><code>RICH-R13</code> 焦点光标</td><td>CUR-01..12、PTY-RICH-38..43、GLD-13..14</td><td>Unit + PTY + Golden</td><td>原生闪烁块、提示符后空格、绝对行列、IME、会话/overlay 恢复。</td></tr>
+<tr><td><code>RICH-R14</code> 对话层级</td><td>HIER-01..14、GLD-15..18</td><td>Unit + Golden + PTY</td><td>gutter、缩进、留白、Result 优先级和窄屏降级。</td></tr>
+</tbody></table>
+</section>
+
+<section id="layers">
+<h2>3. 测试层级与覆盖</h2>
+<table><thead><tr><th>层级</th><th>范围</th><th>不做什么</th></tr></thead><tbody>
+<tr><td>Pure Unit</td><td>Theme token、StyledSpan、Unicode width、BlockBuilder、Markdown parser、Diff highlighter、Panel Rect、TranscriptLayout、CursorTarget。</td><td>不启动终端。</td></tr>
+<tr><td>Render Model</td><td>Projection → ViewModel → gutter/indent → ScreenBuffer → CursorTarget。</td><td>不比较真实终端光标行为。</td></tr>
+<tr><td>ANSI Golden</td><td>ScreenBuffer → AnsiComposer → rows×columns 网格。</td><td>不依赖人工截图。</td></tr>
+<tr><td>Runtime Integration</td><td>Projection reasoning/tool/diff 变化 → ViewModel → RenderScheduler。</td><td>不 mock Reasoning 真实性。</td></tr>
+<tr><td>Real PTY</td><td>raw mode、快捷键、原生光标、IME、焦点、resize、流式刷新、退出恢复。</td><td>不替换 Composer、Keymap、CursorController 和 PanelManager。</td></tr>
+<tr><td>State Space</td><td>Width × Theme × Focus × Panel × Reasoning × Task × Cursor。</td><td>不枚举无限日志内容。</td></tr>
+<tr><td>Performance/Fault</td><td>高频流、长历史、大 Diff、终端能力变化、Provider 中断。</td><td>不以截图为证据。</td></tr>
+</tbody></table>
+</section>
+
+<section id="harness">
+<h2>4. 测试 Harness</h2>
+<div class="grid">
+<div class="card"><h3>Pure Render Harness</h3><p>直接构造 ViewModel，输出 ScreenBuffer 和 ANSI；时钟、Session ID、Artifact 和 Theme 可固定。</p></div>
+<div class="card"><h3>PTY Harness</h3><p>通过真实 PTY 启动 TUI，注入按键、粘贴和 resize；建议 devDependency 使用 <code>node-pty</code>。</p></div>
+<div class="card"><h3>Terminal Emulator</h3><p>用 <code>@xterm/headless</code> 或等价解析器把 ANSI 还原成 rows×columns，断言光标、颜色、背景和裁剪。</p></div>
+<div class="card"><h3>Golden Normalizer</h3><p>归一化时间、Session ID、Artifact ID 和动画帧；不得归一化颜色、边框宽度、焦点和换行。</p></div>
+</div>
+<h3>Fixture</h3>
+<pre>fixtures/tui/
+├── basic.json
+├── markdown-rich.json
+├── reasoning-stream.json
+├── reasoning-complete.json
+├── tools-commands.json
+├── diff-conflict.json
+├── approvals-errors.json
+├── agents-sessions.json
+├── hierarchy-wide.json
+├── hierarchy-compact.json
+├── cursor-ime.json
+├── no-color.json
+└── unicode-long-lines.json
+
+测试产物：
+  screen.raw.ansi
+  screen.grid.txt
+  screen.cells.json
+  cursor.trace.json
+  layout.indent.json
+  projection.trace.json
+  input.keys.log
+  frame.metrics.json</pre>
+<div class="rule">PTY 测试必须清理子进程、临时目录、Session 和终端 raw mode。失败时导出 ANSI、屏幕网格、按键序列和 Projection trace。</div>
+</section>
+
+<section id="theme">
+<h2>5. Theme 与终端能力</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>层级</th></tr></thead><tbody>
+<tr><td>THM-01</td><td>truecolor 深色主题</td><td>所有 token 输出正确 RGB，无越界样式</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>THM-02</td><td>ansi256 主题</td><td>每个 token 映射到稳定 256 色索引</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>THM-03</td><td>ansi16 主题</td><td>颜色近似可辨识，不输出 24bit 序列</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>THM-04</td><td>浅色主题</td><td>前景/背景对比度达到可读阈值</td><td><span class="tag golden">Golden</span></td></tr>
+<tr><td>THM-05</td><td>mono 主题</td><td>无颜色代码，状态与层级仍可辨识</td><td><span class="tag golden">Golden</span></td></tr>
+<tr><td>THM-06</td><td>NO_COLOR=1</td><td>强制无色，忽略主题颜色偏好</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>THM-07</td><td>TERM=dumb / 非 TTY</td><td>纯文本模式，无光标/清屏/OSC 序列</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>THM-08</td><td>颜色 token 未知</td><td>回退 text + 诊断，不崩溃</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>THM-09</td><td>Theme 运行中切换</td><td>ScreenBuffer 重建，Scroll/Focus 不丢</td><td><span class="tag">Integration</span></td></tr>
+<tr><td>THM-10</td><td>终端 capability 运行时变化</td><td>重新解析并安全降级</td><td><span class="tag">PTY</span></td></tr>
+<tr><td>THM-11</td><td>样式包含 reset 攻击字符串</td><td>外部字符串被清洗，不改变 frame style</td><td><span class="tag risk">Security</span></td></tr>
+<tr><td>THM-12</td><td>背景透明终端</td><td>仅 Panel 背景着色，正文不被强制底色覆盖</td><td><span class="tag golden">Golden</span></td></tr>
+</tbody></table>
+</section>
+
+<section id="blocks">
+<h2>6. StyledSpan、Block 与 Work Group</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>层级</th></tr></thead><tbody>
+<tr><td>BLK-01</td><td>User → Answer → Work 顺序</td><td>Block 顺序与 Projection 事实一致</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>BLK-02</td><td>运行中 Work Group</td><td>显示当前工具/命令/Reasoning 摘要，最终回答不折叠</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>BLK-03</td><td>成功 Work Group 完成</td><td>折叠成耗时、工具数和 Agent 数</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>BLK-04</td><td>失败 Work Group</td><td>保持错误和失败证据可见</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>BLK-05</td><td>多个并行工具</td><td>稳定排序，不因完成顺序跳位</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>BLK-06</td><td>Tool succeeded / failed / denied</td><td>状态、颜色和文字三重表达</td><td><span class="tag golden">Golden</span></td></tr>
+<tr><td>BLK-07</td><td>命令 exit 0 / nonzero / timeout</td><td>stdout/stderr/exit/duration 分区正确</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>BLK-08</td><td>Approval pending</td><td>危险色 Panel，不自动消失，不抢输入</td><td><span class="tag golden">Golden</span></td></tr>
+<tr><td>BLK-09</td><td>Plan 更新</td><td>Plan 与普通 Reasoning 区分</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>BLK-10</td><td>子 Agent 状态变化</td><td>只更新对应 Work item，不重建全文</td><td><span class="tag">Integration</span></td></tr>
+<tr><td>BLK-11</td><td>空 assistant / reasoning</td><td>不生成空白 Panel，不显示孤立标签</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>BLK-12</td><td>超长标题和文件名</td><td>Unicode 安全截断，保留结尾状态</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>BLK-13</td><td>嵌套 Work / Artifact</td><td>只展开选中层级，其余摘要</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>BLK-14</td><td>Projection revision 更新</td><td>Block identity 稳定，展开状态不丢</td><td><span class="tag">Integration</span></td></tr>
+</tbody></table>
+</section>
+
+<section id="panels">
+<h2>7. Panel 系统</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>PNL-01</td><td>Inline Panel 内容少于可用高度</td><td>紧贴内容，不占满屏幕</td></tr>
+<tr><td>PNL-02</td><td>Inline Panel 超高度</td><td>按 maxHeight 截断并出现滚动提示</td></tr>
+<tr><td>PNL-03</td><td>Context Panel 无内容</td><td>宽度自动为 0，主区扩大</td></tr>
+<tr><td>PNL-04</td><td>Context Panel 有内容</td><td>宽度在 28–36 列且可收起</td></tr>
+<tr><td>PNL-05</td><td>Panel 获得焦点</td><td>边框/标题使用 Accent，状态语义色不变</td></tr>
+<tr><td>PNL-06</td><td>Panel 失焦</td><td>焦点色移除，滚动位置保留</td></tr>
+<tr><td>PNL-07</td><td>Overlay 打开</td><td>一次只有一个 overlay，Composer 不被误操作</td></tr>
+<tr><td>PNL-08</td><td>Overlay 关闭</td><td>焦点、草稿、光标、原滚动恢复</td></tr>
+<tr><td>PNL-09</td><td>Panel 内容超宽</td><td>裁剪或 wrap，不覆盖右侧 Context Panel</td></tr>
+<tr><td>PNL-10</td><td>80×24 空间预算</td><td>状态 1 行，Composer 1–6 行，无永久侧栏</td></tr>
+<tr><td>PNL-11</td><td>60×20 高度不足</td><td>先隐藏 hint，再收缩 Composer，输入仍可见</td></tr>
+<tr><td>PNL-12</td><td>resize 时 Panel 打开</td><td>Rect 重算，焦点/选择/滚动锚点保留</td></tr>
+<tr><td>PNL-13</td><td>手动上滚 Reasoning</td><td>暂停 auto-follow，显示 below 提示</td></tr>
+<tr><td>PNL-14</td><td>滚动到底部</td><td>恢复可选 auto-follow</td></tr>
+<tr><td>PNL-15</td><td>扩展注册 10 个 Status Cell</td><td>最多 2 个可见，其余合并计数</td></tr>
+<tr><td>PNL-16</td><td>扩展请求永久侧栏</td><td>拒绝注册，不改变主布局</td></tr>
+<tr><td>PNL-17</td><td>扩展 Detail 打开</td><td>受控 overlay，Esc 返回，原焦点恢复</td></tr>
+<tr><td>PNL-18</td><td>扩展直接注入 ANSI</td><td>拒绝或被清洗，不影响边框/背景</td></tr>
+</tbody></table>
+</section>
+
+<section id="hierarchy">
+<h2>8. 对话层级与原生光标</h2>
+<div class="grid">
+<div class="card"><h3>HIER 测试问题</h3><ul><li>不同类型内容是否有稳定 gutter 和缩进。</li><li>最终结果是否比过程日志更醒目。</li><li>连续工具与嵌套列表是否形成视觉分组。</li><li>80×24 与 60×20 下是否仍能辨认层级。</li></ul></div>
+<div class="card"><h3>CUR 测试问题</h3><ul><li>光标是否由终端原生绘制并闪烁。</li><li>光标绝对行列是否对应逻辑输入 offset。</li><li>IME 候选框锚点是否正确。</li><li>流式更新和 overlay 是否移动/遗留光标。</li></ul></div>
+</div>
+<h3>8.1 对话层级</h3>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>HIER-01</td><td>User Turn</td><td>gutter 标记和正文缩进稳定，正文不回落到第 0 列</td></tr>
+<tr><td>HIER-02</td><td>Assistant Turn</td><td>说话者头与正文对比明确，正文使用正常 Text 而不是日志样式</td></tr>
+<tr><td>HIER-03</td><td>Reasoning</td><td>相对 Assistant 再缩进，使用独立 Panel 和弱化 Reasoning 色</td></tr>
+<tr><td>HIER-04</td><td>Tool 成功</td><td>工具作为 Work Group 子项缩进，单行摘要，不与正文同权</td></tr>
+<tr><td>HIER-05</td><td>Tool 失败/运行中</td><td>允许展开 Panel，错误文字与语义色同时可见</td></tr>
+<tr><td>HIER-06</td><td>连续多个工具</td><td>项间不留空行；Work Group 与下一段正文之间留 1 行</td></tr>
+<tr><td>HIER-07</td><td>Result / Summary</td><td>独立分组标题和更高对比度，不被长工具历史挤出</td></tr>
+<tr><td>HIER-08</td><td>三级嵌套列表</td><td>每级固定增加 2 列，层级可辨且正文仍有最小宽度</td></tr>
+<tr><td>HIER-09</td><td>超过三级嵌套</td><td>折叠为摘要入口，进入详情 Panel 查看</td></tr>
+<tr><td>HIER-10</td><td>长段 Markdown 回答</td><td>标题、正文、列表、代码和引用有不同视觉权重</td></tr>
+<tr><td>HIER-11</td><td>透明背景终端</td><td>层级由 gutter/缩进/字重保证，不依赖整块背景</td></tr>
+<tr><td>HIER-12</td><td>NO_COLOR</td><td>纯文本仍可通过标记、缩进、字重和空行识别层级</td></tr>
+<tr><td>HIER-13</td><td>60×20 紧凑模式</td><td>gutter 缩为 1 列，但正文与从属层缩进仍不同</td></tr>
+<tr><td>HIER-14</td><td>同一屏多个焦点色</td><td>只有一个强调边框/反向选中项，状态语义色不被覆盖</td></tr>
+</tbody></table>
+<h3>8.2 原生光标与 IME</h3>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>CUR-01</td><td>Composer 获得焦点</td><td>Frame 完成后显示终端原生闪烁块状光标，且与 <code>&gt;</code> 间保留一个空格</td></tr>
+<tr><td>CUR-02</td><td>Composer 失焦</td><td>光标隐藏，不残留在正文或旧 Panel 位置</td></tr>
+<tr><td>CUR-03</td><td>输入 ASCII</td><td>光标列随 grapheme offset 前进</td></tr>
+<tr><td>CUR-04</td><td>输入中文/Emoji</td><td>绝对列按显示宽度移动，不按 UTF-16 长度移动</td></tr>
+<tr><td>CUR-05</td><td>多行 Composer</td><td>光标在正确 visual row，自动换行后位置正确</td></tr>
+<tr><td>CUR-06</td><td>左移、右移、Home/End</td><td>CursorTarget 与编辑缓冲区一致，组合字符不被拆开</td></tr>
+<tr><td>CUR-07</td><td>IME composition 开始/更新/提交</td><td>候选框锚定输入位置；composition 期间不触发快捷键</td></tr>
+<tr><td>CUR-08</td><td>流式正文持续更新</td><td>只更新正文行，Composer 原生光标不闪回、不跳位</td></tr>
+<tr><td>CUR-09</td><td>打开 Sessions/Agents overlay</td><td>Composer 光标隐藏；overlay 内 Search 光标独立定位</td></tr>
+<tr><td>CUR-10</td><td>关闭 overlay</td><td>恢复原 Session、草稿、逻辑 cursor offset 与绝对位置</td></tr>
+<tr><td>CUR-11</td><td>A/B Session 快速切换</td><td>不复用旧 Session 坐标；各草稿 cursor offset 独立</td></tr>
+<tr><td>CUR-12</td><td>resize/软换行后恢复</td><td>重新计算 CursorTarget，光标仍落在原逻辑字符边界</td></tr>
+</tbody></table>
+<div class="danger rule">阻断缺陷：光标停留在旧位置、正文流式更新时抢焦点、IME 候选框错位、overlay 关闭后光标丢失、所有内容退化为同一列、Result 被过程输出淹没。</div>
+</section>
+
+<section id="format">
+<h2>9. Markdown、代码和 Diff</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>FMT-01</td><td>Heading、bold、italic、quote</td><td>样式正确，长行在可用宽度 wrap</td></tr>
+<tr><td>FMT-02</td><td>有序/无序列表与嵌套</td><td>缩进稳定，不破坏 Unicode 宽度</td></tr>
+<tr><td>FMT-03</td><td>行内代码和 code fence</td><td>等宽、弱背景、不跨 Panel</td></tr>
+<tr><td>FMT-04</td><td>JS/TS/JSON/Shell 语法高亮</td><td>token 不重叠、reset 正确</td></tr>
+<tr><td>FMT-05</td><td>未知代码语言</td><td>普通 code fence 降级</td></tr>
+<tr><td>FMT-06</td><td>表格宽屏</td><td>列对齐，最长列受预算约束</td></tr>
+<tr><td>FMT-07</td><td>表格窄屏</td><td>改为键值列表，不水平溢出</td></tr>
+<tr><td>FMT-08</td><td>Link 且支持 OSC 8</td><td>显示文本、链接目标安全</td></tr>
+<tr><td>FMT-09</td><td>Link 且不支持 OSC 8</td><td>附加 URL 文本</td></tr>
+<tr><td>FMT-10</td><td>Diff added/deleted/hunk</td><td>颜色、前缀、行号都正确</td></tr>
+<tr><td>FMT-11</td><td>冲突标记 ours/theirs</td><td>分区清晰，可选中处理</td></tr>
+<tr><td>FMT-12</td><td>100 万字符代码块</td><td>按需加载/虚拟滚动，不冻结输入</td></tr>
+<tr><td>FMT-13</td><td>Markdown 中包含 ESC/OSC/CSI</td><td>全部清洗，无终端注入</td></tr>
+<tr><td>FMT-14</td><td>超长无空格字符串</td><td>强制安全折行，不越界</td></tr>
+<tr><td>FMT-15</td><td>中文/Emoji/组合字符</td><td>宽度、裁剪和光标列准确</td></tr>
+<tr><td>FMT-16</td><td>恶意 Markdown 嵌套/深层列表</td><td>parser 有界，面板不卡死</td></tr>
+<tr><td>FMT-17</td><td>Hyperlink 字符宽度 2</td><td>OSC 包住完整 grapheme，不破坏列</td></tr>
+<tr><td>FMT-18</td><td>语法高亮异常</td><td>回退普通文本并继续渲染</td></tr>
+</tbody></table>
+</section>
+
+<section id="reasoning">
+<h2>10. Reasoning 真实性与交互</h2>
+<div class="warn rule">测试必须明确：本地 Activity “Thinking”不是 reasoning。只有 Provider 发出 <code>reasoning_delta</code> 后，UI 才能创建或填充 Reasoning 内容。</div>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>RSN-01</td><td>Provider 无 reasoning 字段</td><td>显示 Waiting/RUN，不创建假 Reasoning Panel</td></tr>
+<tr><td>RSN-02</td><td>首个 reasoning_delta 到达</td><td>Waiting 消失，Reasoning Panel 出现</td></tr>
+<tr><td>RSN-03</td><td>reasoning 流式增长</td><td>最近内容更新，行数和高度受预算约束</td></tr>
+<tr><td>RSN-04</td><td>Reasoning 完成</td><td>折叠为 Thought for Ns/长度摘要</td></tr>
+<tr><td>RSN-05</td><td>Reasoning 失败</td><td>失败色，保留已接收内容，不伪装完成</td></tr>
+<tr><td>RSN-06</td><td>hidden 模式</td><td>只显示入口，不占正文高度</td></tr>
+<tr><td>RSN-07</td><td>preview 模式</td><td>live 4–6 行，完成后折叠</td></tr>
+<tr><td>RSN-08</td><td>full 模式</td><td>最多 30% 屏幕高，内部滚动</td></tr>
+<tr><td>RSN-09</td><td>Ctrl+T 切换模式</td><td>内容、持久化偏好和状态栏提示一致</td></tr>
+<tr><td>RSN-10</td><td>Enter 展开/折叠</td><td>展开状态按 row ID 保留</td></tr>
+<tr><td>RSN-11</td><td>Reasoning Inspector</td><td>全屏搜索/复制/跳到最新可用</td></tr>
+<tr><td>RSN-12</td><td>Reasoning 中含 Markdown/代码</td><td>格式化渲染，安全降级</td></tr>
+<tr><td>RSN-13</td><td>同时存在 Activity Thinking 和 reasoning</td><td>只显示一个真实 Reasoning 标题</td></tr>
+<tr><td>RSN-14</td><td>用户上滚后新 reasoning 到达</td><td>不抢滚动位置，显示 below 指示</td></tr>
+<tr><td>RSN-15</td><td>Reasoning 中断后重连</td><td>不重复旧文本，按 Event Seq 续接或重建</td></tr>
+<tr><td>RSN-16</td><td>Provider 切换为无 reasoning 模型</td><td>不残留上一个 Session 的 Reasoning 状态</td></tr>
+<tr><td>RSN-17</td><td>reasoning_delta 高频 10k 次</td><td>批量渲染，不丢最终文本和完成状态</td></tr>
+<tr><td>RSN-18</td><td>Reasoning 内容含敏感控制字符</td><td>安全清洗，不影响终端光标</td></tr>
+<tr><td>RSN-19</td><td>Reasoning 完成但 assistant 仍在流式</td><td>Reasoning 已折叠，最终回答继续显示</td></tr>
+<tr><td>RSN-20</td><td>多工具轮次</td><td>每轮 Reasoning 与对应 Work Group 关联</td></tr>
+</tbody></table>
+</section>
+
+<section id="pty">
+<h2>11. 真实 PTY E2E</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>PTY-RICH-01</td><td>truecolor 启动</td><td>颜色、边框、Composer、状态栏显示正确</td></tr>
+<tr><td>PTY-RICH-02</td><td>256 色启动</td><td>无 truecolor 序列，样式仍可区分</td></tr>
+<tr><td>PTY-RICH-03</td><td>16 色启动</td><td>主题映射正确</td></tr>
+<tr><td>PTY-RICH-04</td><td>NO_COLOR 启动</td><td>纯文本状态可读</td></tr>
+<tr><td>PTY-RICH-05</td><td>80×24 输入与流式回答</td><td>无永久侧栏，输入不被挤走</td></tr>
+<tr><td>PTY-RICH-06</td><td>120×40 Context Panel 开关</td><td>布局重算，主对话和草稿保留</td></tr>
+<tr><td>PTY-RICH-07</td><td>resize 过程中流式更新</td><td>不丢字符、不串行、不越界</td></tr>
+<tr><td>PTY-RICH-08</td><td>Markdown 格式化回答</td><td>列表、代码、链接和换行稳定</td></tr>
+<tr><td>PTY-RICH-09</td><td>工具成功/失败卡片</td><td>标题、耗时、状态和摘要正确</td></tr>
+<tr><td>PTY-RICH-10</td><td>真实 reasoning_content fixture</td><td>Waiting 后切换为 live Reasoning</td></tr>
+<tr><td>PTY-RICH-11</td><td>无 reasoning 模型</td><td>全程无假 Reasoning Panel</td></tr>
+<tr><td>PTY-RICH-12</td><td>Ctrl+T preview/full/hidden</td><td>显示模式循环，偏好持久化</td></tr>
+<tr><td>PTY-RICH-13</td><td>Reasoning 完成后 Enter 展开</td><td>全文显示，最终回答仍可访问</td></tr>
+<tr><td>PTY-RICH-14</td><td>Reasoning 自动跟随和用户上滚</td><td>不抢滚动，below 提示出现</td></tr>
+<tr><td>PTY-RICH-15</td><td>Reasoning Inspector 搜索</td><td>匹配、导航和返回正确</td></tr>
+<tr><td>PTY-RICH-16</td><td>reasoning 失败</td><td>红色 Panel，已收内容保留</td></tr>
+<tr><td>PTY-RICH-17</td><td>多轮 tool/reasoning</td><td>每轮 Work Group 关联正确</td></tr>
+<tr><td>PTY-RICH-18</td><td>Panel 打开时输入</td><td>焦点规则正确，不误发送</td></tr>
+<tr><td>PTY-RICH-19</td><td>Composer 多行/IME</td><td>Enter 发送、Shift+Enter/Ctrl+J 换行</td></tr>
+<tr><td>PTY-RICH-20</td><td>运行中 Ctrl+C</td><td>停止当前任务，不退出 TUI</td></tr>
+<tr><td>PTY-RICH-21</td><td>空空闲 Ctrl+C 两次</td><td>确认后退出并恢复终端</td></tr>
+<tr><td>PTY-RICH-22</td><td>Overlay 返回</td><td>原 Composer 草稿和焦点恢复</td></tr>
+<tr><td>PTY-RICH-23</td><td>无动画模式</td><td>无 shimmer，无高频 spinner 重绘</td></tr>
+<tr><td>PTY-RICH-24</td><td>60×20 紧凑模式</td><td>状态/输入可见，Panel 使用 overlay</td></tr>
+<tr><td>PTY-RICH-25</td><td>像素宽度中文/Emoji</td><td>列对齐、Diff 不扭曲</td></tr>
+<tr><td>PTY-RICH-26</td><td>终端控制字符注入</td><td>无光标移动/清屏/OSC 劫持</td></tr>
+<tr><td>PTY-RICH-27</td><td>大 Diff</td><td>滚动流畅，输入不阻塞</td></tr>
+<tr><td>PTY-RICH-28</td><td>后台 Agent 完成</td><td>状态 cell/摘要更新，不抢焦点</td></tr>
+<tr><td>PTY-RICH-29</td><td>断线重连</td><td>Projection 重建，Panel/Reasoning 不重复</td></tr>
+<tr><td>PTY-RICH-30</td><td>退出后重开</td><td>Session、草稿、Reasoning 偏好恢复</td></tr>
+<tr><td>PTY-RICH-31</td><td>两个 Session 分别输入草稿后切换</td><td>各自草稿、滚动和选中项独立恢复</td></tr>
+<tr><td>PTY-RICH-32</td><td>A 运行中切到 B，再回到 A</td><td>A 后台不停止，迟到 Delta 只更新 A</td></tr>
+<tr><td>PTY-RICH-33</td><td>删除当前或正在运行的 Session</td><td>先确认并处理 Stop；失败时保持原视图和可恢复提示</td></tr>
+<tr><td>PTY-RICH-34</td><td>任意 Profile 形成多层子 Agent 树</td><td>缩进、排序、过滤和选中正确，不依赖固定角色</td></tr>
+<tr><td>PTY-RICH-35</td><td>后台 Agent 完成或失败</td><td>状态 Cell 更新，不切 Session、不抢 Composer 焦点</td></tr>
+<tr><td>PTY-RICH-36</td><td>Agent Board 进入子 Session 后 Esc</td><td>回到父 Session 和原滚动/选中位置</td></tr>
+<tr><td>PTY-RICH-37</td><td>子工作区合并入口</td><td>未 Preview 不能 Apply；Preview 展示文件、风险与验证</td></tr>
+<tr><td>PTY-RICH-38</td><td>Composer 初始聚焦</td><td>原生闪烁块状光标可见，与 <code>&gt;</code> 间有一个空格，位置在输入末尾</td></tr>
+<tr><td>PTY-RICH-39</td><td>中文 IME 组合输入</td><td>候选框锚点正确，composition 阶段无快捷键误触</td></tr>
+<tr><td>PTY-RICH-40</td><td>流式更新同时输入</td><td>正文局部刷新不移动 Composer 光标</td></tr>
+<tr><td>PTY-RICH-41</td><td>打开/关闭 overlay</td><td>光标先隐藏再恢复，Session 与 draft 不串</td></tr>
+<tr><td>PTY-RICH-42</td><td>120×40 层级 Golden</td><td>gutter、缩进和 Result 优先级肉眼与网格断言一致</td></tr>
+<tr><td>PTY-RICH-43</td><td>60×20 层级降级</td><td>正文/工具/Reasoning 仍可区分，光标可持续输入</td></tr>
+</tbody></table>
+</section>
+
+<section id="golden">
+<h2>12. ScreenBuffer 与 ANSI Golden</h2>
+<table><thead><tr><th>ID</th><th>Fixture / 尺寸</th><th>断言</th></tr></thead><tbody>
+<tr><td>GLD-01</td><td>basic / 80×24 / dark</td><td>User、Answer、Status、Composer 网格稳定</td></tr>
+<tr><td>GLD-02</td><td>basic / 80×24 / mono</td><td>无颜色但布局一致</td></tr>
+<tr><td>GLD-03</td><td>reasoning-stream / 80×24</td><td>Reasoning Panel 高度与颜色正确</td></tr>
+<tr><td>GLD-04</td><td>reasoning-complete / 80×24</td><td>折叠摘要与最终回答共存</td></tr>
+<tr><td>GLD-05</td><td>tools-commands / 80×24</td><td>工具状态和 exit code 摘要正确</td></tr>
+<tr><td>GLD-06</td><td>diff-conflict / 120×40</td><td>Diff 颜色、行号、hunk 对齐</td></tr>
+<tr><td>GLD-07</td><td>agents-sessions / 120×40</td><td>Context Panel 与主区不重叠</td></tr>
+<tr><td>GLD-08</td><td>approvals-errors / 80×24</td><td>P0 状态可见，Panel 不覆盖 Composer</td></tr>
+<tr><td>GLD-09</td><td>unicode-long-lines / 80×24</td><td>中文与 Emoji 宽度正确</td></tr>
+<tr><td>GLD-10</td><td>no-color / 60×20</td><td>纯文本、状态词完整</td></tr>
+<tr><td>GLD-11</td><td>overlay / 120×40</td><td>主视图被替换，返回恢复原网格</td></tr>
+<tr><td>GLD-12</td><td>terminal-gradient / 80×24</td><td>背景不清屏，透明终端不受污染</td></tr>
+<tr><td>GLD-13</td><td>cursor-composer / 80×24</td><td>光标绝对 row/column、可见性、块状和提示符后空格正确</td></tr>
+<tr><td>GLD-14</td><td>cursor-ime / 80×24</td><td>中文组合串前后的 grapheme anchor 不漂移</td></tr>
+<tr><td>GLD-15</td><td>hierarchy-wide / 120×40</td><td>User、Assistant、Work、Result 的 gutter 和留白稳定</td></tr>
+<tr><td>GLD-16</td><td>hierarchy-compact / 80×24</td><td>相同语义层级在紧凑尺寸下仍可辨</td></tr>
+<tr><td>GLD-17</td><td>hierarchy-no-color / 80×24</td><td>无颜色时标记、缩进和空行仍表达层级</td></tr>
+<tr><td>GLD-18</td><td>hierarchy-deep-nesting / 120×40</td><td>最多三级缩进，超过后显示详情入口</td></tr>
+</tbody></table>
+<p>Golden 比较 rows×columns 网格、cell style、cursor 绝对位置/可见性/形状和 hyperlink；允许归一化时间、ID 和唯一 Artifact 路径，不允许归一化颜色、边框、gutter 或缩进。</p>
+</section>
+
+<section id="state">
+<h2>13. Panel、层级与光标状态空间</h2>
+<pre>Theme =
+  dark | light | mono
+ColorDepth =
+  truecolor | ansi256 | ansi16 | none
+Session =
+  A | B
+Task =
+  queued | running | waiting | completed | failed
+Panel =
+  conversation | reasoning | tool | diff | sessions |
+  agents | status | command | approval
+Focus =
+  composer | transcript | overlay
+Cursor =
+  hidden | visible | composing | fallback
+Reasoning =
+  unavailable | waiting | streaming | complete | failed
+Width =
+  full | normal | narrow | emergency
+
+主不变量：
+  任意时刻只有一个焦点和一个活动 overlay
+  Composer 永不被 Panel 越界覆盖
+  非活动 Session 的 Reasoning 不进入当前 Panel
+  Waiting 不生成 Reasoning 内容
+  真实 reasoning 不被 Activity Thinking 重复
+  Panel 关闭恢复原焦点、草稿、滚动
+  Composer 聚焦时恰有一个可见光标
+  光标 logical offset 与 visual row/column 双向可定位
+  overlay/失焦时正文区域无残留光标
+  User/Assistant/Work/Result 的 gutter 层级稳定
+  Result 不被连续工具输出挤出当前回合
+  P0/P1 状态在全部宽度可见
+  扩展不能创建永久侧栏
+  所有外部文本都不改变终端控制状态</pre>
+<p>建议先用组合模型覆盖 <code>3 themes × 4 color depths × 5 task statuses × 9 panels × 3 focus × 4 cursor states × 5 reasoning states × 4 widths</code>，再做 pairwise 降维；关键三元组必须全量保留。</p>
+<table><thead><tr><th>ID</th><th>不变量</th><th>测试</th></tr></thead><tbody>
+<tr><td>STA-R01</td><td>Panel 焦点唯一</td><td>有界 BFS + PTY</td></tr>
+<tr><td>STA-R02</td><td>Composer 不被覆盖</td><td>全宽度组合</td></tr>
+<tr><td>STA-R03</td><td>Session 隔离</td><td>A/B 快速切换 + Reasoning 迟到</td></tr>
+<tr><td>STA-R04</td><td>Waiting/Reasoning 互斥</td><td>Provider 状态机</td></tr>
+<tr><td>STA-R05</td><td>Overlay 返回恢复</td><td>所有 Panel 类型</td></tr>
+<tr><td>STA-R06</td><td>响应式最低可读</td><td>60×20 和 40×15</td></tr>
+<tr><td>STA-R07</td><td>扩展预算</td><td>0/2/10 cell</td></tr>
+<tr><td>STA-R08</td><td>无终端注入</td><td>含控制字符内容</td></tr>
+<tr><td>STA-R09</td><td>光标唯一且归属正确</td><td>全 Focus × Panel × Session 组合</td></tr>
+<tr><td>STA-R10</td><td>CursorTarget 往返一致</td><td>offset → row/column → offset</td></tr>
+<tr><td>STA-R11</td><td>对话层级不退化</td><td>全消息类型 × 4 widths</td></tr>
+</tbody></table>
+</section>
+
+<section id="performance">
+<h2>14. 性能与资源</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>门禁</th></tr></thead><tbody>
+<tr><td>PERF-01</td><td>连续输入与操作</td><td>按键到 ScreenBuffer 更新 p95 ≤ 16ms；PTY visible frame p95 ≤ 50ms</td></tr>
+<tr><td>PERF-02</td><td>10k reasoning deltas</td><td>最终文本完整，无 O(n²) 重建，内存增长有界</td></tr>
+<tr><td>PERF-03</td><td>10k tool/log lines</td><td>虚拟滚动，只渲染可视窗口</td></tr>
+<tr><td>PERF-04</td><td>大 Diff 与代码高亮</td><td>按需 tokenize，不阻塞输入</td></tr>
+<tr><td>PERF-05</td><td>resize storm</td><td>合并布局，不产生陈旧 frame</td></tr>
+<tr><td>PERF-06</td><td>高频状态计时</td><td>UI 刷新 250ms–1s，不与流式 frame 竞争</td></tr>
+<tr><td>PERF-07</td><td>Frame diff</td><td>只写变化 cell；正常流式帧不发送全屏 clear</td></tr>
+<tr><td>PERF-08</td><td>长 Session 切换</td><td>缓存 Session ≤100ms；不重复解析全部 Markdown</td></tr>
+<tr><td>PERF-09</td><td>内存</td><td>10 万行日志、20 Panel 后仍低于预算，无 listener/interval 泄漏</td></tr>
+<tr><td>PERF-10</td><td>颜色合成</td><td>style 压缩，不产生每 cell 重复 escape 序列</td></tr>
+<tr><td>PERF-11</td><td>原生光标闪烁</td><td>由终端驱动，空闲时 UI 不因闪烁持续重算整帧</td></tr>
+<tr><td>PERF-12</td><td>层级布局</td><td>10k 行历史下只计算可视 gutter/缩进，不重复解析 Markdown</td></tr>
+<tr><td>PERF-13</td><td>高频 Projection + Persistence</td><td>200 次连续 Delta 的 Frame 刷新合并；Snapshot 保存次数显著少于事件数且最终文本不丢</td></tr>
+<tr><td>PERF-14</td><td>长时间流式稳定性</td><td>持续 10 分钟后内存无单调增长，无逐 token Snapshot backlog</td></tr>
+</tbody></table>
+</section>
+
+<section id="fault">
+<h2>15. 故障与安全</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>FAULT-01</td><td>Reasoning 流中途断开</td><td>显示 failed，保留已收内容，停止 live 动画</td></tr>
+<tr><td>FAULT-02</td><td>Provider 返回 reasoning 后再返回 error</td><td>不拼接成完成，错误状态优先</td></tr>
+<tr><td>FAULT-03</td><td>Panel 内容异常超宽</td><td>裁剪在 Rect 内，不覆写 Context</td></tr>
+<tr><td>FAULT-04</td><td>终端 resize 到极小尺寸</td><td>只保留状态、必要内容和 Composer</td></tr>
+<tr><td>FAULT-05</td><td>终端 capability 变化</td><td>重新生成 frame，不崩溃</td></tr>
+<tr><td>FAULT-06</td><td>无效 Markdown/高亮</td><td>回退纯文本，不阻塞 Session</td></tr>
+<tr><td>FAULT-07</td><td>Overlay 打开时 Session 被删</td><td>安全退回 Session 列表/最近会话</td></tr>
+<tr><td>FAULT-08</td><td>后台 Agent 完成时用户输入</td><td>Composer 焦点、文本和光标不受影响</td></tr>
+<tr><td>FAULT-09</td><td>UI 状态写入失败</td><td>界面继续工作，提示偏好未保存</td></tr>
+<tr><td>FAULT-10</td><td>TerminalBridge 不支持颜色/alt screen</td><td>降级，不发送不支持的控制序列</td></tr>
+<tr><td>FAULT-11</td><td>原生光标/DECSCUSR 不受支持</td><td>回退 Host 默认闪烁或受控静态块，输入行为不降级</td></tr>
+<tr><td>FAULT-12</td><td>IME composition 中 Session 被切换</td><td>取消或安全提交旧草稿，隐藏旧光标后定位新 Session</td></tr>
+</tbody></table>
+<div class="danger rule">阻断缺陷：Reasoning 被伪造、Composer 被 Panel 覆盖、外部 ANSI 注入成功、快速切换串 Session、扩展创建永久 UI、非 TTY 输出控制序列、光标停留在错误输入、对话层级退化为同一列日志。</div>
+</section>
+
+<section id="ci">
+<h2>16. CI 与完成门禁</h2>
+<table><thead><tr><th>门禁</th><th>内容</th><th>阻断</th></tr></thead><tbody>
+<tr><td>PR Fast</td><td>Theme、Span、BlockBuilder、TranscriptLayout、CursorTarget、Markdown、Panel Rect、Reasoning model unit。</td><td>是</td></tr>
+<tr><td>PR Render</td><td>ScreenBuffer、ANSI Golden、层级 Golden、光标坐标、80×24/60×20/120×40、NO_COLOR。</td><td>是</td></tr>
+<tr><td>PR PTY</td><td>输入、原生光标/IME、focus、resize、Reasoning 流、Panel 返回、退出恢复。</td><td>是</td></tr>
+<tr><td>PR State</td><td>Panel/Reasoning/层级/光标有界状态空间、Session 隔离。</td><td>是</td></tr>
+<tr><td>Nightly</td><td>10k reasoning、10k logs、render coalescing、persistence backlog、10 分钟流式、resize storm、大 Diff、性能趋势。</td><td>报告趋势</td></tr>
+<tr><td>Release</td><td>真实 DeepSeek reasoning 模型 smoke、所有主题、文档和打包。</td><td>是</td></tr>
+</tbody></table>
+<h3>完成标准</h3>
+<ul><li>所有 <code>RICH-R01..R14</code> 有追踪测试并通过。</li><li>80×24、60×20、120×40 在深/浅/mono 下 Golden 通过。</li><li>Provider 可见 reasoning 可以实时展示、折叠、展开和搜索；不伪造隐藏 Chain-of-Thought。</li><li>Panel 打开/关闭不影响 Runtime、Composer 草稿和 Session 后台任务。</li><li>多 Session 草稿隔离，通用子 Agent 看板可进入、筛选和安全返回。</li><li>Composer 使用原生可见闪烁块状光标，与提示符保留一个空格；IME/overlay/resize 后位置正确，正文无残留光标。</li><li>User、Assistant、Reasoning、Tool 和 Result 有稳定 gutter/缩进/留白，NO_COLOR 下仍可辨。</li><li>正常流式不发送全屏 clear；Frame 与 Persistent Snapshot 均有界合并，最终内容完整。</li><li>按键 p95、10 分钟流式内存和持久化队列门禁达标。</li><li>无 ANSI/OSC 注入、Panel 越界、扩展抢焦点或 Session 串话。</li></ul>
+<p><a href="tinyai-rich-tui-design-v1.html">返回富终端 TUI 详细设计 →</a></p>
+<p class="foot">配套实现目标：<code>src/tui</code> 的 Theme/Block/Panel/Renderer、<code>src/node/run-tui.ts</code> 的 Terminal Diff Renderer，以及现有 Reasoning Projection。</p>
+</section>
+</div>
+</body>
+</html>

@@ -64,12 +64,12 @@ describe('portable virtual coding loop', () => {
           yield* events(
             ...toolCall('patch_1', 'apply_patch', {
               patch: [
-                '--- a/src/math.ts',
-                '+++ b/src/math.ts',
-                '@@ -1,1 +1,1 @@',
+                '*** Begin Patch',
+                '*** Update File: src/math.ts',
+                '@@',
                 '-export function add(a: number, b: number) { return a - b; }',
                 '+export function add(a: number, b: number) { return a + b; }',
-                '',
+                '*** End Patch',
               ].join('\n'),
             })
           );

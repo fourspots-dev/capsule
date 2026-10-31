@@ -573,7 +573,12 @@
     "read_file"
   ]);
   var TERMINAL_TOOLS = /* @__PURE__ */ new Set(["exec", "run_tests"]);
-  var CHANGE_TOOLS = /* @__PURE__ */ new Set(["write_file", "apply_patch", "edit"]);
+  var CHANGE_TOOLS = /* @__PURE__ */ new Set([
+    "write_file",
+    "apply_patch",
+    "apply_unified_diff",
+    "edit"
+  ]);
   var SUBAGENT_TOOLS = /* @__PURE__ */ new Set([
     "spawn_agent",
     "send_message",
@@ -2238,7 +2243,7 @@
     if (name === "navigate") return `${zh ? "\u6253\u5F00\u9875\u9762" : "Open page"}${suffix}`;
     if (name === "exec") return `${zh ? "\u6267\u884C\u547D\u4EE4" : "Run command"}${suffix}`;
     if (name === "run_tests") return `${zh ? "\u8FD0\u884C\u6D4B\u8BD5" : "Run tests"}${suffix}`;
-    if (name === "write_file" || name === "apply_patch" || name === "edit") {
+    if (name === "write_file" || name === "apply_patch" || name === "apply_unified_diff" || name === "edit") {
       return `${zh ? "\u4FEE\u6539\u6587\u4EF6" : "Edit file"}${suffix}`;
     }
     if (name === "spawn_agent") return `${zh ? "\u542F\u52A8\u5B50 Agent" : "Start subagent"}${suffix}`;

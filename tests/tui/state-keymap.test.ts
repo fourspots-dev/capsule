@@ -31,12 +31,14 @@ describe('TUI view state', () => {
       draftText: 'draft B',
       selectionId: 'child_2',
     });
+    await first.setReasoningMode('full');
     await first.setActive('A');
     await first.flush();
 
     const reopened = new ViewStateStore(storage, 'tui:state');
     await reopened.initialize();
     expect(reopened.active).toBe('A');
+    expect(reopened.preferredReasoningMode).toBe('full');
     expect(await reopened.get('A')).toMatchObject({
       draftText: 'draft A',
       attachments: [{ name: 'a.txt' }],
@@ -63,6 +65,17 @@ describe('TUI keymap', () => {
     expect(mapKey('\n', conversation)).toEqual({ type: 'newline' });
     expect(mapKey('\x03', conversation)).toEqual({ type: 'stop' });
     expect(mapKey('\x0b', conversation)).toEqual({ type: 'sessions' });
+    expect(mapKey('\x14', conversation)).toEqual({ type: 'reasoning-mode' });
+    expect(mapKey('\x1b[D', conversation)).toEqual({ type: 'left' });
+    expect(mapKey('\x1b[C', conversation)).toEqual({ type: 'right' });
+    expect(mapKey('\x1b[H', conversation)).toEqual({ type: 'home' });
+    expect(mapKey('\x1b[F', conversation)).toEqual({ type: 'end' });
+    expect(mapKey('\x1b[3~', conversation)).toEqual({ type: 'delete' });
+    expect(mapKey('中', conversation)).toEqual({ type: 'text', text: '中' });
+    expect(mapKey('👨‍👩‍👧‍👦', conversation)).toEqual({
+      type: 'text',
+      text: '👨‍👩‍👧‍👦',
+    });
     expect(mapKey('?', conversation)).toEqual({ type: 'help' });
     expect(
       mapKey('\r', {

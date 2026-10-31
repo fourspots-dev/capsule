@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tinyai 富终端 TUI 详细设计 V1</title>
+<style>
+:root{--bg:#f4f5f7;--paper:#fff;--text:#191a1e;--muted:#6f7179;--line:#e2e3e8;--accent:#5145d8;--accent-soft:#efedff;--ok:#137a4b;--warn:#986100;--danger:#b42318;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.72 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}
+.wrap{max-width:1220px;margin:auto;padding:36px 24px 100px}
+.hero{padding:40px;border-radius:27px;background:radial-gradient(circle at 88% 8%,#bb9af7 0,transparent 24%),linear-gradient(135deg,#11131a,#25294f 58%,#4f46b8);color:#fff}
+.hero small{letter-spacing:.12em;opacity:.72}.hero h1{font-size:38px;line-height:1.18;margin:12px 0}.hero p{max-width:920px;margin:0;color:#e8e7ff}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}
+nav{position:sticky;top:0;z-index:5;display:flex;gap:14px;overflow:auto;margin:18px 0;padding:10px 14px;border:1px solid var(--line);border-radius:13px;background:#f4f5f7ed;backdrop-filter:blur(12px)}
+nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}
+section{margin:18px 0;padding:26px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}
+h2{font-size:23px;margin:0 0 14px}h3{font-size:16px;margin:22px 0 8px}h4{font-size:14px;margin:18px 0 6px}p{color:#45464c}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafafa}.card h3,.card h4{margin:0 0 8px}.card p{margin:0}.card ul{margin:8px 0 0;padding-left:18px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafafa;color:var(--muted)}
+code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;border-radius:4px}
+pre{padding:17px;overflow:auto;border-radius:12px;background:#11131a;color:#e6e8ef;font:12px/1.62 var(--mono);border:1px solid #282c3a}
+.rule{padding:13px 15px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#f5f3ff}.warn{border-color:var(--warn);background:#fff8e8}.danger{border-color:var(--danger);background:#fff1f0}
+.pill{display:inline-block;padding:1px 8px;border-radius:999px;background:#eef8f2;color:var(--ok);font-size:11px;white-space:nowrap}.pill.p1{background:var(--accent-soft);color:var(--accent)}.pill.p2{background:#f5f5f7;color:var(--muted)}
+.swatches{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.swatch{padding:10px;border-radius:10px;border:1px solid var(--line);font-family:var(--mono);font-size:11px}.swatch i{display:block;height:18px;border-radius:5px;margin-bottom:7px}
+.diagram{background:#f7f7fb;color:#292a33;border:1px solid var(--line)}
+.phase{display:flex;align-items:center;gap:12px;margin:18px 0 7px;padding:10px 12px;border:1px solid var(--line);border-radius:11px;background:#fafafa}.phase h2{margin:0;font-size:17px}.phase-no{display:grid;place-items:center;width:34px;height:26px;border-radius:7px;background:var(--accent-soft);color:var(--accent);font:700 12px/1 var(--mono)}
+.foot{color:var(--muted);font-size:12px}.tag{display:inline-block;padding:1px 7px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:11px}
+@media(max-width:850px){.grid3{grid-template-columns:1fr}.swatches{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.grid{grid-template-columns:1fr}.hero h1{font-size:28px}.wrap{padding:20px 12px 70px}section{padding:20px}table{display:block;max-width:100%;overflow-x:auto}pre{max-width:100%}}
+@media print{nav{display:none}body{background:#fff}.hero{border-radius:0}.wrap{max-width:none;padding:0}section{break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+<small>TINYAI / RICH TERMINAL UI / DETAILED DESIGN V1</small>
+<h1>富终端 TUI<br>多色彩 · Panel · 格式化内容 · 可见 Reasoning</h1>
+<p>把当前“纯文本行 + 全屏清空重绘”的 TUI 升级为语义化终端界面系统：支持主题、Panel、Markdown、代码与 Diff 高亮、工具卡片和 Provider 可见 reasoning，同时保持默认界面紧凑、键盘优先、可降级和可测试。</p>
+<div class="chips"><span class="chip">Semantic Color</span><span class="chip">Panel System</span><span class="chip">Provider-visible Reasoning</span><span class="chip">Markdown + Diff</span><span class="chip">Screen Buffer</span><span class="chip">80×24 First</span></div>
+</header>
+<nav><a href="#status">现状</a><a href="#requirements">需求</a><a href="#principles">原则</a><a href="#visual">视觉</a><a href="#layout">布局</a><a href="#hierarchy">层级语法</a><a href="#panels">Panel</a><a href="#format">格式</a><a href="#reasoning">Reasoning</a><a href="#cursor">光标</a><a href="#interaction">交互</a><a href="#architecture">架构</a><a href="#responsive">响应式</a><a href="#extension">扩展</a><a href="#persistence">状态</a><a href="#phases">实施</a><a href="#acceptance">验收</a></nav>
+
+<section id="status">
+<h2>1. 当前实现基线</h2>
+<div class="grid">
+<div class="card"><h3>语义渲染已落地</h3><p><code>styled.ts</code> 已提供主题 token、色彩深度与 ANSI span；<code>render.ts</code> 使用 StyledLine 构图，并保留纯文本 render 供测试与降级。</p></div>
+<div class="card"><h3>Panel / Markdown / Reasoning 已接入</h3><p>Reasoning 具有 waiting/live/complete 表达，Markdown、代码、Diff、工具摘要、Context、Sessions 与 Agent Board 已使用统一 Panel/Block。</p></div>
+<div class="card"><h3>增量刷新已接入</h3><p><code>TerminalFrameRenderer</code> 只重写变化行，不再在正常帧中发送 <code>ESC[2J</code>；resize 时强制整帧。</p></div>
+<div class="card"><h3>原生光标与层级已接入</h3><p>Composer/Search 已使用绝对 CursorTarget、原生闪烁与显隐控制；User/Assistant/Reasoning/Tool/Result 已采用 0/2/4 列 gutter，并对中间消息、超长输出和活动回合做差异化处理。</p></div>
+</div>
+<div class="rule">目标不是把每一个元素都装进彩色盒子，而是建立一套“语义样式 → Block → Panel → ScreenBuffer → ANSI”的渲染体系。</div>
+</section>
+
+<section id="requirements">
+<h2>2. 需求基线</h2>
+<table><thead><tr><th>ID</th><th>优先级</th><th>需求</th><th>验收结果</th></tr></thead><tbody>
+<tr><td><code>RICH-R01</code></td><td><span class="pill">P0</span></td><td>语义化多色彩主题</td><td>Text、Muted、Accent、Reasoning、Tool、Success、Warning、Error 和 Diff 颜色均有独立 token；支持 truecolor、256 色、16 色与无颜色。</td></tr>
+<tr><td><code>RICH-R02</code></td><td><span class="pill">P0</span></td><td>统一 Panel 系统</td><td>Panel 支持标题、徽标、边框、焦点、裁剪、滚动、折叠和 footer；内联 Panel 与全屏 Panel 使用同一模型。</td></tr>
+<tr><td><code>RICH-R03</code></td><td><span class="pill">P0</span></td><td>格式化内容展示</td><td>支持 Markdown 子集、代码块、行内代码、列表、表格降级、命令输出和 Diff 高亮。</td></tr>
+<tr><td><code>RICH-R04</code></td><td><span class="pill">P0</span></td><td>展示 Provider 可见 Reasoning</td><td>Provider 返回 reasoning 时实时展示；未返回时只显示 Waiting，不伪造思考；完成后可折叠和展开。</td></tr>
+<tr><td><code>RICH-R05</code></td><td><span class="pill">P0</span></td><td>默认操作保持简单</td><td>输入、Enter、Ctrl+C 即完成基本任务；高级能力通过渐进披露访问。</td></tr>
+<tr><td><code>RICH-R06</code></td><td><span class="pill">P0</span></td><td>内容优先与紧凑空间</td><td>80×24 默认无永久侧栏；Panel 不挤占输入区；宽屏上下文 Panel 可由用户收起。</td></tr>
+<tr><td><code>RICH-R07</code></td><td><span class="pill p1">P1</span></td><td>焦点和滚动明确</td><td>任意时刻只有一个焦点；Panel 打开、关闭、scroll 和 Composer 恢复语义一致。</td></tr>
+<tr><td><code>RICH-R08</code></td><td><span class="pill">P0</span></td><td>终端安全</td><td>模型、工具、文件名和扩展内容不能注入任意 ANSI/OSC；颜色只来自可信样式层。</td></tr>
+<tr><td><code>RICH-R09</code></td><td><span class="pill p1">P1</span></td><td>增量渲染</td><td>流式阶段只更新变化 cell；默认不每帧清屏，不丢滚动与选择。</td></tr>
+<tr><td><code>RICH-R10</code></td><td><span class="pill p1">P1</span></td><td>扩展空间预算</td><td>扩展只能贡献受控状态 cell、活动摘要、命令和详情；不能创建永久侧栏或抢焦点。</td></tr>
+<tr><td><code>RICH-R11</code></td><td><span class="pill p1">P1</span></td><td>可访问与可降级</td><td>无颜色、低动画、Unicode 宽度、IME、resize 和纯文本模式均可用。</td></tr>
+<tr><td><code>RICH-R12</code></td><td><span class="pill">P0</span></td><td>多会话与通用子 Agent 导航</td><td>每个 Session 独立草稿与历史；切换不停止后台任务。任意 Profile 的子 Agent 可在树形看板查看、过滤、进入和返回。</td></tr>
+<tr><td><code>RICH-R13</code></td><td><span class="pill">P0</span></td><td>焦点光标的真实性</td><td>Composer 聚焦时显示终端原生闪烁块状光标，与 <code>&gt;</code> 之间保留一个空格；光标行列、IME 锚点和文字插入位置一致。overlay/失焦时隐藏，返回后准确恢复。</td></tr>
+<tr><td><code>RICH-R14</code></td><td><span class="pill">P0</span></td><td>对话层级可读性</td><td>用户、Assistant、Reasoning、Tool、Result 和嵌套内容通过 gutter、缩进、字重、弱化、Panel 与留白形成稳定层级，不能退化为同一列日志。</td></tr>
+</tbody></table>
+<h3>非目标</h3>
+<div class="grid">
+<div class="card"><h3>不做像素级 GUI</h3><p>TUI 不模拟网页布局，不依赖图片、鼠标 hover 或浏览器 CSS。</p></div>
+<div class="card"><h3>不默认常驻三栏</h3><p>Panel 是上下文容器，不是永久 IDE 侧栏。</p></div>
+<div class="card"><h3>不展示隐藏 Chain-of-Thought</h3><p>只展示 Provider 实际返回且允许展示的 reasoning 字段。</p></div>
+<div class="card"><h3>不允许内容直接着色</h3><p>外部文本先解析为安全 styled span，不能携带任意终端控制序列。</p></div>
+</div>
+</section>
+
+<section id="principles">
+<h2>3. 设计原则</h2>
+<div class="grid3">
+<div class="card"><h3>语义先于颜色</h3><p>先定义这个元素是什么，再决定主题色。扩展和主题变化不能改变状态含义。</p></div>
+<div class="card"><h3>内容优先</h3><p>最终回答、用户目标和输入区优先级最高。Panel 边界不能压缩到无法阅读。</p></div>
+<div class="card"><h3>渐进披露</h3><p>摘要始终可见，原始参数、完整 Reasoning、日志和 Diff 按需展开。</p></div>
+<div class="card"><h3>真实状态</h3><p>Waiting、Reasoning、Running、Verifying、Failed 是不同状态，不使用一个模糊的 Thinking 文案代替。</p></div>
+<div class="card"><h3>稳定布局</h3><p>流式文本到达时，Panel 不跳位；用户手动向上滚动后暂停自动跟随。</p></div>
+<div class="card"><h3>可测试渲染</h3><p>布局和样式先生成 ScreenBuffer，再生成 ANSI。测试可直接断言二维网格。</p></div>
+</div>
+</section>
+
+<section id="visual">
+<h2>4. 视觉系统</h2>
+<h3>4.1 深色语义色板</h3>
+<div class="swatches">
+<div class="swatch"><i style="background:#e6e8ef"></i>Text<br>#E6E8EF</div>
+<div class="swatch"><i style="background:#8c93a5"></i>Muted<br>#8C93A5</div>
+<div class="swatch"><i style="background:#7aa2f7"></i>Accent<br>#7AA2F7</div>
+<div class="swatch"><i style="background:#bb9af7"></i>Reasoning<br>#BB9AF7</div>
+<div class="swatch"><i style="background:#7dcfff"></i>Tool<br>#7DCFFF</div>
+<div class="swatch"><i style="background:#9ece6a"></i>Success<br>#9ECE6A</div>
+<div class="swatch"><i style="background:#e0af68"></i>Warning<br>#E0AF68</div>
+<div class="swatch"><i style="background:#f7768e"></i>Error<br>#F7768E</div>
+<div class="swatch"><i style="background:#171a23"></i>Panel<br>#171A23</div>
+<div class="swatch"><i style="background:#2c3243"></i>Border<br>#2C3243</div>
+</div>
+<table><thead><tr><th>Token</th><th>用途</th><th>无颜色降级</th></tr></thead><tbody>
+<tr><td><code>text</code></td><td>正文</td><td>普通文本</td></tr>
+<tr><td><code>muted</code></td><td>时间、路径、辅助信息</td><td>括号包围或弱化前缀</td></tr>
+<tr><td><code>accent</code></td><td>焦点、当前选择、链接</td><td><code>&gt;</code> 或 <code>[focus]</code></td></tr>
+<tr><td><code>reasoning</code></td><td>Provider 可见 Reasoning</td><td><code>THINK</code> 标签</td></tr>
+<tr><td><code>tool</code></td><td>工具名和调用头</td><td><code>TOOL</code> 标签</td></tr>
+<tr><td><code>success</code></td><td>完成、通过</td><td><code>✓ DONE</code></td></tr>
+<tr><td><code>warning</code></td><td>审批、等待、风险</td><td><code>!</code> 和状态词</td></tr>
+<tr><td><code>error</code></td><td>失败、冲突、断线</td><td><code>ERR</code>/<code>FAILED</code></td></tr>
+</tbody></table>
+<h3>4.2 主题与能力降级</h3>
+<pre>Theme =
+  tiny-dark | tiny-light | mono
+
+ColorDepth =
+  truecolor | ansi256 | ansi16 | none
+
+检测顺序：
+  NO_COLOR / TERM=dumb → none
+  COLORTERM=truecolor/24bit → truecolor
+  TERM 包含 256color → ansi256
+  其他 TTY → ansi16
+  非 TTY → none</pre>
+<ul><li>主题切换不改变布局和状态词。</li><li>Diff 颜色必须有 <code>+</code>/<code>-</code> 前缀；成功/失败必须带图标或文字。</li><li>Panel 背景只覆盖 Panel 矩形，不强制整屏背景，避免与终端透明背景冲突。</li><li>颜色值通过 <code>ThemeResolver</code> 解析，业务 ViewModel 不直接包含 ANSI。</li></ul>
+</section>
+
+<section id="layout">
+<h2>5. 布局与屏幕模型</h2>
+<h3>5.1 宽屏推荐布局</h3>
+<pre>╭─ RUNNING ──────────────────────────────────────────────────────────────╮
+│ fix-auth · main* · deepseek-reasoner            queue 2 · agents 3    │
+├──────────────────────────────────────────────┬────────────────────────┤
+│ YOU                                          │ TASK                   │
+│ 修复登录竞态并补测试                         │ ✓ inspect             │
+│                                              │ ● patch                │
+│ ASSISTANT                                    │ ○ verify               │
+│ 已定位到 token refresh 的竞态。              │                        │
+│                                              │ AGENTS                 │
+│ ╭─ Thinking · live 00:12 ──────────────────╮ │ ● schema-audit  RUN    │
+│ │ 检查 refresh 锁的获取顺序……              │ ✓ add-tests    DONE    │
+│ ╰──────────────────────────────────────────╯ │ ! review-auth  FAILED  │
+│                                              │                        │
+│ ╭─ apply_patch · ✓ 1.8s ───────────────────╮ │ FILES                  │
+│ │ src/auth/session.ts                  +18 │ │ M session.ts           │
+│ │                                      -7  │ │ A auth.test.ts         │
+│ ╰──────────────────────────────────────────╯ │                        │
+├──────────────────────────────────────────────┴────────────────────────┤
+│ > 输入任务，Enter 发送，Ctrl+T 展开思考                                 │
+╰───────────────────────────────────────────────────────────────────────╯</pre>
+<h3>5.2 80×24 紧凑布局</h3>
+<pre>RUN 00:42 · mini-git · main* · agents 2                       1 行
+──────────────────────────────────────────────────────────────
+YOU
+实现三方合并和冲突 UI
+ASSISTANT
+已完成对象模型和 merge driver。
+╭ Thinking · live 00:08 ─────────────────────────────────╮
+│ 检查 base→ours/theirs 行映射，避免冲突区间重复……     │
+╰────────────────────────────────────────────────────────╯
+▸ apply_patch ✓ 1.2s · 3 files +82/-17
+──────────────────────────────────────────────────────────────
+>                                                       1–6 行
+Enter 发送 · Ctrl+T 思考 · Ctrl+K 会话 · ? 帮助</pre>
+<table><thead><tr><th>区域</th><th>高度</th><th>规则</th></tr></thead><tbody>
+<tr><td>Status / Header</td><td>1 行</td><td>P0/P1 永不隐藏；焦点和错误优先。</td></tr>
+<tr><td>Conversation</td><td>剩余高度</td><td>唯一常驻主区域，虚拟滚动。</td></tr>
+<tr><td>Context Panel</td><td>宽屏 28–36 列，可收起</td><td>无任务/Agent/Diff 内容时不占位。</td></tr>
+<tr><td>Composer</td><td>1–6 行</td><td>始终保留，不被 Panel 覆盖。</td></tr>
+<tr><td>Footer hint</td><td>0–1 行</td><td>窄屏或高度不足时优先隐藏。</td></tr>
+<tr><td>Overlay</td><td>主区域或全屏</td><td>一次一个；关闭后恢复焦点、草稿和滚动。</td></tr>
+</tbody></table>
+<h3 id="hierarchy">5.3 对话层级语法</h3>
+<p>颜色只能强化层级，不能独自承担层级。所有会话内容使用稳定的 <b>gutter + body + nested</b> 三列语法：gutter 放说话者与状态，body 放正文，nested 放工具、思考与列表的从属内容。</p>
+<pre>▌ YOU
+  修复 merge 的空路径问题
+
+◆ TINYAI
+  已定位到 add() 的路径归一化顺序。
+
+  ╭─ THINKING · live ─────────────────────────────╮
+  │ 空字符串是内部根路径哨兵，不能按用户路径校验 │
+  ╰───────────────────────────────────────────────╯
+
+    ✓ read_file  lib/stage.js  28ms
+    ✓ exec       exit 0        21ms
+
+  RESULT
+  修复路径校验、索引排序和测试发现。
+
+  1. 保留真实 traversal 拒绝
+     - 只对内部根哨兵使用 allowDot
+     - 用户输入仍禁止空路径和 ..
+  2. 统一 Work Group 输出
+  ▸ 12 more lines · Enter open</pre>
+<table><thead><tr><th>层级</th><th>视觉规则</th><th>内容宽度与间距</th></tr></thead><tbody>
+<tr><td>User Turn</td><td>Accent 竖线或左侧弱色带；说话者粗体；正文最多缩进 2 列</td><td>回合前 1 行留白；正文优先换行</td></tr>
+<tr><td>Assistant</td><td>Accent 起点标记 + 粗体说话者；正文使用正常 Text，不使用整块背景</td><td>正文相对 gutter 缩进 2 列；段落间 1 行</td></tr>
+<tr><td>Work Group</td><td>Reasoning 紫色、Tool 青色；连续工具调用不逐项留空</td><td>相对 Assistant 再缩进 2 列；默认最多展示 4–6 项</td></tr>
+<tr><td>Result / Summary</td><td>独立分组标题；正文对比度高于 Reasoning 和 Tool 日志</td><td>始终可见；不被折叠进历史工具组</td></tr>
+<tr><td>Nested Content</td><td>最多 3 个视觉层级；超出层级进入详情 Panel</td><td>每级 2 列，最小正文宽度 24 列</td></tr>
+</tbody></table>
+<div class="warn rule">禁止“所有内容都从第 0 列开始，只靠颜色区分”。同一屏只保留一个强调边框和一个反向选中项；路径、耗时、计数等元数据统一使用 Muted/Dim。背景色只用于焦点、选区和当前活动项。</div>
+<h3>5.4 留白与内容预算</h3>
+<ul><li><b>Turn gap：</b>用户回合之间固定 1 行；同一回合的连续工具调用之间为 0 行。</li><li><b>Result priority：</b>最终回答优先于运行历史；历史只能向上滚动，不把结果挤出屏幕。</li><li><b>Detail budget：</b>Reasoning 默认最多 6 行，Tool 成功摘要 1 行，失败/运行中 Tool 最多 4 行，详情通过 Enter 打开。</li><li><b>Long output：</b>超过预算时显示首尾摘要与 <code>▸ N more lines</code>，不把整段 stdout 混入对话正文。</li><li><b>窄屏：</b>gutter 可缩为 1 列，但正文和从属层级仍必须保持可辨识的缩进差。</li></ul>
+<div class="rule">布局使用 Rect 计算：<code>{x, y, width, height}</code>。每个 Panel 在独立 Surface 上绘制后再裁剪合成，禁止内容越过 Panel 边界。</div>
+</section>
+
+<section id="panels">
+<h2>6. Panel 系统</h2>
+<h3>6.1 核心模型</h3>
+<pre>interface PanelSpec {
+  id: string;
+  kind: 'inline' | 'context' | 'overlay';
+  title?: string;
+  badge?: StyledSpan[];
+  border: 'none' | 'single' | 'rounded';
+  focusable: boolean;
+  scrollable: boolean;
+  collapsible: boolean;
+  minWidth?: number;
+  maxHeight?: number | 'fill';
+  children: Block[];
+  footer?: Block[];
+}
+
+interface PanelState {
+  id: string;
+  rect: Rect;
+  scroll: { x: number; y: number };
+  focused: boolean;
+  collapsed: boolean;
+  generation: number;
+}</pre>
+<h3>6.2 Panel 类型</h3>
+<table><thead><tr><th>Panel</th><th>默认形态</th><th>内容</th></tr></thead><tbody>
+<tr><td>Conversation</td><td>常驻主 Panel</td><td>用户、回答、Work Group、最终回答</td></tr>
+<tr><td>Reasoning</td><td>内联可折叠</td><td>Provider-visible reasoning、live、完成摘要</td></tr>
+<tr><td>Tool</td><td>内联折叠</td><td>名称、风险、参数摘要、耗时、输出、Artifact</td></tr>
+<tr><td>Terminal</td><td>内联折叠</td><td>命令、cwd、stdout/stderr、exit code</td></tr>
+<tr><td>Diff</td><td>内联摘要 / overlay</td><td>文件、hunk、增删行、验证状态</td></tr>
+<tr><td>Approval</td><td>黄色内联 Panel</td><td>风险、动作摘要、允许/拒绝</td></tr>
+<tr><td>Context</td><td>宽屏可选右栏</td><td>Plan、Agents、Files、Queue</td></tr>
+<tr><td>Sessions / Agents / Review / Status</td><td>全屏 overlay</td><td>导航和详情</td></tr>
+<tr><td>Command / Help</td><td>全屏 overlay</td><td>命令搜索和快捷键</td></tr>
+</tbody></table>
+<h3>6.3 Panel 焦点</h3>
+<ul><li>焦点 token 只影响边框、标题和选中行，不改变内容本身状态颜色。</li><li>内联 Panel 默认不抢焦点；Enter 展开后视图滚动。</li><li>Overlay 关闭时必须恢复进入前的焦点、Composer 光标和草稿。</li><li>滚动遵循“手动滚动后暂停自动跟随”，到顶部/底部才恢复可选 auto-follow。</li></ul>
+<h3>6.4 多会话与通用 Agent Board</h3>
+<table><thead><tr><th>视图</th><th>信息层级</th><th>交互与状态归属</th></tr></thead><tbody>
+<tr><td>Sessions overlay</td><td>当前标记、任务状态、标题、项目/分支、活动、未读/注意、更新时间</td><td>按会话保存草稿和滚动锚点；切换只替换 Projection 订阅，不停止旧 Session 的后台任务。</td></tr>
+<tr><td>Agents overlay</td><td>任意 Profile 名、层级缩进、foreground/background 模式、运行状态、摘要和 attention</td><td>树形结构来自 Parent Task，不预设固定角色；过滤命中子项时保留祖先路径；Enter 进入子 Session，Esc 回到父 Session 的原看板位置。</td></tr>
+<tr><td>Agent 详情 / Merge</td><td>任务摘要、变更量、验证结果、风险、工作区合并入口</td><td>详情是受控 overlay；合并必须先 preview 再 apply，默认不改父 Working Copy。</td></tr>
+</tbody></table>
+<div class="rule">Session 与 Agent 导航共享同一套 Route 栈和焦点恢复规则。背景事件只能更新状态和摘要；除非用户主动进入，不能改变当前 Session、选中项或 Composer 焦点。</div>
+</section>
+
+<section id="format">
+<h2>7. 格式化内容</h2>
+<h3>7.1 Markdown 子集</h3>
+<table><thead><tr><th>元素</th><th>样式</th><th>降级</th></tr></thead><tbody>
+<tr><td>Heading</td><td>粗体 + Accent</td><td><code>##</code> 保留</td></tr>
+<tr><td>Bold / Italic</td><td>ANSI attribute</td><td>原 Markdown 保留</td></tr>
+<tr><td>Bullet / Number</td><td>Unicode 项目符号与缩进</td><td>纯文本列表</td></tr>
+<tr><td>Inline code</td><td>Tool 色 + 弱背景</td><td>反引号保留</td></tr>
+<tr><td>Code fence</td><td>语言高亮 + 行号可选</td><td>等宽普通文本</td></tr>
+<tr><td>Quote</td><td>Muted + 左侧竖线</td><td><code>&gt;</code></td></tr>
+<tr><td>Link</td><td>Accent + OSC 8（支持时）</td><td>显示 URL</td></tr>
+<tr><td>Table</td><td>宽屏表格；窄屏键值列表</td><td>逐行字段</td></tr>
+</tbody></table>
+<h3>7.2 代码与 Diff</h3>
+<pre>支持基础语言：
+  javascript/typescript, json, shell, html, css
+
+Diff:
+  + added     成功色前景或弱背景
+  - removed   错误色前景或弱背景
+  @@ hunk     Accent + 独立行
+   file path  Accent
+   tests      ✓ PASS / ! FAIL / ○ SKIP</pre>
+<p>语法高亮以 token span 输出；无法识别语言时回退到普通等宽文本。超长代码块和日志不进入常驻高度，默认只显示摘要和前后若干行，Enter 打开详情 Panel。</p>
+<h3>7.3 Work Group</h3>
+<p>同一用户任务下的 Reasoning、Tool、Command 和子 Agent 事件合并成 Work Group。运行中展示关键活动；完成后折叠为 <code>Worked 2m 14s · 6 tools · 2 agents</code>，失败时保持关键证据展开。</p>
+</section>
+
+<section id="reasoning">
+<h2>8. Reasoning 展示</h2>
+<div class="warn rule">只展示 Provider 实际返回且允许展示的 <code>reasoning_content</code>、<code>reasoning</code> 或 <code>thinking</code>。本地“等待模型”动画不能被描述成真实推理，更不能伪造 Chain-of-Thought。</div>
+<h3>8.1 状态模型</h3>
+<pre>ReasoningState =
+  unavailable   Provider 不返回可见 reasoning
+  waiting       请求已发出，尚未收到首个 token
+  streaming     正在接收 reasoning_delta
+  complete      正常完成
+  failed        Reasoning 流错误或中断
+
+ReasoningMode =
+  hidden | preview | full</pre>
+<table><thead><tr><th>状态</th><th>UI</th><th>行为</th></tr></thead><tbody>
+<tr><td>unavailable</td><td>不创建 Reasoning Panel</td><td>WAIT/RUN 状态由活动行表达。</td></tr>
+<tr><td>waiting</td><td><code>Waiting for model · 00:03</code></td><td>不明示为推理内容。</td></tr>
+<tr><td>streaming</td><td>Reasoning 色 Panel，最近 4–6 行</td><td>随流更新；用户上滚后暂停自动跟随。</td></tr>
+<tr><td>complete</td><td><code>▸ Thought for 14s · 286 chars</code></td><td>Enter 展开；再次折叠。</td></tr>
+<tr><td>failed</td><td>Error 边框 + 原因</td><td>保留已收到的内容，不丢弃证据。</td></tr>
+</tbody></table>
+<h3>8.2 展示模式</h3>
+<div class="grid3">
+<div class="card"><h3>hidden</h3><p>只显示“Thought for 14s”入口；适合不关注推理的用户。</p></div>
+<div class="card"><h3>preview</h3><p>live 显示最近 4–6 行，完成后折叠。默认推荐。</p></div>
+<div class="card"><h3>full</h3><p>live 展示完整 reasoning，高度最多为屏幕的 30%，其余滚动。</p></div>
+</div>
+<h3>8.3 交互</h3>
+<ul><li><code>Ctrl+T</code> 循环切换 hidden/preview/full，并在状态栏短暂显示当前模式。</li><li>在 Reasoning 行或摘要上按 Enter 展开/折叠。</li><li><code>Ctrl+T</code> 在全屏 Reasoning Inspector 中打开时，可搜索、复制和跳到最新。</li><li>Reasoning 与通用 Activity 行去重：存在真实 Reasoning 时，不再重复显示“Thinking”占位。</li><li>默认 live 跟随底部；用户通过 PageUp/滚轮离开底部后显示“New reasoning below”，不强行拉回。</li></ul>
+</section>
+
+<section id="interaction">
+<h2>9. 交互与快捷键</h2>
+<table><thead><tr><th>按键</th><th>Conversation</th><th>Panel / Overlay</th></tr></thead><tbody>
+<tr><td>Enter</td><td>发送</td><td>展开/激活选中项</td></tr>
+<tr><td>Shift+Enter / Ctrl+J</td><td>换行</td><td>无</td></tr>
+<tr><td>Ctrl+C</td><td>停止；空闲时两次确认退出</td><td>关闭当前临时视图</td></tr>
+<tr><td>Ctrl+T</td><td>切换 Reasoning 模式</td><td>打开/切换 Reasoning Inspector</td></tr>
+<tr><td>Ctrl+B</td><td>切换宽屏 Context Panel</td><td>关闭 Context 并返回焦点</td></tr>
+<tr><td>Ctrl+K / Ctrl+G / Ctrl+I / Ctrl+O / Ctrl+P</td><td>Session / Agents / Status / Review / Commands</td><td>切换到对应临时视图</td></tr>
+<tr><td>PageUp / PageDown</td><td>滚动 Transcript</td><td>滚动当前 Panel</td></tr>
+<tr><td>Esc</td><td>取消选择，不清空草稿</td><td>返回上一路由</td></tr>
+<tr><td>?</td><td>Composer 为空时打开帮助</td><td>打开快捷键帮助</td></tr>
+</tbody></table>
+<h3 id="cursor">9.1 原生光标、闪烁与 IME 锚点</h3>
+<div class="warn rule">输入框显示静态 <code>▌</code> 字符不是完整的光标实现。真实光标必须由终端定位并显示，否则用户无法可靠判断焦点、字符插入点和 IME 组合文本位置。</div>
+<pre>CursorTarget {
+  sessionId: string
+  field: 'composer' | 'search' | 'confirmation'
+  row: number
+  column: number
+  graphemeOffset: number
+}
+
+CursorState =
+  hidden          overlay 打开、Panel 聚焦或失焦
+  visible         Composer/Search 聚焦，等待输入
+  composing       IME 正在组合，不移动锚点
+  fallback        Host 不支持原生光标时的安全降级</pre>
+<table><thead><tr><th>阶段</th><th>行为</th><th>约束</th></tr></thead><tbody>
+<tr><td>绘制 Frame</td><td>先隐藏光标并完成脏区更新，避免光标在旧位置闪烁</td><td>流式正文更新不能抢走输入光标</td></tr>
+<tr><td>定位</td><td>根据 Composer 的实际 grapheme offset、wrap 和 Panel Rect 计算绝对 row/column</td><td>中文、Emoji、组合字符和软换行不能产生列漂移</td></tr>
+<tr><td>显示</td><td>发送绝对定位 CSI，然后显示原生闪烁块状光标；与提示符 <code>&gt;</code> 之间保留一个空格 cell</td><td>默认使用终端闪烁，不由 UI 高频定时器驱动</td></tr>
+<tr><td>IME</td><td>组合输入期间保持光标锚点与输入法候选框位置一致</td><td>Composition 事件不能误触快捷键或换行</td></tr>
+<tr><td>失焦/Overlay</td><td>发送隐藏光标；关闭后恢复目标 input、草稿、selection 与锚点</td><td>Session 快速切换不得复用旧 Session 坐标</td></tr>
+</tbody></table>
+<h3>9.2 光标对象接口</h3>
+<pre>interface TerminalCursorController {
+  hide(): void
+  place(target: CursorTarget): void
+  show(shape?: 'bar' | 'block'): void
+  capture(sessionId: string): CursorTarget
+  restore(sessionId: string): void
+  dispose(): void
+}</pre>
+<ul><li>Frame 更新顺序固定为：<code>hide cursor → diff rows → place cursor → show cursor</code>。</li><li>光标目标保存在客户端 UI State，不进入 Session Snapshot；Session 只保存 draft 和逻辑 cursor offset。</li><li>不支持 DECSCUSR 的终端使用 Host 默认闪烁；只有非标准 Host 才使用受控的手动闪烁回退。</li><li>非 TTY/pipe 模式不输出任何光标控制序列。</li></ul>
+<div class="rule">Panel 不是一个新模式系统。用户不需要学习“普通模式 / Panel 模式”；只根据当前焦点执行同一组语义动作。</div>
+</section>
+
+<section id="architecture">
+<h2>10. 渲染架构与核心对象</h2>
+<pre class="diagram">Projection + Runtime Facts + UI State
+                  │
+                  ▼
+             BlockBuilder
+ User / Answer / Reasoning / Tool / Diff / Approval
+                  │
+                  ▼
+              ViewModel
+                  │
+                  ▼
+             LayoutEngine ───── Terminal size / Theme
+                  │
+                  ▼
+               PanelTree
+                  │
+        ┌─────────┴──────────┐
+        ▼                    ▼
+ Markdown/Code/Diff     Panel Scroll/Focus
+        └─────────┬──────────┘
+                  ▼
+             ScreenBuffer
+         cell + spans + width + attrs
+                  │
+                  ▼
+            AnsiComposer
+                  │
+                  ▼
+        TerminalDiffRenderer</pre>
+<table><thead><tr><th>对象</th><th>职责</th><th>不负责</th></tr></thead><tbody>
+<tr><td><code>ThemeResolver</code></td><td>主题 token、颜色深度、无颜色降级。</td><td>业务状态判断。</td></tr>
+<tr><td><code>BlockBuilder</code></td><td>把 Projection rows 合并为可理解的内容块。</td><td>访问终端或写 ANSI。</td></tr>
+<tr><td><code>LayoutEngine</code></td><td>Status、Transcript、Context、Composer、Overlay 的 Rect 计算。</td><td>解析 Markdown。</td></tr>
+<tr><td><code>PanelManager</code></td><td>Panel 栈、焦点、折叠、滚动和恢复。</td><td>改变 Runtime 事实。</td></tr>
+<tr><td><code>MarkdownRenderer</code></td><td>Markdown 到 StyledSpan / Block。</td><td>执行链接或命令。</td></tr>
+<tr><td><code>CodeHighlighter</code> / <code>DiffRenderer</code></td><td>代码、命令输出和 Diff 的 span 样式。</td><td>修改文件。</td></tr>
+<tr><td><code>ReasoningPresenter</code></td><td>Provider reasoning 状态、摘要、折叠和自动跟随。</td><td>伪造或补全思考内容。</td></tr>
+<tr><td><code>TranscriptLayout</code></td><td>User/Assistant/Work/Result 的 gutter、缩进、留白和内容预算。</td><td>改变 Projection 事件顺序。</td></tr>
+<tr><td><code>FocusManager</code></td><td>Composer、Transcript、Panel、Overlay 的唯一焦点与恢复。</td><td>理解业务状态。</td></tr>
+<tr><td><code>TerminalCursorController</code></td><td>原生光标定位、显隐、形状、IME 锚点和恢复。</td><td>决定光标应属于哪个业务输入，只消费 CursorTarget。</td></tr>
+<tr><td><code>ScreenBuffer</code></td><td>二维 cell、Unicode 宽度、裁剪和背景。</td><td>业务事件。</td></tr>
+<tr><td><code>AnsiComposer</code></td><td>Cell 样式到 ANSI 序列。</td><td>布局。</td></tr>
+<tr><td><code>TerminalDiffRenderer</code></td><td>比较前后 ScreenBuffer，只更新变化 cell。</td><td>访问 Projection。</td></tr>
+<tr><td><code>RenderScheduler</code></td><td>16–33ms 合并流式更新，resize/input 立即刷。</td><td>修改内容顺序。</td></tr>
+<tr><td><code>TerminalHostBridge</code></td><td>raw mode、size、input、output。</td><td>理解 Agent 语义。</td></tr>
+</tbody></table>
+<h3>10.1 StyledSpan</h3>
+<pre>interface StyledSpan {
+  text: string;
+  style: {
+    fg?: ThemeToken;
+    bg?: ThemeToken;
+    bold?: boolean;
+    dim?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+  }
+}
+
+interface Cell {
+  text: string;
+  width: 0 | 1 | 2;
+  continuation: boolean;
+  style: ResolvedStyle;
+  hyperlink?: string;
+}</pre>
+<h3>10.2 Reasoning 流</h3>
+<pre>ModelEvent.reasoning_delta
+  → SessionRuntime reasoning row
+  → BlockBuilder ReasoningBlock
+  → ReasoningPresenter
+  → MarkdownRenderer / safe plain spans
+  → inline Panel or Inspector
+  → ScreenBuffer + diff render</pre>
+<h3>10.3 Panel 流</h3>
+<pre>Keymap.openPanel(id)
+  → PanelManager.push()
+  → LayoutEngine.layout()
+  → BlockRenderer.render()
+  → ScreenBuffer.markDirty(rect)
+  → AnsiComposer.diff(previous, next)
+  → TerminalHostBridge.write()</pre>
+<h3>10.4 层级与光标合成流</h3>
+<pre>Projection rows
+  → TranscriptLayout(gutter / body / nested)
+  → BlockBuilder + Panel painter
+  → Frame diff painter
+  → FocusManager.resolveCursorTarget()
+  → TerminalCursorController.hide()
+  → write changed rows
+  → TerminalCursorController.place(target)
+  → TerminalCursorController.show()</pre>
+<h3>10.5 流式背压与持久化合并</h3>
+<p>Reasoning/Answer 的 Delta 可能远高于屏幕刷新频率。Projection 事件、UI Frame 和 Session Snapshot 必须分别节流，不能把每个 token 同时转换成一次全量渲染和一次全量写入。</p>
+<table><thead><tr><th>路径</th><th>合并策略</th><th>一致性约束</th></tr></thead><tbody>
+<tr><td>Projection 读取</td><td>Runtime 产生新对象后按不可变值传递；UI 读取不 structuredClone 全历史。</td><td>消费者只读；Session 切换仍按 generation/epoch 拒绝迟到帧。</td></tr>
+<tr><td>屏幕渲染</td><td><code>RenderScheduler</code> 约 33ms 合并，最多 30fps；resize 强制重算。</td><td>最终 Frame 必须包含最后一次 Projection 状态。</td></tr>
+<tr><td>会话持久化</td><td>约 50ms debounce；最多一个 Snapshot 写入在途，新事件只标记 dirty。</td><td>命令 ACK 前必须 flush；退出/停止时 flush 最后一次快照。</td></tr>
+<tr><td>长内容解析</td><td>只解析可视预算内的尾部与分段摘要，完整内容保留在 Projection/详情视图。</td><td>不得丢失 Session 数据，只限制 Frame 工作量。</td></tr>
+</tbody></table>
+<div class="warn rule">性能问题必须在数据流水线层解决。仅降低 TUI 刷新率但保留每 token 全量 Snapshot，仍会造成无界内存增长。</div>
+</section>
+
+<section id="responsive">
+<h2>11. 响应式、降级与无障碍</h2>
+<table><thead><tr><th>条件</th><th>布局</th><th>降级</th></tr></thead><tbody>
+<tr><td>≥120 列</td><td>Conversation + 可选 Context Panel</td><td>Context 无内容时自动 0 宽。</td></tr>
+<tr><td>90–119 列</td><td>单主栏，Work 内联 Panel</td><td>Context 只通过 overlay。</td></tr>
+<tr><td>60–89 列</td><td>单主栏，状态栏压缩</td><td>Diff 简化，表格转键值。</td></tr>
+<tr><td>&lt;60 列</td><td>纯单栏，装饰边框最小化</td><td>颜色和图标可省略，状态词保留。</td></tr>
+<tr><td>高度 &lt;20</td><td>隐藏 footer hint</td><td>Composer 最小 1 行。</td></tr>
+<tr><td>NO_COLOR / mono</td><td>普通文本 + 标签</td><td>所有状态可辨识。</td></tr>
+<tr><td>reduced motion</td><td>静态 spinner/无 shimmer</td><td>Reasoning live 仍更新文本。</td></tr>
+<tr><td>非 TTY / pipe</td><td>纯文本输出</td><td>不输出光标控制与局部刷新序列。</td></tr>
+</tbody></table>
+<ul><li>宽度以终端显示 cell 计算，支持中文、Emoji、组合字符和零宽字符。</li><li>控制字符清洗发生在 Markdown 前和 ANSI 合成前两处。</li><li>Panel 边框只是辅助；层级和焦点必须有文字/符号表达。</li><li>IME 组合输入期间不误触快捷键。</li></ul>
+</section>
+
+<section id="extension">
+<h2>12. 扩展 UI 协议</h2>
+<table><thead><tr><th>贡献</th><th>允许</th><th>限制</th></tr></thead><tbody>
+<tr><td>Status Cell</td><td>key、priority、StyledSpan[]、action</td><td>所有扩展最多 2 个可见 cell 或主状态栏宽度 20%。</td></tr>
+<tr><td>Activity Summary</td><td>单行 Work item</td><td>不能自动展开、不能占永久高度。</td></tr>
+<tr><td>Detail Panel</td><td>受控 overlay</td><td>Esc 返回；不能改 Composer 焦点。</td></tr>
+<tr><td>Command</td><td>标题、描述、availability、handler</td><td>按 Host/Session 能力过滤。</td></tr>
+<tr><td>Badge / Icon</td><td>单 cell 或语义文字</td><td>不能直接写 ANSI。</td></tr>
+</tbody></table>
+<div class="warn rule">扩展不能创建常驻 Sidebar、Top Dashboard、第二 Composer 或劫持全局快捷键。扩展样式通过 Theme token，而不是自带颜色字符串。</div>
+</section>
+
+<section id="persistence">
+<h2>13. UI 状态与持久化</h2>
+<pre>GlobalUiState {
+  theme: tiny-dark | tiny-light | mono
+  colorDepth: auto | truecolor | ansi256 | ansi16 | none
+  reasoningMode: hidden | preview | full
+  contextPanel: hidden | visible
+  showHints: boolean
+}
+
+SessionUiState {
+  draft, cursor, attachments, selectedSkill
+  scrollAnchor, expandedItemIds
+  reasoningExpandedIds
+  activePanel, panelScroll
+  lastReasoningMode
+}</pre>
+<p>主题、Reasoning 模式和 Context Panel 偏好属于客户端 UI 状态，不写入 Session Snapshot。Reasoning 内容本身属于 Session Event/Projection，需按现有持久化与安全策略保存。</p>
+</section>
+
+<section id="phases">
+<h2>14. 实施阶段</h2>
+<div class="phase"><div class="phase-no">P1</div><div><h2>ANSI Foundation</h2></div></div>
+<ul><li>ThemeResolver、StyledSpan、ScreenBuffer、AnsiComposer。</li><li>Terminal capability detection、无颜色与 pipe 模式。</li><li>用 Screen diff 替换全屏 clear。</li><li>TerminalCursorController、Composer 光标定位和 IME 锚点。</li></ul>
+<div class="phase"><div class="phase-no">P2</div><div><h2>Block 与 Panel</h2></div></div>
+<ul><li>User/Answer/Work/Session/Agent Block。</li><li>TranscriptLayout 的 gutter、缩进、留白和内容预算。</li><li>PanelSpec、PanelManager、焦点、滚动、折叠、overlay。</li><li>状态栏、工具行、Work Group 与 Result 色彩化。</li></ul>
+<div class="phase"><div class="phase-no">P3</div><div><h2>Reasoning</h2></div></div>
+<ul><li>Waiting / reasoning 区分与去重。</li><li>preview/full/hidden、自动跟随与暂停。</li><li>Reasoning Inspector、搜索和复制。</li></ul>
+<div class="phase"><div class="phase-no">P4</div><div><h2>Rich Formatting</h2></div></div>
+<ul><li>Markdown 子集、代码高亮、Diff、命令输出、表格降级。</li><li>Artifact 和大内容详情 Panel。</li></ul>
+<div class="phase"><div class="phase-no">P5</div><div><h2>Performance &amp; Extensions</h2></div></div>
+<ul><li>RenderScheduler、脏区、流式批量更新。</li><li>Projection 不可变读取、Persistence debounce 与单一在途写入。</li><li>扩展 UI token 预算和详情协议。</li><li>PTY、Golden、状态空间和性能门禁。</li></ul>
+</section>
+
+<section id="acceptance">
+<h2>15. 完成定义</h2>
+<table><thead><tr><th>维度</th><th>验收标准</th></tr></thead><tbody>
+<tr><td>视觉</td><td>深/浅/mono 主题可用；正文、Reasoning、工具、成功、警告、错误、Diff 有稳定语义色。</td></tr>
+<tr><td>Panel</td><td>内联 Work、Reasoning、Tool、Diff、Context 和 overlay 可由同一模型渲染；resize/scroll/focus 正确。</td></tr>
+<tr><td>格式化</td><td>Markdown、代码、列表、表格、命令和 Diff 可读，异常输入安全降级。</td></tr>
+<tr><td>Reasoning</td><td>Provider 可见 reasoning 实时展示、完成后折叠、可展开搜索；不伪造、不重复 Thinking。</td></tr>
+<tr><td>层级</td><td>User、Assistant、Reasoning、Tool 和 Result 有稳定的 gutter/缩进/留白差异；连续内容不表现为同一列日志。</td></tr>
+<tr><td>光标</td><td>Composer 聚焦时原生闪烁块状光标可见，并与 <code>&gt;</code> 保留一个空格；行列与 IME 锚点正确；overlay 和 Session 切换后安全恢复。</td></tr>
+<tr><td>紧凑</td><td>80×24 下无需侧栏，Composer 和 P0/P1 状态始终可见。</td></tr>
+<tr><td>性能</td><td>流式 10k 事件下按键到画面 p95 ≤ 50ms；不全屏反复 clear；内存有界。</td></tr>
+<tr><td>背压</td><td>高频 Delta 不产生逐事件全量渲染或 Snapshot 队列；最终文本与持久化内容完整。</td></tr>
+<tr><td>安全</td><td>模型/工具/扩展不能注入控制序列或越界覆盖 Panel。</td></tr>
+<tr><td>测试</td><td>Theme、Block、Panel、Format、Reasoning、PTY Golden、状态空间、性能和故障注入全部通过。</td></tr>
+</tbody></table>
+<div class="rule">最终视觉目标：像成熟的终端工作台，而不是在终端里打印普通日志。紧凑时保持对话优先；需要时 Panel 提供结构化上下文；Reasoning 可观察但不抢占回答。</div>
+<p><a href="tinyai-rich-tui-testing-v1.html">查看配套富终端 UI 测试方案 →</a></p>
+<p class="foot">设计基线：当前 <code>src/tui/render.ts</code>、<code>src/tui/status-bar.ts</code>、<code>src/node/run-tui.ts</code>、<code>core/session-runtime.ts</code> 与 <code>adapters/openai-model.ts</code>。</p>
+</section>
+</div>
+</body>
+</html>

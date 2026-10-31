@@ -1894,7 +1894,12 @@ function approvalSummary(name: string, input: unknown, zh: boolean): string {
   if (name === 'navigate') return `${zh ? '打开页面' : 'Open page'}${suffix}`;
   if (name === 'exec') return `${zh ? '执行命令' : 'Run command'}${suffix}`;
   if (name === 'run_tests') return `${zh ? '运行测试' : 'Run tests'}${suffix}`;
-  if (name === 'write_file' || name === 'apply_patch' || name === 'edit') {
+  if (
+    name === 'write_file' ||
+    name === 'apply_patch' ||
+    name === 'apply_unified_diff' ||
+    name === 'edit'
+  ) {
     return `${zh ? '修改文件' : 'Edit file'}${suffix}`;
   }
   if (name === 'spawn_agent') return `${zh ? '启动子 Agent' : 'Start subagent'}${suffix}`;

@@ -204,7 +204,7 @@ export class NodeTerminal implements HostTerminal {
     this.streams.output.off('resize', this.handleResize);
     this.streams.input.setRawMode?.(false);
     this.streams.input.pause();
-    this.streams.output.write('\x1b[?25h\x1b[?1049l');
+    this.streams.output.write('\x1b[0 q\x1b[?25h\x1b[?1049l');
   }
 }
 

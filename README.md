@@ -1,5 +1,22 @@
 # tinyai
 
+## Engineering governance
+
+Release versions use `A.B.C`: major for incompatible changes, minor for new
+features and patch for small changes or bug fixes. Every new requirement gets a
+unique `REQ-<AREA>-<NNN>` id and must link both a design section and a test
+design section.
+
+- Policy: [`docs/engineering-versioning-and-traceability.html`](docs/engineering-versioning-and-traceability.html)
+- Registry: [`policy/requirement-registry.json`](policy/requirement-registry.json)
+- Templates: [`docs/requirements/`](docs/requirements/)
+- Validate registry: `npm run requirements:check`
+- Install commit enforcement: `npm run hooks:install`
+
+Commits use `type(REQ-ID): summary` and trail a matching requirement, version,
+design path, test path and test evidence. See the policy document and
+`.gitmessage` for the exact format.
+
 tinyai is a browser agent that runs in Chrome/Edge and a local coding agent that runs in a restricted macOS Seatbelt workspace.
 
 The extension uses one product UI and one authoritative runtime. It no longer includes the old side-panel runtime.

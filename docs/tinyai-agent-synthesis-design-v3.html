@@ -1443,7 +1443,8 @@ interface VerificationResult {
               <pre><code>interface SandboxProvider extends ExecutionProvider {
   createWorkspace(sessionId: string, template: WorkspaceTemplate): Promise&lt;WorkspaceRef&gt;;
   readFile(path: string): Promise&lt;FileChunk&gt;;
-  writePatch(patch: UnifiedPatch): Promise&lt;PatchResult&gt;;
+  applyContextPatch(patch: ContextPatch): Promise&lt;PatchResult&gt;;
+  applyUnifiedDiff(patch: UnifiedPatch): Promise&lt;PatchResult&gt;;
   search(query: SearchQuery): Promise&lt;SearchResult[]&gt;;
   startProcess(spec: ProcessSpec, signal: AbortSignal): Promise&lt;ProcessHandle&gt;;
   runTests(spec: TestSpec, signal: AbortSignal): Promise&lt;TestReport&gt;;
@@ -1454,7 +1455,7 @@ interface VerificationResult {
             </div>
           </div>
           <h4>交互</h4>
-          <p>ToolExecutor 将代码动作路由到 SandboxProvider；PolicyEngine 校验工作区、网络和命令能力；Verifier 消费 TestReport；ArtifactStore 保存 diff/日志；SessionLifecycle stop 等待进程、PTY、日志和 volume lease 释放。</p>
+          <p>ToolExecutor 将代码动作路由到 SandboxProvider；模型默认使用上下文 Patch DSL，内部生成 unified diff；外部标准补丁使用独立入口。PolicyEngine 校验工作区、网络和命令能力；Verifier 消费 TestReport；ArtifactStore 保存 diff/日志；SessionLifecycle stop 等待进程、PTY、日志和 volume lease 释放。</p>
           <h4>行为基线</h4>
           <p><strong>PI Tool 契约</strong>和 <strong>ZCode 权限/进程管理纪律</strong>适配采用。<strong>RISK-ZC</strong>明确：yolo 不是沙盒。目标是安装主机零信任，由独立执行层实施限制。</p>
           <h4>验收</h4>

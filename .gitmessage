@@ -1,0 +1,9 @@
+feat(REQ-AREA-001): concise summary
+
+Explain what changed and why.
+
+Requirement: REQ-AREA-001
+Version: 0.2.0
+Design: docs/design.html#requirement-anchor
+Tests: docs/testing.html#requirement-anchor
+Test-Evidence: npm run check

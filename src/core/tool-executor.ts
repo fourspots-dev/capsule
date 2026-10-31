@@ -15,6 +15,10 @@ import type {
 
 export class ToolExecutor {
   private readonly tools: Map<string, ToolDefinition>;
+  private readonly repeatedFailures = new Map<
+    string,
+    { count: number; lastCode: string }
+  >();
 
   constructor(
     tools: Iterable<ToolDefinition>,
@@ -104,6 +108,33 @@ export class ToolExecutor {
       }
     }
 
+    const failureKey =
+      tool.risk === 'read'
+        ? undefined
+        : this.failureKey(invocation, tool.name, input);
+    const repeated = failureKey
+      ? this.repeatedFailures.get(failureKey)
+      : undefined;
+    if (failureKey && repeated && repeated.count >= 3) {
+      return {
+        ...base,
+        status: 'failed',
+        error: new AgentError(
+          'TOOL_RETRY_BLOCKED',
+          `Blocked repeated ${tool.name} call after ${repeated.count} identical failures. Re-read current state or change the request before retrying.`,
+          {
+            details: {
+              tool: tool.name,
+              retryCount: repeated.count,
+              lastCode: repeated.lastCode,
+              suggestion:
+                'Re-read the current file and submit a smaller or corrected operation',
+            },
+          }
+        ).toStructured(),
+      };
+    }
+
     let policyRequiresApproval = false;
     let actionDigest: string | undefined;
     if (this.options.policy) {
@@ -172,16 +203,46 @@ export class ToolExecutor {
       const output = await this.artifactize(rawOutput, invocation);
       const result: ToolExecutionResult = { ...base, status: 'succeeded', output };
       await this.runPostHooks(invocation, input, result);
+      if (failureKey) this.repeatedFailures.delete(failureKey);
       return result;
     } catch (error) {
+      const structured = toStructuredError(error, 'TOOL_EXECUTION_FAILED');
       const result: ToolExecutionResult = {
         ...base,
         status: 'failed',
-        error: toStructuredError(error, 'TOOL_EXECUTION_FAILED'),
+        error: structured,
       };
+      if (failureKey) {
+        this.recordFailure(failureKey, structured.code);
+      }
       await this.runPostHooks(invocation, input, result);
       return result;
     }
+  }
+
+  private failureKey(
+    invocation: ToolInvocation,
+    toolName: string,
+    input: Record<string, JsonValue>
+  ): string {
+    return [
+      invocation.sessionId,
+      invocation.taskId,
+      toolName,
+      String(hashString(JSON.stringify(input))),
+    ].join(':');
+  }
+
+  private recordFailure(key: string, code: string): void {
+    const previous = this.repeatedFailures.get(key);
+    if (this.repeatedFailures.size >= 1_000 && !previous) {
+      const oldest = this.repeatedFailures.keys().next().value;
+      if (oldest) this.repeatedFailures.delete(oldest);
+    }
+    this.repeatedFailures.set(key, {
+      count: (previous?.count ?? 0) + 1,
+      lastCode: code,
+    });
   }
 
   private assertActive(signal: AbortSignal): void {
@@ -265,6 +326,15 @@ export class ToolExecutor {
       truncated: true,
     };
   }
+}
+
+function hashString(value: string): number {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
 }
 
 export function toolResultText(result: ToolExecutionResult): string {

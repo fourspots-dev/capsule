@@ -9,5 +9,6 @@ export * from './shell';
 export * from './jobs';
 export * from './search';
 export * from './patch';
+export * from './context-patch';
 export * from './sync';
 export * from './workspace';

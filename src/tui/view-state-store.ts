@@ -1,9 +1,12 @@
 import type { HostStorage } from '../host';
-import type { AgentFilter, SessionUiState } from './types';
+import type { AgentFilter, ReasoningMode, SessionUiState } from './types';
 
 interface PersistedViewState {
   schemaVersion: 1;
   activeSessionId?: string;
+  preferences?: {
+    reasoningMode?: ReasoningMode;
+  };
   sessions: Record<string, SessionUiState>;
 }
 
@@ -15,6 +18,7 @@ export interface ViewStateStorage {
 export class ViewStateStore {
   private readonly sessions = new Map<string, SessionUiState>();
   private activeSessionId?: string;
+  private reasoningMode: ReasoningMode = 'preview';
   private loading?: Promise<void>;
 
   constructor(
@@ -26,6 +30,10 @@ export class ViewStateStore {
     return this.activeSessionId;
   }
 
+  get preferredReasoningMode(): ReasoningMode {
+    return this.reasoningMode;
+  }
+
   async initialize(): Promise<void> {
     this.loading ??= this.load();
     await this.loading;
@@ -34,6 +42,11 @@ export class ViewStateStore {
   async setActive(sessionId: string): Promise<void> {
     await this.initialize();
     this.activeSessionId = sessionId;
+  }
+
+  async setReasoningMode(mode: ReasoningMode): Promise<void> {
+    await this.initialize();
+    this.reasoningMode = mode;
   }
 
   async get(sessionId: string): Promise<SessionUiState> {
@@ -81,6 +94,7 @@ export class ViewStateStore {
     const state: PersistedViewState = {
       schemaVersion: 1,
       ...(this.activeSessionId ? { activeSessionId: this.activeSessionId } : {}),
+      preferences: { reasoningMode: this.reasoningMode },
       sessions: Object.fromEntries(
         [...this.sessions].map(([id, value]) => [id, cloneState(value)])
       ),
@@ -96,6 +110,11 @@ export class ViewStateStore {
       return;
     }
     this.activeSessionId = state.activeSessionId;
+    this.reasoningMode =
+      state.preferences?.reasoningMode === 'hidden' ||
+      state.preferences?.reasoningMode === 'full'
+        ? state.preferences.reasoningMode
+        : 'preview';
     for (const [sessionId, value] of Object.entries(state.sessions)) {
       if (!value || typeof value !== 'object') continue;
       this.sessions.set(sessionId, normalizeState(sessionId, value as Partial<SessionUiState>));

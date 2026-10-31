@@ -37,13 +37,13 @@ describe('virtual workspace agent tools', () => {
 
     await execute(executor, 'apply_patch', {
       patch: [
-        '--- a/src/value.ts',
-        '+++ b/src/value.ts',
-        '@@ -1,1 +1,2 @@',
+        '*** Begin Patch',
+        '*** Update File: src/value.ts',
+        '@@',
         '-export const value = 1;',
         '+export const value = 2;',
         '+export const doubled = value * 2;',
-        '',
+        '*** End Patch',
       ].join('\n'),
     });
     expect(new TextDecoder().decode(await workspace.fs.read('src/value.ts'))).toBe(
@@ -143,6 +143,101 @@ describe('virtual workspace agent tools', () => {
       status: 'failed',
       error: { code: 'EDIT_TEXT_AMBIGUOUS' },
     });
+  });
+
+  it('separates contextual apply_patch from strict unified diff input', async () => {
+    const { executor, workspace } = setup();
+    await execute(executor, 'write_file', {
+      path: 'a.txt',
+      text: 'old\n',
+    });
+    await expect(
+      execute(executor, 'apply_patch', {
+        patch: [
+          '--- a/a.txt',
+          '+++ b/a.txt',
+          '@@ -1 +1 @@',
+          '-old',
+          '+context',
+          '',
+        ].join('\n'),
+      })
+    ).resolves.toMatchObject({
+      status: 'failed',
+      error: {
+        code: 'PATCH_PROTOCOL_INVALID',
+        details: { suggestion: expect.stringContaining('apply_unified_diff') },
+      },
+    });
+    await execute(executor, 'apply_unified_diff', {
+      patch: [
+        '--- a/a.txt',
+        '+++ b/a.txt',
+        '@@ -1 +1 @@',
+        '-old',
+        '+unified',
+        '',
+      ].join('\n'),
+    });
+    expect(new TextDecoder().decode(await workspace.fs.read('a.txt'))).toBe(
+      'unified\n'
+    );
+  });
+
+  it('blocks a fourth identical failed patch instead of retrying forever', async () => {
+    const { executor } = setup();
+    await execute(executor, 'write_file', {
+      path: 'a.txt',
+      text: 'current\n',
+    });
+    const patch = [
+      '*** Begin Patch',
+      '*** Update File: a.txt',
+      '@@',
+      '-missing',
+      '+other',
+      '*** End Patch',
+    ].join('\n');
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await expect(
+        execute(executor, 'apply_patch', { patch })
+      ).resolves.toMatchObject({
+        status: 'failed',
+        error: { code: 'PATCH_CONTEXT_NOT_FOUND' },
+      });
+    }
+    await expect(
+      execute(executor, 'apply_patch', { patch })
+    ).resolves.toMatchObject({
+      status: 'failed',
+      error: {
+        code: 'TOOL_RETRY_BLOCKED',
+        details: { retryCount: 3 },
+      },
+    });
+  });
+
+  it('advertises distinct ContextPatch and unified diff contracts', () => {
+    const { executor } = setup();
+    const descriptors = new Map(
+      executor.descriptors().map((descriptor) => [descriptor.name, descriptor])
+    );
+    expect(descriptors.get('apply_patch')?.description).toContain(
+      '*** Begin Patch'
+    );
+    expect(descriptors.get('apply_patch')?.description).toContain(
+      'Do not provide unified-diff hunk counts'
+    );
+    expect(
+      descriptors.get('apply_patch')?.parameters.properties
+    ).toMatchObject({
+      patch: {
+        description: expect.stringContaining('Do not use unified-diff headers'),
+      },
+    });
+    expect(descriptors.get('apply_unified_diff')?.description).toContain(
+      'exact @@ hunk counts'
+    );
   });
 });
 

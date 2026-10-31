@@ -59,6 +59,74 @@ describe('TuiApp and renderer', () => {
     await app.dispose();
   });
 
+  it('edits at the native cursor target instead of only appending', async () => {
+    const { app } = await appWithAnswer();
+    await app.handleInput('abc');
+    await app.handleInput('\x1b[D\x1b[D');
+    await app.handleInput('X');
+    await app.handleInput('\x1b[3~');
+
+    const frame = app.renderFrame(80, 24, {
+      theme: 'dark',
+      depth: 'none',
+    });
+    const composerLine = frame.lines[frame.cursor.row - 1];
+    expect(composerLine).toContain('> aXc');
+    expect(composerLine).not.toContain('aXc▌');
+    expect(frame.cursor).toMatchObject({
+      visible: true,
+      shape: 'block',
+      row: expect.any(Number),
+      column: expect.any(Number),
+    });
+    expect(composerLine[frame.cursor.column - 1]).toBe('c');
+    await app.dispose();
+  });
+
+  it('hides the composer cursor while an overlay owns focus', async () => {
+    const { app } = await appWithAnswer();
+    await app.handleInput('\x0b');
+    const search = app.renderFrame(80, 24).cursor;
+    expect(search.visible).toBe(true);
+    expect(search.row).toBe(3);
+    await app.handleInput('\x1b');
+    await app.handleInput('\x07');
+    expect(app.renderFrame(80, 24).cursor.visible).toBe(false);
+    await app.handleInput('\x1b');
+    expect(app.renderFrame(80, 24).cursor.visible).toBe(true);
+    await app.dispose();
+  });
+
+  it('keeps one visible space between the prompt and the native block cursor', async () => {
+    const { app } = await appWithAnswer();
+    const frame = app.renderFrame(80, 24, {
+      theme: 'dark',
+      depth: 'none',
+    });
+    const composerLine = frame.lines[frame.cursor.row - 1];
+
+    expect(frame.cursor.shape).toBe('block');
+    expect(composerLine).toContain('│ > ');
+    expect(composerLine[frame.cursor.column - 2]).toBe(' ');
+    await app.dispose();
+  });
+
+  it('keeps Unicode graphemes intact while editing around the native cursor', async () => {
+    const { app } = await appWithAnswer();
+    await app.handleInput('a👨‍👩‍👧‍👦b');
+    await app.handleInput('\x1b[D\x1b[D');
+    await app.handleInput('X');
+
+    const frame = app.renderFrame(100, 24, {
+      theme: 'dark',
+      depth: 'none',
+    });
+    const composerLine = frame.lines[frame.cursor.row - 1];
+    expect(composerLine).toContain('> aX👨‍👩‍👧‍👦b');
+    expect(composerLine).not.toContain('�');
+    await app.dispose();
+  });
+
   it('opens compact overlays and creates a local draft without polluting history', async () => {
     const { app, runtime } = await appWithAnswer();
     await app.handleInput('first task');

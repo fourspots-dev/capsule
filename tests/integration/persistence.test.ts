@@ -7,6 +7,38 @@ import { events, text } from '../harness/fakes';
 import { command, createTestWorkspace } from '../harness/workspace';
 
 describe('session persistence and cold hydration', () => {
+  it('coalesces high-frequency persistence without dropping the final stream', async () => {
+    const store = new CountingStore();
+    const workspace = createTestWorkspace({
+      model: async () =>
+        events(
+          ...Array.from({ length: 200 }, () => ({
+            type: 'text_delta' as const,
+            text: 'x',
+          })),
+          { type: 'finish', reason: 'stop' }
+        ),
+      tools: [],
+      sessionStore: store,
+    });
+
+    await workspace.runtime.command(
+      command('session_stream', 'command_stream', 'stream quickly')
+    );
+    await workspace.runtime.waitForSessionIdle('session_stream');
+    await workspace.runtime.flush('session_stream');
+
+    expect(store.saves).toBeLessThan(20);
+    expect((await store.load('session_stream'))?.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'assistant',
+          text: 'x'.repeat(200),
+        }),
+      ])
+    );
+  });
+
   it('lists active in-memory sessions even without a persistent store', async () => {
     const workspace = createTestWorkspace({
       model: async () => events(...text('active')),
@@ -286,3 +318,12 @@ describe('session persistence and cold hydration', () => {
     expect(await store.load('session_b')).toBeUndefined();
   });
 });
+
+class CountingStore extends InMemorySessionStore {
+  saves = 0;
+
+  override async save(snapshot: SessionSnapshot): Promise<void> {
+    this.saves += 1;
+    await super.save(snapshot);
+  }
+}

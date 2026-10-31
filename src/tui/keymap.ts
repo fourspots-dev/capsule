@@ -12,13 +12,19 @@ export type TuiIntent =
   | { type: 'status' }
   | { type: 'review' }
   | { type: 'commands' }
+  | { type: 'reasoning-mode' }
   | { type: 'back' }
   | { type: 'help' }
   | { type: 'up' }
   | { type: 'down' }
+  | { type: 'left' }
+  | { type: 'right' }
+  | { type: 'home' }
+  | { type: 'end' }
   | { type: 'page-up' }
   | { type: 'page-down' }
-  | { type: 'backspace' };
+  | { type: 'backspace' }
+  | { type: 'delete' };
 
 export interface KeymapContext {
   route: TuiRoute;
@@ -36,12 +42,22 @@ export function mapKey(
   if (key === '\x09') return { type: 'status' };
   if (key === '\x0f') return { type: 'review' };
   if (key === '\x10') return { type: 'commands' };
+  if (key === '\x14') return { type: 'reasoning-mode' };
   if (key === '\x1b[A' || key === '\x1bOA') return { type: 'up' };
   if (key === '\x1b[B' || key === '\x1bOB') return { type: 'down' };
+  if (key === '\x1b[D' || key === '\x1bOD') return { type: 'left' };
+  if (key === '\x1b[C' || key === '\x1bOC') return { type: 'right' };
+  if (key === '\x1b[H' || key === '\x1bOH' || key === '\x01') {
+    return { type: 'home' };
+  }
+  if (key === '\x1b[F' || key === '\x1bOF' || key === '\x05') {
+    return { type: 'end' };
+  }
   if (key === '\x1b[5~') return { type: 'page-up' };
   if (key === '\x1b[6~') return { type: 'page-down' };
   if (key === '\x1b') return { type: 'back' };
   if (key === '\x7f' || key === '\b') return { type: 'backspace' };
+  if (key === '\x1b[3~') return { type: 'delete' };
   if (key === '\n') return { type: 'newline' };
   if (key === '\r') {
     return context.route.kind === 'conversation'
@@ -51,7 +67,7 @@ export function mapKey(
   if (key === '?' && context.route.kind === 'conversation' && context.composerEmpty) {
     return { type: 'help' };
   }
-  if (key.length === 1 && key >= ' ' && key !== '\x7f') {
+  if ((key.codePointAt(0) ?? 0) >= 0x20 && key !== '\x7f') {
     return { type: 'text', text: key };
   }
   return undefined;

@@ -1,6 +1,7 @@
 import { AgentError } from '../core/errors';
 import type { JsonValue, ToolDefinition, ToolInvocation } from '../core/types';
 import type { VirtualWorkspace } from '../virtual';
+import { applyContextPatch } from '../virtual/context-patch';
 import { applyUnifiedPatch } from '../virtual/patch';
 import { globVirtualFiles, searchVirtualFiles } from '../virtual/search';
 
@@ -294,10 +295,46 @@ export function createVirtualWorkspaceTools(
     ),
     tool(
       'apply_patch',
-      'Validate and atomically apply a unified diff to virtual files.',
+      'Apply a contextual patch to one or more virtual files. Use *** Begin Patch ... *** End Patch with Update File, Add File, Delete File and Move to directives. Every Update File hunk starts with @@ or @@ anchor text. Context lines use a leading space, removed lines use -, added lines use +. Do not provide unified-diff hunk counts or ---/+++ headers; use apply_unified_diff for those.',
       schema(
         {
-          patch: { type: 'string' },
+          patch: {
+            type: 'string',
+            description:
+              'ContextPatch text beginning with *** Begin Patch and ending with *** End Patch. Do not use unified-diff headers or hunk line counts.',
+          },
+          expected_versions: { type: 'object' },
+          expected_hashes: { type: 'object' },
+        },
+        ['patch']
+      ),
+      'write',
+      'write',
+      async (input, invocation) =>
+        applyContextPatch(
+          workspace.fs,
+          requiredString(input, 'patch'),
+          {
+            signal: invocation.signal,
+            ...(numberRecord(input.expected_versions)
+              ? { expectedVersions: numberRecord(input.expected_versions)! }
+              : {}),
+            ...(stringRecord(input.expected_hashes)
+              ? { expectedHashes: stringRecord(input.expected_hashes)! }
+              : {}),
+          }
+        ) as unknown as JsonValue
+    ),
+    tool(
+      'apply_unified_diff',
+      'Apply a strict Git-style unified diff with ---/+++ headers and exact @@ hunk counts to virtual files. Use this only for standard unified diffs; prefer apply_patch for model-authored edits.',
+      schema(
+        {
+          patch: {
+            type: 'string',
+            description:
+              'Strict Git unified diff with ---/+++ headers and exact @@ hunk counts.',
+          },
           expected_versions: { type: 'object' },
           expected_hashes: { type: 'object' },
         },

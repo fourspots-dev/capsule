@@ -222,7 +222,7 @@ async function main(): Promise<void> {
       const wrote = view.rows.some(
         (row) =>
           row.kind === 'tool' &&
-          ['write_file', 'apply_patch', 'delete_file'].includes(
+          ['write_file', 'apply_patch', 'apply_unified_diff', 'delete_file'].includes(
             row.toolName ?? ''
           ) &&
           row.status === 'completed'
@@ -246,7 +246,7 @@ async function main(): Promise<void> {
       'All files and commands are virtual. Use search, patch, exec and job tools.',
       'The Virtual Shell only provides builtins: true, false, set, pwd, echo, printf, uname, which, command, env, export, cd, ls, cat, touch, mkdir, rm, cp, mv, grep, rg, head, tail, wc, find, diff, patch and test.',
       'Do not try to run node, npm, python, bash, git, sed, awk, uname from the host, /usr/bin paths or host package managers. They are intentionally unavailable.',
-      'Use write_file for new files or complete rewrites, append_file to add a complete chunk to an existing file, replace_in_file for small exact edits, and apply_patch only for valid unified diffs with exact hunk counts. Use exec with ls, cat, grep, wc, diff or test only to inspect and verify them.',
+      'Use write_file for complete rewrites, replace_in_file for small exact edits, and append_file for appending. Use apply_patch with the contextual *** Begin Patch / *** Update File / *** Add File / *** Delete File / *** End Patch syntax. Every Update hunk begins with @@ or @@ anchor text; context lines start with a space, removals with -, additions with +. Do not calculate @@ line counts or send ---/+++ headers. apply_unified_diff is only for strict Git unified diffs.',
       'read_file offset and length are byte offsets. Prefer start_line/end_line for line-oriented inspection.',
       `The imported project root is ${resolve(options.workspace)}; virtual paths are relative to that root.`,
       'Inspect before editing. Keep modifications small and reversible.',

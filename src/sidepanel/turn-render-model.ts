@@ -71,7 +71,12 @@ const EXPLORE_TOOLS = new Set([
 ]);
 
 const TERMINAL_TOOLS = new Set(['exec', 'run_tests']);
-const CHANGE_TOOLS = new Set(['write_file', 'apply_patch', 'edit']);
+const CHANGE_TOOLS = new Set([
+  'write_file',
+  'apply_patch',
+  'apply_unified_diff',
+  'edit',
+]);
 const SUBAGENT_TOOLS = new Set([
   'spawn_agent',
   'send_message',

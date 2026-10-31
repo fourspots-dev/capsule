@@ -1,7 +1,7 @@
 {
   "name": "tinyai",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "scripts": {
     "build": "npm run typecheck && npm run clean && npm run build:sidepanel && npm run build:background && npm run build:cli && npm run build:tui && npm run build:runner && npm run build:proxy && npm run build:package",
     "build:sidepanel": "esbuild src/sidepanel.ts --bundle --format=iife --target=chrome120 --outfile=extension/js/sidepanel/main.js",
@@ -16,6 +16,9 @@
     "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
     "typecheck:core": "tsc --noEmit -p tsconfig.core.json",
     "check:boundaries": "node scripts/check-core-boundaries.mjs",
+    "requirements:check": "node scripts/check-requirement-traceability.mjs",
+    "commit:check": "node scripts/check-commit-message.mjs",
+    "hooks:install": "node scripts/install-git-hooks.mjs",
     "test": "vitest run",
     "test:state": "vitest run tests/state-space tests/adapters/chrome-browser.test.ts tests/integration/chrome-runtime-extension.test.ts",
     "test:state:deep": "STATE_SPACE_DEEP=1 vitest run tests/state-space",
@@ -30,7 +33,7 @@
     "test:acceptance": "npm run typecheck && npm run typecheck:tests && npm run typecheck:core && npm run check:boundaries && npm test && npm run test:e2e",
     "test:watch": "vitest",
     "test:e2e": "npm run build && vitest run --config vitest.e2e.config.mts",
-    "check": "npm run typecheck && npm run typecheck:tests && npm run typecheck:core && npm run check:boundaries && npm test && npm run build"
+    "check": "npm run requirements:check && npm run typecheck && npm run typecheck:tests && npm run typecheck:core && npm run check:boundaries && npm test && npm run build"
   },
   "devDependencies": {
     "@types/chrome": "^0.3.6",

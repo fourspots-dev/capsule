@@ -40,7 +40,10 @@ export class SessionController {
   }
 
   get currentProjection(): ProductProjection | undefined {
-    return this.projection ? structuredClone(this.projection) : undefined;
+    // Projection objects are replaced immutably by the runtime/frame reducer.
+    // Consumers are read-only; cloning the full history on every read causes
+    // O(rows × events) allocation during streaming.
+    return this.projection;
   }
 
   async initialize(): Promise<string | undefined> {
@@ -67,7 +70,7 @@ export class SessionController {
 
     const projection = await this.runtime.loadProjection(sessionId);
     if (generation !== this.generation) return projection;
-    this.projection = structuredClone(projection);
+    this.projection = projection;
     this.activeSessionId = sessionId;
     await this.viewState.setActive(sessionId);
     const dispose = await this.runtime.subscribe(
@@ -117,13 +120,13 @@ export class SessionController {
     }
     if (!this.projection) {
       if (envelope.frame.type !== 'snapshot') return false;
-      this.projection = structuredClone(envelope.frame.projection);
+      this.projection = envelope.frame.projection;
       this.emit();
       return true;
     }
     if (this.projection.logEpoch !== envelope.logEpoch) {
       if (envelope.frame.type !== 'snapshot') return false;
-      this.projection = structuredClone(envelope.frame.projection);
+      this.projection = envelope.frame.projection;
       this.emit();
       return true;
     }
@@ -184,8 +187,7 @@ export class SessionController {
 
   private emit(): void {
     if (!this.projection) return;
-    const projection = structuredClone(this.projection);
-    for (const listener of this.listeners) listener(projection);
+    for (const listener of this.listeners) listener(this.projection);
   }
 }
 

@@ -227,6 +227,7 @@ describe('turn render model', () => {
     expect(toolFamily('read_page')).toBe('explore');
     expect(toolFamily('exec')).toBe('terminal');
     expect(toolFamily('apply_patch')).toBe('changes');
+    expect(toolFamily('apply_unified_diff')).toBe('changes');
     expect(toolFamily('spawn_agent')).toBe('subagent');
     expect(toolFamily('screenshot')).toBe('artifact');
     expect(toolFamily('unknown_tool')).toBe('other');

@@ -1,13 +1,26 @@
 import type { ProductProjection } from '../core/types';
 import { buildAgentRows, selectAgent } from './agent-board';
+import {
+  clampCursor,
+  deleteBackward,
+  deleteForward,
+  insertAtCursor,
+  moveCursor,
+} from './cursor';
 import { mapKey, type TuiIntent } from './keymap';
-import { renderTui, type TuiRenderSnapshot } from './render';
+import {
+  renderTui,
+  renderTuiFrame,
+  type TuiRenderedFrame,
+  type TuiRenderSnapshot,
+} from './render';
 import { RouteController } from './route-controller';
 import { buildSessionRows } from './session-list';
 import { SessionController } from './session-controller';
 import type {
   AgentFilter,
   RuntimeSessionSummary,
+  ReasoningMode,
   StatusBarFacts,
   TuiAgentRecord,
   TuiFocus,
@@ -51,6 +64,7 @@ export class TuiApp {
   private selectedSessionId?: string;
   private sessionQuery = '';
   private composer = '';
+  private composerCursor = 0;
   private statusMessage?: string;
   private exitArmed = false;
   private shouldExit = false;
@@ -61,6 +75,7 @@ export class TuiApp {
   private review?: TuiReviewSnapshot;
   private readonly mergePreviewed = new Set<string>();
   private readonly renderListeners = new Set<() => void>();
+  private reasoningMode: ReasoningMode = 'preview';
 
   constructor(private readonly options: TuiAppOptions) {
     this.now = options.now ?? (() => Date.now());
@@ -83,12 +98,15 @@ export class TuiApp {
   async initialize(): Promise<void> {
     this.sessions = await this.options.runtime.listSessions();
     const active = await this.sessionsController.initialize();
+    this.reasoningMode = this.viewState.preferredReasoningMode;
     this.selectedSessionId = active ?? this.sessions[0]?.sessionId;
     if (this.selectedSessionId && !active) {
       await this.sessionsController.switch(this.selectedSessionId);
     }
     if (this.sessionsController.active) {
-      this.composer = (await this.viewState.get(this.sessionsController.active)).draftText;
+      const state = await this.viewState.get(this.sessionsController.active);
+      this.composer = state.draftText;
+      this.composerCursor = clampCursor(this.composer, state.cursor);
     }
   }
 
@@ -105,6 +123,14 @@ export class TuiApp {
     }
     if (intent.type === 'sessions') {
       await this.openSessions();
+      return;
+    }
+    if (intent.type === 'reasoning-mode') {
+      const modes: ReasoningMode[] = ['hidden', 'preview', 'full'];
+      const index = modes.indexOf(this.reasoningMode);
+      this.reasoningMode = modes[(index + 1) % modes.length];
+      await this.viewState.setReasoningMode(this.reasoningMode);
+      this.statusMessage = `Reasoning view: ${this.reasoningMode}`;
       return;
     }
     if (intent.type === 'agents') {
@@ -185,6 +211,22 @@ export class TuiApp {
     return renderTui(this.snapshot(), width, height);
   }
 
+  renderStyled(
+    width: number,
+    height: number,
+    options?: Parameters<typeof renderTuiFrame>[3]
+  ): string[] {
+    return this.renderFrame(width, height, options).lines;
+  }
+
+  renderFrame(
+    width: number,
+    height: number,
+    options?: Parameters<typeof renderTuiFrame>[3]
+  ): TuiRenderedFrame {
+    return renderTuiFrame(this.snapshot(), width, height, options);
+  }
+
   onRender(listener: () => void): () => void {
     this.renderListeners.add(listener);
     return () => this.renderListeners.delete(listener);
@@ -194,7 +236,7 @@ export class TuiApp {
     if (this.sessionsController.active) {
       await this.viewState.update(this.sessionsController.active, {
         draftText: this.composer,
-        cursor: this.composer.length,
+        cursor: this.composerCursor,
       });
     }
     await this.sessionsController.dispose();
@@ -234,7 +276,30 @@ export class TuiApp {
       return;
     }
     if (intent.type === 'backspace') {
-      this.composer = this.composer.slice(0, -1);
+      const next = deleteBackward(this.composer, this.composerCursor);
+      this.composer = next.value;
+      this.composerCursor = next.cursor;
+      await this.persistDraft();
+      return;
+    }
+    if (intent.type === 'delete') {
+      const next = deleteForward(this.composer, this.composerCursor);
+      this.composer = next.value;
+      this.composerCursor = next.cursor;
+      await this.persistDraft();
+      return;
+    }
+    if (
+      intent.type === 'left' ||
+      intent.type === 'right' ||
+      intent.type === 'home' ||
+      intent.type === 'end'
+    ) {
+      this.composerCursor = moveCursor(
+        this.composer,
+        this.composerCursor,
+        intent.type
+      );
       await this.persistDraft();
       return;
     }
@@ -449,6 +514,7 @@ export class TuiApp {
       this.sessionsController.activateLocal(id);
     }
     this.composer = '';
+    this.composerCursor = 0;
     await this.persistDraft();
     const active = this.sessionsController.active;
     const ack = await this.sessionsController.send(text);
@@ -463,7 +529,9 @@ export class TuiApp {
   }
 
   private async insertText(text: string): Promise<void> {
-    this.composer += text;
+    const next = insertAtCursor(this.composer, this.composerCursor, text);
+    this.composer = next.value;
+    this.composerCursor = next.cursor;
     await this.persistDraft();
   }
 
@@ -472,7 +540,7 @@ export class TuiApp {
     if (!active) return;
     await this.viewState.update(active, {
       draftText: this.composer,
-      cursor: this.composer.length,
+      cursor: this.composerCursor,
     });
   }
 
@@ -501,13 +569,16 @@ export class TuiApp {
     this.selectedSessionId = id;
     this.sessionsController.activateLocal(id);
     this.composer = '';
+    this.composerCursor = 0;
     this.routes.reset();
   }
 
   private async switchSession(sessionId: string, resetRoute = true): Promise<void> {
     await this.sessionsController.switch(sessionId);
     this.selectedSessionId = sessionId;
-    this.composer = (await this.viewState.get(sessionId)).draftText;
+    const state = await this.viewState.get(sessionId);
+    this.composer = state.draftText;
+    this.composerCursor = clampCursor(this.composer, state.cursor);
     if (resetRoute) this.routes.reset();
   }
 
@@ -628,6 +699,8 @@ export class TuiApp {
         : {}),
       agentFilter: this.agentFilter,
       composer: this.composer,
+      composerCursor: this.composerCursor,
+      reasoningMode: this.reasoningMode,
       ...(this.statusMessage ? { statusMessage: this.statusMessage } : {}),
       ...(this.confirmation
         ? {
@@ -706,7 +779,10 @@ function splitInput(input: string): string[] {
   const keys: string[] = [];
   for (let index = 0; index < input.length; index += 1) {
     if (input[index] !== '\x1b') {
-      keys.push(input[index]);
+      const codePoint = input.codePointAt(index)!;
+      const char = String.fromCodePoint(codePoint);
+      keys.push(char);
+      index += char.length - 1;
       continue;
     }
     const rest = input.slice(index);
