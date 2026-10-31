@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tinyai 双作用域 Workspace 测试方案</title>
+<style>
+:root{--bg:#f4f5f7;--paper:#fff;--text:#191a1e;--muted:#6f7179;--line:#e2e3e8;--accent:#4f44d8;--ok:#137a4b;--warn:#986100;--bad:#b42318;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1160px;margin:auto;padding:34px 24px 90px}
+header{padding:30px;border:1px solid var(--line);border-radius:20px;background:var(--paper)}header small{color:var(--accent);font-weight:650;letter-spacing:.09em}h1{font-size:33px;margin:8px 0 12px}header p{max-width:840px;margin:0;color:var(--muted)}
+.metrics{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}.metric{padding:9px 13px;border-radius:11px;background:#f0efff;font-size:12px}.metric b{font-size:18px;display:block}
+nav{position:sticky;top:0;z-index:3;display:flex;gap:13px;overflow:auto;margin:16px 0;padding:10px 13px;border:1px solid var(--line);border-radius:12px;background:#f4f5f7e8;backdrop-filter:blur(10px)}nav a{font-size:12px;color:var(--muted);text-decoration:none;white-space:nowrap}
+section{margin:16px 0;padding:24px;border:1px solid var(--line);border-radius:17px;background:var(--paper)}h2{margin:0 0 13px;font-size:21px}h3{margin:19px 0 8px;font-size:15px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafafa;color:var(--muted)}
+code{font-family:var(--mono);font-size:.92em;background:#f0f1f4;padding:1px 5px;border-radius:4px}pre{padding:15px;overflow:auto;border-radius:11px;background:#181820;color:#ecebf8;font:12px/1.58 var(--mono)}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px}.card{padding:14px;border:1px solid var(--line);border-radius:11px}.card h3{margin:0 0 7px}.card p{margin:0;color:var(--muted);font-size:13px}
+.tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;background:#eef8f2;color:var(--ok)}.tag.unit{background:#f1efff;color:var(--accent)}.tag.risk{background:#fff6e5;color:var(--warn)}.tag.manual{background:#fff0ef;color:var(--bad)}
+.note{padding:12px 14px;border-left:3px solid var(--accent);background:#f5f4ff;border-radius:0 9px 9px 0}.warn{border-color:var(--warn);background:#fff8e8}
+@media(max-width:800px){.grid{grid-template-columns:1fr}.wrap{padding:18px 12px 60px}h1{font-size:27px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+<small>TINYAI / WORKSPACE TEST PLAN / V2</small>
+<h1>双作用域 Workspace 测试方案</h1>
+<p>验证“标签组共享 Workspace Session、组外标签独立 Session”，同时验证 Chrome 特有实现不会泄漏到 Core，TUI/CLI 可以通过自己的 WorkspacePort 独立运行。</p>
+<div class="metrics"><div class="metric"><b>6</b>测试层级</div><div class="metric"><b>45+</b>核心用例</div><div class="metric"><b>4</b>关键竞态</div><div class="metric"><b>1</b>跨端门禁</div></div>
+</header>
+<nav><a href="#strategy">策略</a><a href="#matrix">核心矩阵</a><a href="#race">竞态</a><a href="#tools">工具并发</a><a href="#ports">跨端隔离</a><a href="#ui">UI</a><a href="#migration">迁移</a><a href="#acceptance">验收</a></nav>
+<section id="strategy">
+<h2>1. 测试分层</h2>
+<div class="grid"><div class="card"><h3>Registry Unit</h3><p>group/tab 双作用域、提升、合并、拆分、解散。</p></div><div class="card"><h3>Browser Integration</h3><p>Tab Group 成员、active target、Debugger 生命周期。</p></div><div class="card"><h3>Runtime Integration</h3><p>Session、Projection、审批、队列、冷加载。</p></div><div class="card"><h3>Tool Contract</h3><p>new_tab/switch_tab/显式 target 的成员校验。</p></div><div class="card"><h3>Property / Race</h3><p>快速激活、成员变化、任务运行中切组。</p></div><div class="card"><h3>Chrome E2E</h3><p>真实 Chrome Tab Group、Side Panel 和 Agent 工具循环。</p></div></div>
+</section>
+<section id="matrix">
+<h2>2. 核心用例矩阵</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>层级</th></tr></thead><tbody>
+<tr><td>WS-01</td><td>组 G 的成员 A、B 依次激活</td><td>同一 group Session，仅改变 active target</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>WS-02</td><td>组外 C 激活</td><td>C 的独立 Session，不读取 G 上下文</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>WS-03</td><td>G→C→G</td><td>G 完整恢复，C 不污染 G</td><td><span class="tag">E2E</span></td></tr>
+<tr><td>WS-04</td><td>独立 A 中 new_tab(B)</td><td>A、B 组队，原 Session 提升为 Group Session</td><td><span class="tag">Integration</span></td></tr>
+<tr><td>WS-05</td><td>已有组内 new_tab(C)</td><td>C 加入现有组并成为 active target</td><td><span class="tag">Integration</span></td></tr>
+<tr><td>WS-06</td><td>Agent switch_tab 到组内 B</td><td>成功，Session 不变</td><td><span class="tag">Tool</span></td></tr>
+<tr><td>WS-07</td><td>Agent switch_tab 到组外 C</td><td><code>TARGET_OUTSIDE_WORKSPACE</code></td><td><span class="tag unit">Tool</span></td></tr>
+<tr><td>WS-08</td><td>用户把 C 拖入 G</td><td>G 已有 Session 时 C 使用 G；C 原会话保留 History</td><td><span class="tag">E2E</span></td></tr>
+<tr><td>WS-09</td><td>组无 Session，合并 A+B</td><td>active tab 的 Session 提升，另一个不自动合并</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>WS-10</td><td>B 移出组</td><td>B 下次激活获得独立 Session</td><td><span class="tag">Integration</span></td></tr>
+<tr><td>WS-11</td><td>组最后一个标签关闭/取消分组</td><td>adapter binding 删除，Session 保留 History</td><td><span class="tag">Integration</span></td></tr>
+<tr><td>WS-12</td><td>groupId 失效</td><td>清理 binding 并重新解析，不影响 Session</td><td><span class="tag unit">Unit</span></td></tr>
+</tbody></table>
+</section>
+<section id="race">
+<h2>3. 状态与竞态测试</h2>
+<pre>standalone
+  --(first new_tab)--> group_promoting
+  --(group attached)--> group_ready
+  --(member leaves)--> standalone_reattach
+  --(group dissolves)--> historical_session
+inactive_workspace
+  --(member active)--> active_workspace
+  --(external tab active)--> standalone
+  --(member active again)--> active_workspace</pre>
+<table><thead><tr><th>竞态</th><th>验证点</th><th>预期</th></tr></thead><tbody>
+<tr><td>new_tab 创建中用户切走</td><td>组创建、attach、UI 订阅</td><td>新标签加入原 Workspace，但 UI 保持用户最终选择</td></tr>
+<tr><td>A→B→C 快速激活</td><td>resolve 交错返回</td><td>最终只订阅 C，旧 Projection 不得覆盖</td></tr>
+<tr><td>切换时成员集合变化</td><td>membership revision</td><td>过期工具返回 stale，不作用于新成员</td></tr>
+<tr><td>任务运行中标签移出组</td><td>当前和后续工具目标</td><td>已开始操作完成或安全中止，后续拒绝</td></tr>
+<tr><td>关闭 active 成员</td><td>下一 active tab</td><td>优先同组下一个成员，不切到组外</td></tr>
+</tbody></table>
+<div class="note warn">竞态测试必须在 E2E 中注入异步延迟，不能只依赖顺序单元测试。</div>
+</section>
+<section id="tools">
+<h2>4. 工具、审批与并发测试</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>TOOL-01</td><td>read_page target=B，B 在组内</td><td>读取 B，结果含 targetId</td></tr>
+<tr><td>TOOL-02</td><td>read_page target=C，C 在组外</td><td>拒绝，不触发页面访问</td></tr>
+<tr><td>TOOL-03</td><td>A、B 同时 snapshot</td><td>只读并行，结果按调用 ID 对应</td></tr>
+<tr><td>TOOL-04</td><td>A、B 同时 click/fill</td><td>跨 target 写入顺序执行，同 target 绝不并发</td></tr>
+<tr><td>TOOL-05</td><td>A 等待审批，切到 B 只读</td><td>B 可继续，A 审批仍绑定 A</td></tr>
+<tr><td>TOOL-06</td><td>审批后标签移出组</td><td>执行前重校验，过期则拒绝</td></tr>
+<tr><td>TOOL-07</td><td>close_tab 关闭成员 A</td><td>成员更新，组和 Session 保留</td></tr>
+<tr><td>TOOL-08</td><td>close_tab 关闭组外 C</td><td><code>TARGET_OUTSIDE_WORKSPACE</code></td></tr>
+</tbody></table>
+<ul><li>同一 target 同时最多一个可变操作。</li><li>只读并行不得改变 active target。</li><li>结果携带 sessionId、workspaceKey、targetId。</li><li>审批 digest 包含 Workspace revision 与 target，防止批准后目标变化。</li></ul>
+</section>
+<section id="ports">
+<h2>5. 跨端隔离测试</h2>
+<table><thead><tr><th>ID</th><th>检查</th><th>预期</th></tr></thead><tbody>
+<tr><td>PORT-01</td><td>Core 静态依赖扫描</td><td>src/core 不引用 chrome/tabs/tabGroup/groupId/debugger</td></tr>
+<tr><td>PORT-02</td><td>TUI 构建</td><td>只加载 TerminalWorkspacePort，不包含 Chrome Gateway</td></tr>
+<tr><td>PORT-03</td><td>TUI 单会话启动</td><td>生成一个 Standalone Workspace，无需 tab/group 字段</td></tr>
+<tr><td>PORT-04</td><td>Chrome 启动</td><td>只加载 ChromeWorkspacePort 和 Browser ToolPack</td></tr>
+<tr><td>PORT-05</td><td>Session Snapshot 互通</td><td>同一 Snapshot 可由 Chrome/TUI 读取，Chrome binding 不入库</td></tr>
+<tr><td>PORT-06</td><td>多端写同一 Session</td><td>lease/fencing 阻止并发破坏</td></tr>
+</tbody></table>
+<div class="grid"><div class="card"><h3>禁止</h3><p>Core 导入 ChromeProvider，SessionSnapshot 存 tabId/groupId，TUI 注册 new_tab。</p></div><div class="card"><h3>允许</h3><p>Adapter 提供 opaque targetId；Browser ToolPack 独立注册；各端只负责自己的 scope 映射。</p></div></div>
+</section>
+<section id="ui">
+<h2>6. UI 验收</h2>
+<table><thead><tr><th>检查项</th><th>预期</th></tr></thead><tbody>
+<tr><td>作用域标题</td><td>组内显示 Workspace + 成员数，组外显示 Independent tab</td></tr>
+<tr><td>@ 菜单</td><td>当前组和其他标签分区；组内切换不换 Session</td></tr>
+<tr><td>组外切换</td><td>自动切到该标签自己的 Session</td></tr>
+<tr><td>Agent 新标签</td><td>UI 显示新 target chip，active 标记与 Chrome 一致</td></tr>
+<tr><td>后台任务</td><td>组外 Session 不显示组成员的任务状态</td></tr>
+<tr><td>审批/接管</td><td>切回 Workspace 后恢复，不丢失</td></tr>
+<tr><td>Tab Group 标题</td><td>网页标题或 Workspace 摘要，不显示内部 ID / legacy 前缀</td></tr>
+<tr><td>窄侧栏</td><td>320px 下成员 chip 可折叠，不遮挡 composer</td></tr>
+</tbody></table>
+</section>
+<section id="migration">
+<h2>7. 迁移与清理</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>MIG-01</td><td>v1 tab binding 对应标签有 groupId</td><td>迁移为 group binding</td></tr>
+<tr><td>MIG-02</td><td>v1 tab binding 对应标签无 groupId</td><td>保持独立 tab binding</td></tr>
+<tr><td>MIG-03</td><td>groupId 不存在或成员不匹配</td><td>不猜测，回退独立 Session</td></tr>
+<tr><td>MIG-04</td><td>迁移中 Service Worker 重启</td><td>幂等，不产生重复 Session 或成员</td></tr>
+<tr><td>CLR-01</td><td>清除全部历史</td><td>workspace binding、Session Snapshot、旧 v1 映射全部清理</td></tr>
+<tr><td>CLR-02</td><td>清理时组内任务运行</td><td>任务停止不重放；用户标签和模型配置保留</td></tr>
+</tbody></table>
+</section>
+<section id="acceptance">
+<h2>8. 发布门禁</h2>
+<div class="grid"><div class="card"><h3>功能</h3><p>组内多 target 共享 Session；组外自动独立；Agent 可在组内新开与切换。</p></div><div class="card"><h3>隔离</h3><p>组外工具拒绝；快速切换不串消息、审批、草稿和任务状态。</p></div><div class="card"><h3>跨端</h3><p>Core 和 Session Snapshot 无 Chrome 依赖；TUI standalone 构建通过。</p></div></div>
+<ul><li>Registry 单元测试覆盖所有作用域转换与成员状态。</li><li>Tool contract 覆盖组内/组外和 stale membership。</li><li>至少 3 个真实 Chrome E2E：组内协作、组外隔离、Agent 建组。</li><li>至少 2 个并发测试：快速标签切换、运行中成员变化。</li><li>v1 映射迁移、全量清理和 TUI 隔离均有回归测试。</li><li>不引入跨组审批越权、内部 ID 泄漏或历史消息自动合并。</li></ul>
+<div class="note">本文件描述下一阶段方案；当前上线版本仍是“一标签一 Session”。</div>
+<p><a href="group-workspace-sessions-design.html">← 返回设计方案</a></p>
+</section>
+</div>
+</body>
+</html>

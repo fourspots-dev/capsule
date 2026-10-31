@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tinyai 双作用域 Workspace 会话设计</title>
+<style>
+:root{--bg:#f5f6f8;--paper:#fff;--text:#19191d;--muted:#70717a;--line:#e2e3e8;--accent:#5347df;--warn:#9b6200;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;color:var(--text);background:var(--bg);font:15px/1.72 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}
+.wrap{max-width:1160px;margin:auto;padding:36px 24px 100px}.hero{padding:34px;border-radius:24px;background:linear-gradient(135deg,#17172a,#2d288f 62%,#6557e8);color:#fff}
+.hero h1{font-size:34px;line-height:1.2;margin:12px 0 14px}.hero p{max-width:850px;margin:0;color:#e4e2ff}
+nav{position:sticky;top:0;z-index:4;display:flex;gap:14px;overflow:auto;margin:18px 0;padding:10px 14px;border:1px solid var(--line);border-radius:13px;background:#f5f6f8eb;backdrop-filter:blur(12px)}nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}
+section{margin:18px 0;padding:26px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:22px;margin:0 0 14px}h3{font-size:16px;margin:22px 0 8px}p{color:#45464d}.muted{color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.card{padding:16px;border:1px solid var(--line);border-radius:13px;background:#fafafa}.card h3{margin:0 0 8px}.card p{margin:0}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:10px 9px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}th{background:#fafafa;color:var(--muted);font-weight:600}
+code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{padding:17px;overflow:auto;border-radius:12px;background:#181820;color:#eae9ff;font:12px/1.6 var(--mono)}
+.flow{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap}.flow>div{flex:1;min-width:150px;padding:13px;border:1px solid var(--line);border-radius:11px;background:#fafafa}.arrow{align-self:center;color:var(--muted)}
+.rule{padding:13px 15px;border-left:3px solid var(--accent);border-radius:0 10px 10px 0;background:#f5f3ff}
+@media(max-width:800px){.grid{grid-template-columns:1fr}.hero h1{font-size:28px}.wrap{padding:20px 12px 70px}section{padding:20px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+<small>TINYAI / WORKSPACE SCOPE / V2</small>
+<h1>双作用域 Workspace 会话设计</h1>
+<p>Chrome 中，标签组共享 Workspace Session，组外标签保持独立 Session。浏览器适配器负责标签与分组；Agent Core 只处理抽象 Session 与 Workspace 生命周期。</p>
+</header>
+<nav><a href="#boundary">架构边界</a><a href="#model">作用域模型</a><a href="#classes">核心对象</a><a href="#flows">交互流程</a><a href="#tools">工具与并发</a><a href="#ports">跨端接口</a><a href="#storage">持久化</a><a href="#plan">实施计划</a></nav>
+<section id="boundary">
+<h2>1. 架构边界</h2>
+<div class="flow"><div><b>Agent Core</b><br><span class="muted">Session、任务、消息、队列、审批、Projection</span></div><span class="arrow">←</span><div><b>WorkspacePort</b><br><span class="muted">抽象作用域与活动目标</span></div><span class="arrow">←</span><div><b>Chrome Adapter</b><br><span class="muted">Tab Group、active tab、debugger、tabs.onActivated</span></div><span class="arrow">←</span><div><b>Side Panel</b><br><span class="muted">浏览器交互界面</span></div></div>
+<div class="rule">硬边界：<code>groupId</code>、<code>tabId</code>、<code>windowId</code>、<code>chrome.tabs</code> 和“自动切标签”只存在于 Chrome Adapter；Core 的 SessionManager 不得引用这些字段。</div>
+<table><thead><tr><th>端</th><th>Workspace 实现</th><th>不存在的概念</th></tr></thead><tbody><tr><td>Chrome Extension</td><td>标签组共享 Scope，组外标签独立 Scope</td><td>无</td></tr><tr><td>TUI</td><td>每个终端会话或 pane scope；默认单 Session</td><td>Chrome tab、tabGroup、自动标签切换</td></tr><tr><td>Web / Desktop</td><td>每个窗口或用户工作区 Scope</td><td>Chrome Tab Group</td></tr><tr><td>CLI 单次运行</td><td>一个临时 Standalone Scope</td><td>跨标签协作</td></tr></tbody></table>
+</section>
+<section id="model">
+<h2>2. 作用域模型</h2>
+<table><thead><tr><th>Scope</th><th>Chrome 身份</th><th>Session 规则</th></tr></thead><tbody><tr><td>Grouped Workspace</td><td><code>windowId + groupId</code></td><td>组成员共享一个 Session；切换成员只改变 active target</td></tr><tr><td>Standalone Tab</td><td><code>windowId + tabId</code></td><td>每个组外标签一个独立 Session</td></tr></tbody></table>
+<ul><li>切到同一标签组内其他标签：保持 Session，只切换活动页面。</li><li>切到组外标签：自动进入或创建该标签自己的 Session。</li><li>Agent 从组外标签打开新标签：两个标签组队，原 Session 提升为 Group Workspace。</li><li>Agent 在已有组内打开新标签：加入当前组，继续使用同一个 Session。</li><li>成员、active target、Chrome groupId 都只是 BrowserAdapter 状态。</li></ul>
+</section>
+<section id="classes">
+<h2>3. 核心对象与职责</h2>
+<pre>Agent Core
+├── SessionManager → SessionRuntime / TaskGraph / Ledger / Projection
+└── WorkspacePort (abstract)
+    ├── resolve(activation)
+    ├── activate(sessionId, targetId)
+    ├── listTargets(sessionId)
+    └── release(sessionId)
+Chrome Adapter
+├── ChromeWorkspacePort implements WorkspacePort
+├── TabGroupMembership + BindingStore
+└── ChromeBrowserTools
+TUI Adapter
+└── TerminalWorkspacePort → 每个终端会话一个 Standalone Scope</pre>
+<table><thead><tr><th>对象</th><th>责任</th><th>禁止依赖</th></tr></thead><tbody><tr><td>SessionRuntime</td><td>单会话任务与消息</td><td>Chrome、TUI、tabId、groupId</td></tr><tr><td>WorkspacePort</td><td>把抽象激活事件解析为 session + active target</td><td>具体 UI 组件</td></tr><tr><td>ChromeWorkspacePort</td><td>tab/group 映射、标签激活、成员校验</td><td>模型和业务状态机</td></tr><tr><td>Browser Tools</td><td>浏览器动作；通过 Adapter 校验目标</td><td>Core 会话状态机</td></tr><tr><td>Side Panel</td><td>当前作用域、标签状态、草稿</td><td>全局唯一映射真相</td></tr></tbody></table>
+</section>
+<section id="flows">
+<h2>4. 关键流程</h2>
+<pre>Chrome tabs.onActivated
+  → ChromeWorkspacePort.capture(windowId, tabId)
+  → tab.groupId 有效 ?
+      yes → resolve group scope → sessionId
+      no  → resolve tab scope   → sessionId
+  → SessionManager.acquire(sessionId)
+  → ChromeBrowserProvider.setActiveTarget(adapterTargetId)
+  → Side Panel subscribe(sessionId)</pre>
+<h3>Agent 打开新标签</h3><ol><li>当前为 Standalone Tab 时，创建新标签。</li><li>Chrome Adapter 将两个标签加入同一 Tab Group。</li><li>将 Standalone Binding 提升为 Group Binding，Session 不复制。</li><li>新标签加入成员列表并设为 active target。</li><li>工具结果返回抽象 targetId，不要求模型理解 Chrome groupId。</li></ol>
+<h3>组外与成员变化</h3><p>组外标签不会进入当前 WorkspacePort。Agent 无法用工具切换到它；用户切过去时，Adapter 发出新的 WorkspaceActivation，Side Panel 才切换 Session。已有 Group Session 时新成员采用组会话；组无 Session 时提升 active member 的会话；成员移出组后下次激活获得独立 Session。</p>
+</section>
+<section id="tools">
+<h2>5. 工具与并发边界</h2>
+<table><thead><tr><th>工具</th><th>规则</th></tr></thead><tbody><tr><td><code>list_workspace_targets</code></td><td>只列当前抽象 Workspace 的 targets</td></tr><tr><td><code>new_tab</code></td><td>仅 Chrome Browser ToolPack 提供；通过 WorkspacePort 创建同 Scope target</td></tr><tr><td><code>switch_tab</code></td><td>目标必须属于当前 Workspace；组外返回 <code>TARGET_OUTSIDE_WORKSPACE</code></td></tr><tr><td>read / snapshot</td><td>可指定 target；多个只读 target 可受限并行</td></tr><tr><td>click / fill / navigate</td><td>目标成员校验；同 target 写入串行，高风险仍审批</td></tr></tbody></table>
+<div class="grid"><div class="card"><h3>只读并行</h3><p>不同 target 的读取可并行，结果携带 target/session 标识。</p></div><div class="card"><h3>写入隔离</h3><p>同一 target 单锁；跨 target 写入默认顺序执行。</p></div></div>
+<div class="rule">“同时操作多个标签”是浏览器 Workspace 能力，不是取消权限控制。TUI 不注册这些浏览器工具。</div>
+</section>
+<section id="ports">
+<h2>6. 跨端接口</h2>
+<pre>interface WorkspacePort {
+  capture(request: UnknownJson): Promise&lt;WorkspaceActivation&gt;;
+  create(sessionId: string, target?: UnknownJson): Promise&lt;WorkspaceActivation&gt;;
+  listTargets(sessionId: string): Promise&lt;WorkspaceTarget[]&gt;;
+  activateTarget(sessionId: string, targetId: string): Promise&lt;void&gt;;
+  assertTarget(sessionId: string, targetId: string): Promise&lt;void&gt;;
+  release(sessionId: string): Promise&lt;void&gt;;
+}
+interface WorkspaceActivation {
+  sessionId: string; workspaceKey: string;
+  activeTargetId?: string; revision: number;
+}</pre>
+<p>协议只使用不透明 <code>workspaceKey</code> 和 <code>targetId</code>。Chrome 可映射为 tabId，TUI 可映射为 paneId，Web 可映射为 viewportId。</p>
+<h3>与现有代码的关系</h3><ul><li>保留 SessionRuntime、WorkspaceRuntime 的会话与 Projection 能力。</li><li>移动现有 TabSessionRegistry 到 <code>adapters/chrome/workspace</code>。</li><li>把 RuntimeGateway 的 tab 专用请求拆到 Browser Gateway。</li><li>Chrome Browser Tools 独立注册，TUI/CLI 不加载。</li><li>Session Snapshot 不增加 Chrome tab/groupId 字段。</li></ul>
+</section>
+<section id="storage">
+<h2>7. 持久化与错误边界</h2>
+<table><thead><tr><th>数据</th><th>归属</th><th>存储</th></tr></thead><tbody><tr><td>Session Snapshot</td><td>Core</td><td><code>tinyai:session:v1:*</code></td></tr><tr><td>WorkspaceBinding</td><td>Chrome Adapter</td><td><code>chrome.storage.session</code></td></tr><tr><td>TUI pane binding</td><td>TUI Adapter</td><td>TUI 自身状态文件</td></tr><tr><td>Chrome membership</td><td>Chrome Adapter</td><td>chrome.tabs/groupId + 临时绑定表</td></tr></tbody></table>
+<p>Chrome 重启后 tab/group ID 可能失效，Adapter 只清理自身映射；Session 仍可从 History 打开。TUI 和其他端不受影响。</p>
+<ul><li>Agent 操作组外标签：<code>TARGET_OUTSIDE_WORKSPACE</code>，不触发页面访问。</li><li>Chrome group 失效：清理 Chrome binding，不删除 Session。</li><li>TUI 启动：只生成 Standalone Workspace，不加载 Chrome Gateway。</li><li>多端同时读取同一 Session 禁止同时写入，写操作使用 lease/fencing。</li></ul>
+</section>
+<section id="plan">
+<h2>8. 实施计划</h2>
+<table><thead><tr><th>阶段</th><th>内容</th><th>验收</th></tr></thead><tbody><tr><td>M1 Port 抽象</td><td>WorkspacePort、WorkspaceActivation、target 契约</td><td>Core 无 Chrome 引用</td></tr><tr><td>M2 Chrome Adapter</td><td>group/tab 双作用域、成员集合、自动切换</td><td>组内同 Session，组外独立</td></tr><tr><td>M3 Browser ToolPack</td><td>new_tab、switch_tab、target 校验、并发策略</td><td>组外稳定拒绝</td></tr><tr><td>M4 Side Panel</td><td>作用域、组成员、切换状态</td><td>组内不换会话，组外换会话</td></tr><tr><td>M5 迁移与跨端</td><td>v1 binding 迁移、TUI standalone port smoke</td><td>Chrome/TUI 独立编译运行</td></tr></tbody></table>
+<p><a href="group-workspace-sessions-testing.html">查看配套测试方案 →</a></p>
+</section>
+</div>
+</body>
+</html>
