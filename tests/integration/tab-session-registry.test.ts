@@ -25,6 +25,12 @@ function browser(
 ) {
   return {
     listTabs: vi.fn(async () => tabs),
+    getTab: vi.fn(async (tabId: string) =>
+      tabs.find((tab) => tab.id === tabId) ?? {
+        id: tabId,
+        active: false,
+      }
+    ),
     setWorkingTab: vi.fn(async () => undefined),
     releaseSession: vi.fn(async () => undefined),
   } as unknown as BrowserProvider;
@@ -185,6 +191,26 @@ describe('TabSessionRegistry', () => {
     await second.clear();
     expect(tabs.releaseSession).toHaveBeenCalledWith('session_persisted');
     expect(storage.values.has('tinyai:tab-sessions:v1')).toBe(false);
+  });
+
+  it('drops a standalone binding when its tab disappears before activation', async () => {
+    const workspace = createTestWorkspace({
+      model: async () => events(...text('unused')),
+      tools: [],
+    });
+    const tabs = browser([{ id: '50', active: true, windowId: 5 }]);
+    const registry = new TabSessionRegistry({
+      runtime: workspace.runtime,
+      browser: tabs,
+      createSessionId: () => 'session_stale',
+    });
+    await registry.resolve({ windowId: 5, tabId: '50' });
+    vi.mocked(tabs.getTab).mockResolvedValue(null);
+
+    await expect(
+      registry.resolve({ windowId: 5, tabId: '50' })
+    ).rejects.toMatchObject({ code: 'BROWSER_TAB_NOT_FOUND' });
+    expect(await registry.list()).toEqual([]);
   });
 
   it('promotes a standalone session when the agent opens another workspace tab', async () => {

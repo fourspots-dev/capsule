@@ -953,6 +953,15 @@ describe('kernel extension E2E', () => {
       expect(pageErrors).toEqual([]);
       await page.screenshot({ path: resolve('docs/tab-scoped-sessions.png'), fullPage: false });
 
+      await page.evaluate(
+        (tabId) => chrome.tabs.remove(Number(tabId)),
+        tabB
+      );
+      await page.waitForTimeout(750);
+      expect(await page.textContent('body')).not.toContain(
+        'BROWSER_TAB_NOT_FOUND'
+      );
+
       await page.click('#kernel-settings');
       await page.waitForSelector('[data-page-action="clear-history"]');
       page.once('dialog', (dialog) => dialog.accept());

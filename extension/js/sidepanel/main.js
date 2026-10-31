@@ -910,10 +910,39 @@
     }
     async function switchToTab(tabId) {
       if (windowId === void 0 || tabId === activeTabId) return;
-      const tab = await chrome.tabs.get(Number(tabId));
-      await activateSession(
-        () => client.resolveTabSession(windowId, tabId, tab.groupId)
-      );
+      let tab;
+      try {
+        tab = await chrome.tabs.get(Number(tabId));
+      } catch {
+        if (activeTabId === tabId) activeTabId = void 0;
+        return;
+      }
+      try {
+        await activateSession(
+          () => client.resolveTabSession(windowId, tabId, tab.groupId)
+        );
+      } catch (cause) {
+        if (!isMissingTabError(cause)) throw cause;
+        const [current] = await chrome.tabs.query({
+          active: true,
+          windowId
+        });
+        if (current?.id !== void 0 && String(current.id) === tabId) {
+          if (!isInspectablePageUrl(current.url)) {
+            error = pageConfig.language.startsWith("zh") ? "\u5F53\u524D\u6807\u7B7E\u9875\u4E0D\u652F\u6301 Agent \u64CD\u4F5C\uFF0C\u8BF7\u5207\u6362\u5230\u666E\u901A\u7F51\u9875\u3002" : "This tab cannot be used by the Agent. Switch to a regular web page.";
+            render();
+            return;
+          }
+          error = pageConfig.language.startsWith("zh") ? "\u5F53\u524D\u6807\u7B7E\u9875\u6682\u65F6\u4E0D\u53EF\u7528\uFF0C\u8BF7\u91CD\u65B0\u5207\u6362\u540E\u91CD\u8BD5\u3002" : "The current tab is temporarily unavailable. Switch tabs and retry.";
+          render();
+          return;
+        }
+        if (current?.id !== void 0) {
+          await switchToTab(String(current.id));
+        } else if (activeTabId === tabId) {
+          activeTabId = void 0;
+        }
+      }
     }
     async function startNewSession() {
       if (windowId === void 0 || !activeTabId) {
@@ -2312,6 +2341,12 @@
   }
   function errorMessage(cause) {
     return cause instanceof Error ? cause.message : String(cause);
+  }
+  function isMissingTabError(cause) {
+    return cause instanceof Error && cause.name === "BROWSER_TAB_NOT_FOUND";
+  }
+  function isInspectablePageUrl(url) {
+    return /^(https?|file):/.test(String(url ?? "")) || url === "about:blank";
   }
   function statusLabel(status, language) {
     if (!language.startsWith("zh")) return status;

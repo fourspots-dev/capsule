@@ -296,10 +296,43 @@ export async function initKernelUi(): Promise<void> {
 
   async function switchToTab(tabId: string): Promise<void> {
     if (windowId === undefined || tabId === activeTabId) return;
-    const tab = await chrome.tabs.get(Number(tabId));
-    await activateSession(() =>
-      client.resolveTabSession(windowId!, tabId, tab.groupId)
-    );
+    let tab: chrome.tabs.Tab;
+    try {
+      tab = await chrome.tabs.get(Number(tabId));
+    } catch {
+      if (activeTabId === tabId) activeTabId = undefined;
+      return;
+    }
+    try {
+      await activateSession(() =>
+        client.resolveTabSession(windowId!, tabId, tab.groupId)
+      );
+    } catch (cause) {
+      if (!isMissingTabError(cause)) throw cause;
+      const [current] = await chrome.tabs.query({
+        active: true,
+        windowId,
+      });
+      if (current?.id !== undefined && String(current.id) === tabId) {
+        if (!isInspectablePageUrl(current.url)) {
+          error = pageConfig.language.startsWith('zh')
+            ? '当前标签页不支持 Agent 操作，请切换到普通网页。'
+            : 'This tab cannot be used by the Agent. Switch to a regular web page.';
+          render();
+          return;
+        }
+        error = pageConfig.language.startsWith('zh')
+          ? '当前标签页暂时不可用，请重新切换后重试。'
+          : 'The current tab is temporarily unavailable. Switch tabs and retry.';
+        render();
+        return;
+      }
+      if (current?.id !== undefined) {
+        await switchToTab(String(current.id));
+      } else if (activeTabId === tabId) {
+        activeTabId = undefined;
+      }
+    }
   }
 
   async function startNewSession(): Promise<void> {
@@ -2017,6 +2050,14 @@ function themeLabel(theme: 'light' | 'dark' | 'system', zh: boolean): string {
 
 function errorMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
+}
+
+function isMissingTabError(cause: unknown): boolean {
+  return cause instanceof Error && cause.name === 'BROWSER_TAB_NOT_FOUND';
+}
+
+function isInspectablePageUrl(url: string | undefined): boolean {
+  return /^(https?|file):/.test(String(url ?? '')) || url === 'about:blank';
 }
 
 function statusLabel(status: string, language: string): string {

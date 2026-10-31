@@ -54,6 +54,18 @@ export class TabSessionRegistry {
   resolve(context: TabContext): Promise<TabSessionBinding> {
     return this.serialized(async () => {
       await this.ensureLoaded();
+      const target = await this.options.browser.getTab(context.tabId);
+      if (!target) {
+        const key = tabKey(context);
+        if (this.bindings.get(key)?.scope === 'tab') {
+          this.bindings.delete(key);
+          await this.persist();
+        }
+        throw new AgentError(
+          'BROWSER_TAB_NOT_FOUND',
+          `Tab not found: ${context.tabId}`
+        );
+      }
       const existing = this.bindings.get(tabKey(context));
       if (existing) {
         if (
