@@ -1,0 +1,652 @@
+import type { ProductProjection } from '../core/types';
+import { buildAgentRows, selectAgent } from './agent-board';
+import { mapKey, type TuiIntent } from './keymap';
+import { renderTui, type TuiRenderSnapshot } from './render';
+import { RouteController } from './route-controller';
+import { buildSessionRows } from './session-list';
+import { SessionController } from './session-controller';
+import type {
+  AgentFilter,
+  RuntimeSessionSummary,
+  StatusBarFacts,
+  TuiAgentRecord,
+  TuiFocus,
+  TuiRuntimePort,
+  TuiReviewProvider,
+  TuiReviewSnapshot,
+} from './types';
+import { ViewStateStore } from './view-state-store';
+
+export interface TuiAppOptions {
+  runtime: TuiRuntimePort;
+  viewState?: ViewStateStore;
+  project?: string;
+  branch?: string;
+  model?: string;
+  provider?: string;
+  processAvailable?: boolean;
+  review?: TuiReviewProvider;
+  now?: () => number;
+}
+
+interface Confirmation {
+  kind: 'rename' | 'delete';
+  sessionId: string;
+  value: string;
+}
+
+export class TuiApp {
+  readonly routes = new RouteController();
+  readonly sessionsController: SessionController;
+  private readonly viewState: ViewStateStore;
+  private readonly now: () => number;
+  private sessions: RuntimeSessionSummary[] = [];
+  private selectedSessionId?: string;
+  private sessionQuery = '';
+  private composer = '';
+  private statusMessage?: string;
+  private exitArmed = false;
+  private shouldExit = false;
+  private confirmation?: Confirmation;
+  private sessionSequence = 0;
+  private filterIndex = 0;
+  private agentFilter: AgentFilter = 'all';
+  private review?: TuiReviewSnapshot;
+  private readonly renderListeners = new Set<() => void>();
+
+  constructor(private readonly options: TuiAppOptions) {
+    this.now = options.now ?? (() => Date.now());
+    this.viewState = options.viewState ?? new ViewStateStore();
+    this.sessionsController = new SessionController(
+      options.runtime,
+      this.viewState,
+      this.now
+    );
+    this.sessionsController.subscribe(() => {
+      this.syncActiveSummary();
+      this.notifyRender();
+    });
+  }
+
+  get exitRequested(): boolean {
+    return this.shouldExit;
+  }
+
+  async initialize(): Promise<void> {
+    this.sessions = await this.options.runtime.listSessions();
+    const active = await this.sessionsController.initialize();
+    this.selectedSessionId = active ?? this.sessions[0]?.sessionId;
+    if (this.selectedSessionId && !active) {
+      await this.sessionsController.switch(this.selectedSessionId);
+    }
+    if (this.sessionsController.active) {
+      this.composer = (await this.viewState.get(this.sessionsController.active)).draftText;
+    }
+  }
+
+  async handleInput(input: string): Promise<void> {
+    for (const key of splitInput(input)) {
+      if (await this.handleKey(key)) break;
+    }
+  }
+
+  async action(intent: TuiIntent): Promise<void> {
+    if (this.confirmation) {
+      await this.handleConfirmation(intent);
+      return;
+    }
+    if (intent.type === 'sessions') {
+      await this.openSessions();
+      return;
+    }
+    if (intent.type === 'agents') {
+      if (this.sessionsController.active) {
+        this.agentFilter = (
+          await this.viewState.get(this.sessionsController.active)
+        ).boardFilter;
+      }
+      this.filterIndex = ['all', 'active', 'attention', 'done'].indexOf(
+        this.agentFilter
+      );
+      this.routes.push({
+        kind: 'agents',
+        rootSessionId: this.sessionsController.active ?? '',
+      });
+      this.selectFirstAgent();
+      return;
+    }
+    if (intent.type === 'status') {
+      if (this.sessionsController.active) {
+        this.routes.push({
+          kind: 'status',
+          targetSessionId: this.sessionsController.active,
+        });
+      }
+      return;
+    }
+    if (intent.type === 'review') {
+      if (this.sessionsController.active) {
+        if (this.options.review) {
+          try {
+            this.review = await this.options.review();
+          } catch (error) {
+            this.statusMessage =
+              error instanceof Error ? error.message : String(error);
+          }
+        }
+        this.routes.push({
+          kind: 'review',
+          targetSessionId: this.sessionsController.active,
+        });
+      }
+      return;
+    }
+    if (intent.type === 'commands' || intent.type === 'help') {
+      this.routes.push({ kind: intent.type === 'commands' ? 'commands' : 'help', query: '' });
+      return;
+    }
+    if (intent.type === 'back') {
+      this.confirmation = undefined;
+      const next = this.routes.back();
+      if (
+        next.kind === 'agents' &&
+        next.rootSessionId &&
+        next.rootSessionId !== this.sessionsController.active
+      ) {
+        await this.switchSession(next.rootSessionId, false);
+        this.agentFilter = (
+          await this.viewState.get(next.rootSessionId)
+        ).boardFilter;
+        this.routes.replace(next);
+      }
+      return;
+    }
+    if (this.routes.current.kind === 'sessions') {
+      await this.handleSessionsIntent(intent);
+      return;
+    }
+    if (this.routes.current.kind === 'agents') {
+      await this.handleAgentsIntent(intent);
+      return;
+    }
+    if (this.routes.current.kind !== 'conversation') return;
+    await this.handleConversationIntent(intent);
+  }
+
+  render(width: number, height: number): string[] {
+    return renderTui(this.snapshot(), width, height);
+  }
+
+  onRender(listener: () => void): () => void {
+    this.renderListeners.add(listener);
+    return () => this.renderListeners.delete(listener);
+  }
+
+  async dispose(): Promise<void> {
+    if (this.sessionsController.active) {
+      await this.viewState.update(this.sessionsController.active, {
+        draftText: this.composer,
+        cursor: this.composer.length,
+      });
+    }
+    await this.sessionsController.dispose();
+  }
+
+  private async handleKey(key: string): Promise<boolean> {
+    const intent = mapKey(
+      key,
+      this.keymapContext()
+    );
+    if (intent) await this.action(intent);
+    else if (key.length > 1 && !key.startsWith('\x1b')) {
+      await this.insertText(key);
+    }
+    if (this.shouldExit) return true;
+    if (intent && intent.type !== 'stop') this.exitArmed = false;
+    return false;
+  }
+
+  private keymapContext() {
+    return {
+      route: this.routes.current,
+      focus: (this.routes.current.kind === 'conversation'
+        ? 'composer'
+        : 'overlay') as TuiFocus,
+      composerEmpty: !this.composer,
+    };
+  }
+
+  private async handleConversationIntent(intent: TuiIntent): Promise<void> {
+    if (intent.type === 'text') {
+      await this.insertText(intent.text);
+      return;
+    }
+    if (intent.type === 'newline') {
+      await this.insertText('\n');
+      return;
+    }
+    if (intent.type === 'backspace') {
+      this.composer = this.composer.slice(0, -1);
+      await this.persistDraft();
+      return;
+    }
+    if (intent.type === 'send') {
+      await this.send();
+      return;
+    }
+    if (intent.type === 'stop') {
+      const projection = this.sessionsController.currentProjection;
+      if (
+        projection &&
+        ['queued', 'running', 'waiting'].includes(projection.taskStatus)
+      ) {
+        await this.sessionsController.stop();
+        this.statusMessage = 'Stopping current task…';
+      } else if (this.exitArmed) {
+        this.shouldExit = true;
+      } else {
+        this.exitArmed = true;
+        this.statusMessage = 'No task running. Ctrl+C again to exit.';
+      }
+    }
+  }
+
+  private async handleSessionsIntent(intent: TuiIntent): Promise<void> {
+    if (intent.type === 'up' || intent.type === 'down') {
+      this.moveSession(intent.type === 'up' ? -1 : 1);
+      return;
+    }
+    const key = intent.type === 'text' ? intent.text.toLowerCase() : '';
+    if (key === 'n') {
+      await this.newSession();
+      return;
+    }
+    if (key === 'r' && this.selectedSessionId) {
+      this.confirmation = {
+        kind: 'rename',
+        sessionId: this.selectedSessionId,
+        value: this.sessions.find((item) => item.sessionId === this.selectedSessionId)?.title ?? '',
+      };
+      return;
+    }
+    if (key === 'd' && this.selectedSessionId) {
+      this.confirmation = {
+        kind: 'delete',
+        sessionId: this.selectedSessionId,
+        value: '',
+      };
+      return;
+    }
+    if (intent.type === 'text') {
+      this.sessionQuery += intent.text;
+      this.selectFirstSession();
+      return;
+    }
+    if (intent.type === 'backspace') {
+      this.sessionQuery = this.sessionQuery.slice(0, -1);
+      this.selectFirstSession();
+      return;
+    }
+    if (intent.type === 'activate') {
+      if (!this.selectedSessionId) return;
+      await this.switchSession(this.selectedSessionId);
+      return;
+    }
+  }
+
+  private async handleAgentsIntent(intent: TuiIntent): Promise<void> {
+    const controls = this.agentControls();
+    if (intent.type === 'up' || intent.type === 'down') {
+      const selected = selectAgent(
+        controls.rows,
+        controls.route.selectedId,
+        intent.type === 'up' ? -1 : 1
+      );
+      if (this.sessionsController.active) {
+        await this.viewState.update(this.sessionsController.active, {
+          boardSelection: selected,
+        });
+      }
+      this.routes.replace({ ...controls.route, selectedId: selected });
+      return;
+    }
+    if (intent.type === 'text' && intent.text.toLowerCase() === 'f') {
+      const filters: AgentFilter[] = ['all', 'active', 'attention', 'done'];
+      this.filterIndex = (this.filterIndex + 1) % filters.length;
+      if (this.sessionsController.active) {
+        await this.viewState.setBoardFilter(
+          this.sessionsController.active,
+          filters[this.filterIndex]
+        );
+      }
+      this.agentFilter = filters[this.filterIndex];
+      return;
+    }
+    if (intent.type === 'text' && intent.text.toLowerCase() === 's') {
+      const selected = controls.rows.find(
+        (row) => row.agent.taskId === controls.route.selectedId
+      );
+      if (selected) {
+        await this.options.runtime.stopSession(selected.agent.sessionId);
+        this.statusMessage = 'Stop requested';
+      }
+      return;
+    }
+    if (intent.type === 'activate') {
+      const selected = controls.rows.find(
+        (row) => row.agent.taskId === controls.route.selectedId
+      );
+      if (selected) {
+        await this.switchSession(selected.agent.sessionId, false);
+        this.routes.push({
+          kind: 'conversation',
+        });
+      }
+    }
+  }
+
+  private async handleConfirmation(intent: TuiIntent): Promise<void> {
+    const confirmation = this.confirmation!;
+    if (intent.type === 'back') {
+      this.confirmation = undefined;
+      return;
+    }
+    if (confirmation.kind === 'rename') {
+      if (intent.type === 'text') confirmation.value += intent.text;
+      if (intent.type === 'backspace') confirmation.value = confirmation.value.slice(0, -1);
+      if (intent.type === 'activate' || intent.type === 'send') {
+        if (confirmation.value.trim()) {
+          await this.options.runtime.renameSession(
+            confirmation.sessionId,
+            confirmation.value.trim()
+          );
+          await this.refreshSessions();
+        }
+        this.confirmation = undefined;
+      }
+      return;
+    }
+    if (intent.type === 'activate' || intent.type === 'send') {
+      await this.options.runtime.deleteSession(confirmation.sessionId);
+      await this.viewState.remove(confirmation.sessionId);
+      await this.refreshSessions();
+      this.selectedSessionId = this.sessions[0]?.sessionId;
+      if (this.selectedSessionId) await this.switchSession(this.selectedSessionId);
+      this.confirmation = undefined;
+    }
+  }
+
+  private async send(): Promise<void> {
+    const text = this.composer.trim();
+    if (!text) return;
+    if (!this.sessionsController.active) {
+      const id = this.newSessionId();
+      this.sessionsController.activateLocal(id);
+    }
+    this.composer = '';
+    await this.persistDraft();
+    const active = this.sessionsController.active;
+    const ack = await this.sessionsController.send(text);
+    if (active && !this.sessionsController.currentProjection) {
+      await this.sessionsController.switch(active);
+    }
+    this.statusMessage =
+      ack.status === 'accepted' || ack.status === 'duplicate'
+        ? undefined
+        : `Send failed: ${ack.error?.message ?? ack.status}`;
+    await this.refreshSessions();
+  }
+
+  private async insertText(text: string): Promise<void> {
+    this.composer += text;
+    await this.persistDraft();
+  }
+
+  private async persistDraft(): Promise<void> {
+    const active = this.sessionsController.active;
+    if (!active) return;
+    await this.viewState.update(active, {
+      draftText: this.composer,
+      cursor: this.composer.length,
+    });
+  }
+
+  private async openSessions(): Promise<void> {
+    await this.refreshSessions();
+    this.routeToSessionsAndSelect();
+    this.routes.push({ kind: 'sessions', query: this.sessionQuery });
+  }
+
+  private async newSession(): Promise<void> {
+    const id = this.newSessionId();
+    this.sessions.unshift({
+      sessionId: id,
+      title: 'New chat',
+      taskStatus: 'completed',
+      lifecycle: 'unloaded',
+      revision: 0,
+      eventSeq: 0,
+      updatedAt: this.now(),
+      rowCount: 0,
+      childCount: 0,
+      attentionCount: 0,
+      ...(this.options.project ? { project: this.options.project } : {}),
+      ...(this.options.branch ? { branch: this.options.branch } : {}),
+    });
+    this.selectedSessionId = id;
+    this.sessionsController.activateLocal(id);
+    this.composer = '';
+    this.routes.reset();
+  }
+
+  private async switchSession(sessionId: string, resetRoute = true): Promise<void> {
+    await this.sessionsController.switch(sessionId);
+    this.selectedSessionId = sessionId;
+    this.composer = (await this.viewState.get(sessionId)).draftText;
+    if (resetRoute) this.routes.reset();
+  }
+
+  private async refreshSessions(): Promise<void> {
+    const runtimeSessions = await this.options.runtime.listSessions();
+    const current = this.sessions.find(
+      (session) =>
+        session.sessionId === this.sessionsController.active &&
+        session.revision === 0
+    );
+    this.sessions = current ? [current, ...runtimeSessions] : runtimeSessions;
+    this.selectFirstSession();
+  }
+
+  private syncActiveSummary(): void {
+    const active = this.sessionsController.active;
+    const projection = this.sessionsController.currentProjection;
+    if (!active || !projection) return;
+    const index = this.sessions.findIndex((session) => session.sessionId === active);
+    const summary: RuntimeSessionSummary = {
+      sessionId: active,
+      title: this.sessions[index]?.title ?? (this.composer.trim() || 'New chat'),
+      taskStatus: projection.taskStatus,
+      lifecycle: projection.lifecycle,
+      revision: projection.revision,
+      eventSeq: projection.eventSeq,
+      updatedAt: this.now(),
+      rowCount: projection.rows.length,
+      queueLength: projection.queueLength,
+      childCount: projection.children?.length ?? 0,
+      attentionCount:
+        projection.children?.filter(
+          (child) => child.status === 'failed' || child.status === 'cancelled'
+        ).length ?? 0,
+      ...(this.options.project ? { project: this.options.project } : {}),
+      ...(this.options.branch ? { branch: this.options.branch } : {}),
+    };
+    if (index >= 0) this.sessions[index] = summary;
+    else this.sessions.unshift(summary);
+  }
+
+  private routeToSessionsAndSelect(): void {
+    this.selectFirstSession();
+  }
+
+  private moveSession(direction: -1 | 1): void {
+    const rows = this.visibleSessions();
+    if (!rows.length) return;
+    const index = rows.findIndex((row) => row.sessionId === this.selectedSessionId);
+    const next = index < 0 ? 0 : (index + direction + rows.length) % rows.length;
+    this.selectedSessionId = rows[next].sessionId;
+  }
+
+  private selectFirstSession(): void {
+    const rows = this.visibleSessions();
+    if (!rows.some((row) => row.sessionId === this.selectedSessionId)) {
+      this.selectedSessionId = rows[0]?.sessionId;
+    }
+  }
+
+  private visibleSessions() {
+    return buildSessionRows(
+      this.sessions,
+      this.sessionQuery,
+      this.sessionsController.active
+    );
+  }
+
+  private agentControls() {
+    const route = this.routes.current.kind === 'agents'
+      ? this.routes.current
+      : { kind: 'agents' as const, rootSessionId: this.sessionsController.active ?? '' };
+    const projection = this.sessionsController.currentProjection;
+    const agents: TuiAgentRecord[] = (projection?.children ?? []).map((child) => ({
+      taskId: child.taskId,
+      sessionId: child.sessionId,
+      parentTaskId: child.parentTaskId,
+      parentSessionId: this.sessionsController.active,
+      profileName: child.profileName,
+      status: child.status,
+      executionMode: child.executionMode,
+      updatedAt: child.updatedAt,
+      ...(child.summary ? { summary: child.summary } : {}),
+    }));
+    return {
+      route,
+      rows: buildAgentRows(agents, route.rootSessionId, this.agentFilter),
+    };
+  }
+
+  private selectFirstAgent(): void {
+    const controls = this.agentControls();
+    const selected = controls.route.selectedId ?? controls.rows[0]?.agent.taskId;
+    if (this.routes.current.kind === 'agents') {
+      this.routes.replace({ ...this.routes.current, selectedId: selected });
+    }
+  }
+
+  private snapshot(): TuiRenderSnapshot {
+    const projection = this.sessionsController.currentProjection;
+    const controls = this.agentControls();
+    return {
+      route: this.routes.current,
+      status: this.statusFacts(projection),
+      ...(this.sessionsController.active
+        ? { activeSessionId: this.sessionsController.active }
+        : {}),
+      activeSessionTitle:
+        this.sessions.find((item) => item.sessionId === this.sessionsController.active)
+          ?.title ?? 'New chat',
+      ...(projection ? { projection } : {}),
+      sessions: this.visibleSessions(),
+      ...(this.selectedSessionId ? { selectedSessionId: this.selectedSessionId } : {}),
+      sessionQuery: this.sessionQuery,
+      agentRows: controls.rows,
+      ...(controls.route.selectedId
+        ? { selectedAgentId: controls.route.selectedId }
+        : {}),
+      agentFilter: this.agentFilter,
+      composer: this.composer,
+      ...(this.statusMessage ? { statusMessage: this.statusMessage } : {}),
+      ...(this.confirmation
+        ? {
+            prompt: {
+              label:
+                this.confirmation.kind === 'rename'
+                  ? 'Rename: '
+                  : `Delete ${this.confirmation.sessionId}? Enter confirm, Esc cancel · `,
+              value: this.confirmation.value,
+            },
+          }
+        : {}),
+      ...(this.review ? { review: this.review } : {}),
+    };
+  }
+
+  private statusFacts(projection: ProductProjection | undefined): StatusBarFacts {
+    const blockers = projection?.lastError ? ['ERR'] : [];
+    return {
+      blockers,
+      connection: 'online',
+      ...(projection ? { taskStatus: projection.taskStatus } : {}),
+      ...(projection
+        ? {
+            elapsedMs:
+              projection.taskStatus === 'running' ||
+              projection.taskStatus === 'queued' ||
+              projection.taskStatus === 'waiting'
+                ? Math.max(
+                    0,
+                    this.now() -
+                      ([...projection.rows]
+                        .reverse()
+                        .find((row) => row.startedAt !== undefined)?.startedAt ??
+                        this.now())
+                  )
+                : undefined,
+          }
+        : {}),
+      ...(projection?.activeTaskId &&
+      this.sessions.find(
+        (item) => item.sessionId === this.sessionsController.active
+      )?.parentSessionId
+        ? { sessionKind: 'child' as const }
+        : {}),
+      sessionTitle:
+        this.sessions.find((item) => item.sessionId === this.sessionsController.active)
+          ?.title ?? 'New chat',
+      ...(this.options.project ? { project: this.options.project } : {}),
+      ...(this.options.branch ? { branch: this.options.branch } : {}),
+      workspaceRevision: projection?.revision,
+      queueLength: projection?.queueLength,
+      agentCount: projection?.children?.length,
+      agentAttention:
+        projection?.children?.filter(
+          (child) => child.status === 'failed' || child.status === 'cancelled'
+        ).length,
+      ...(this.options.model ? { model: this.options.model } : {}),
+      ...(this.options.provider ? { provider: this.options.provider } : {}),
+      processAvailable: this.options.processAvailable,
+    };
+  }
+
+  private newSessionId(): string {
+    return `session_${this.now().toString(36)}_${++this.sessionSequence}`;
+  }
+
+  private notifyRender(): void {
+    for (const listener of this.renderListeners) listener();
+  }
+}
+
+function splitInput(input: string): string[] {
+  const keys: string[] = [];
+  for (let index = 0; index < input.length; index += 1) {
+    if (input[index] !== '\x1b') {
+      keys.push(input[index]);
+      continue;
+    }
+    const rest = input.slice(index);
+    const match = /^\x1b(?:\[[0-9;]*[A-Za-z~]|O[A-Za-z])/.exec(rest);
+    const sequence = match?.[0] ?? '\x1b';
+    keys.push(sequence);
+    index += sequence.length - 1;
+  }
+  return keys;
+}

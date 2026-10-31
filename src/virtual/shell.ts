@@ -70,10 +70,11 @@ export class VirtualShell {
     script: string,
     options: { signal?: AbortSignal; stdin?: string } = {}
   ): Promise<VirtualCommandResult> {
+    assertSupportedSyntax(script);
     const logicalParts = splitOutsideQuotes(script, ['&&', '||', ';']);
-    const logical = logicalParts.map((item, index) => ({
+    const logical = logicalParts.map((item) => ({
       value: item.value,
-      operator: index === 0 ? undefined : logicalParts[index - 1].operator,
+      operator: item.operator,
     }));
     let stdin = options.stdin ?? '';
     let stdout = '';
@@ -261,6 +262,18 @@ export class VirtualShell {
       if (!args.length) return fail(`${command}: pattern required`);
       const pattern = args[0];
       const paths = args.slice(1);
+      if (!paths.length && stdin) {
+        const output = stdin
+          .split('\n')
+          .map((line, index) => ({ line, index }))
+          .filter(({ line }) => line.includes(pattern))
+          .map(({ line, index }) => `${index + 1}:${line}`);
+        return {
+          exitCode: output.length ? 0 : 1,
+          stdout: output.length ? `${output.join('\n')}\n` : '',
+          stderr: '',
+        };
+      }
       const files = paths.length
         ? paths.map((path) => this.resolve(path))
         : (await this.vfs.list('', { recursive: true, signal }))
@@ -282,6 +295,7 @@ export class VirtualShell {
       return ok(
         (await this.vfs.list(path, { recursive: true, signal }))
           .map((item) => item.path)
+          .sort()
           .join('\n') + '\n'
       );
     }
@@ -505,4 +519,38 @@ function decode(value: Uint8Array): string {
 
 function truncate(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max)}\n…(truncated)` : value;
+}
+
+function assertSupportedSyntax(value: string): void {
+  let quote: "'" | '"' | undefined;
+  let escaped = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === '\\' && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) quote = undefined;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (
+      char === '`' ||
+      (char === '$' && value[index + 1] === '(') ||
+      ((char === '<' || char === '>') && value[index + 1] === '(')
+    ) {
+      throw new AgentError(
+        'SHELL_SYNTAX_UNSUPPORTED',
+        'Command substitution and process substitution are not supported'
+      );
+    }
+  }
 }
