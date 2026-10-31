@@ -25,20 +25,20 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <header class="hero">
 <small>TINYAI / PRODUCTION CODING AGENT / ROADMAP</small>
 <h1>生产级 Coding Agent<br>分阶段产品设计</h1>
-<p>面向 macOS TUI、iOS 控制端和 Chrome 浏览器三端。重点不是继续堆功能，而是把 Coding Agent 做成可靠、可恢复、可审阅、跨端连续的日常开发工具。</p>
-<div class="chips"><span class="chip">macOS：执行与 TUI</span><span class="chip">iOS：控制与审阅</span><span class="chip">Chrome：页面与浏览器工作区</span><span class="chip">基础权限管理</span></div>
+<p>当前实现面向 macOS TUI 和 Chrome 浏览器。架构为未来客户端保留扩展性，但本阶段不开发 iOS App。重点是把 Coding Agent 做成可靠、可恢复、可审阅的日常开发工具。</p>
+<div class="chips"><span class="chip">macOS：执行与 TUI</span><span class="chip">Chrome：页面与浏览器工作区</span><span class="chip">iOS：仅考虑未来扩展</span><span class="chip">基础权限管理</span></div>
 </header>
 <nav><a href="#scope">范围</a><a href="#baseline">现状</a><a href="#principles">原则</a><a href="#timeline">路线</a><a href="#p1">P1</a><a href="#p2">P2</a><a href="#p3">P3</a><a href="#p4">P4</a><a href="#p5">P5</a><a href="#p6">P6</a><a href="#p7">P7</a><a href="#metrics">成功指标</a></nav>
 <section id="scope">
 <h2>1. 产品范围与端职责</h2>
 <div class="grid3">
 <div class="card"><h3>macOS</h3><p>权威执行端。提供 TUI、代码工作区、本地沙箱、长任务、Git、测试和子 Agent 运行能力。</p></div>
-<div class="card"><h3>iOS</h3><p>连接已配对的 Mac 或远程 Workspace，查看进度、继续对话、审阅 diff、处理必要确认和接收通知。iOS 不在设备内执行任意代码。</p></div>
+<div class="card"><h3>未来客户端</h3><p>通过稳定、端无关的 Runtime 协议和 Session 数据接入。iOS 当前不实现，仅要求未来客户端不需要改动 Agent Core。</p></div>
 <div class="card"><h3>Chrome</h3><p>浏览网页、捕获页面上下文、运行浏览器 Workspace，并可把上下文交给同一 Session 继续处理。</p></div>
 </div>
 <h3>统一体验</h3>
-<ul><li>同一个 Session 可以在 Mac TUI、iOS 和浏览器之间继续查看与操作。</li><li>任务只由一个权威 Runtime 执行，其他端是客户端，不产生分离状态。</li><li>终端、页面和移动端只是入口不同，历史、任务状态、审阅结果保持一致。</li></ul>
-<div class="rule">产品边界：只面向 macOS、iOS 和浏览器；不投入 Linux/Windows 原生客户端。权限采用“安全默认 + 高风险确认 + 项目级记住”，不做企业级 RBAC。</div>
+<ul><li>同一个 Session 可以在 Mac TUI 和 Chrome 之间继续查看与操作。</li><li>任务只由一个权威 Runtime 执行，其他端是客户端，不产生分离状态。</li><li>Runtime、Projection、Session 和审阅数据保持端无关，为未来客户端保留接口。</li></ul>
+<div class="rule">产品边界：当前只交付 macOS 和浏览器；不实现 iOS App，也不投入 Linux/Windows 原生客户端。权限采用“安全默认 + 高风险确认 + 项目级记住”，不做企业级 RBAC。</div>
 </section>
 <section id="baseline">
 <h2>2. 当前基础</h2>
@@ -47,7 +47,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <tr><td>Core Runtime</td><td>Session、队列、Projection、子 Agent、Policy、Verifier</td><td>完成协议、恢复、上下文预算、可观测性</td></tr>
 <tr><td>代码执行</td><td>macOS Seatbelt、Docker、文件/Exec/PTY</td><td>真实生产 CLI、Patch/Search/Git、持续修复</td></tr>
 <tr><td>CLI</td><td>一次性批处理任务</td><td>没有 TUI、交互、Resume 和实时进度</td></tr>
-<tr><td>iOS</td><td>暂未实现</td><td>配对、会话控制、审阅和通知</td></tr>
+<tr><td>iOS</td><td>不在当前交付范围</td><td>只要求未来可接入，不设计配对、通知或移动 UI</td></tr>
 </tbody></table>
 </section>
 <section id="principles">
@@ -57,14 +57,14 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <div class="card"><h3>执行必须可见</h3><p>用户能看到当前任务、工具、命令、耗时、失败和下一步。</p></div>
 <div class="card"><h3>中断必须可恢复</h3><p>关闭 TUI、断网或应用崩溃后，Session 和 Workspace 可以恢复。</p></div>
 <div class="card"><h3>修改必须可审阅</h3><p>最终呈现文件级 diff、测试结果和未解决风险，默认不自动 commit。</p></div>
-<div class="card"><h3>跨端不复制真相</h3><p>Mac、iOS、Chrome 都消费同一个 Runtime 状态，不各自维护任务历史。</p></div>
+<div class="card"><h3>跨端不复制真相</h3><p>Mac、Chrome 和未来客户端都消费同一个 Runtime 状态，不各自维护任务历史。</p></div>
 <div class="card"><h3>默认安全但不繁琐</h3><p>沙箱内常规操作自动执行；删除、网络、提交等高风险动作才要求确认。</p></div>
 </div>
 </section>
 <section id="timeline">
 <h2>4. 阶段总览</h2>
-<div class="timeline"><div><b>P1</b>Mac TUI</div><div><b>P2</b>编码质量闭环</div><div><b>P3</b>Workspace 与恢复</div><div><b>P4</b>Chrome 对齐</div><div><b>P5</b>iOS 控制端</div><div><b>P6</b>子 Agent 与并行</div><div><b>P7</b>生产加固</div></div>
-<p>P1/P2 是下一阶段重点；P3 与 P1/P2 可穿插；iOS 在桌面 Runtime 稳定后接入，避免把未稳定引擎搬到移动端。</p>
+<div class="timeline"><div><b>P1</b>Mac TUI</div><div><b>P2</b>编码质量闭环</div><div><b>P3</b>Workspace 与恢复</div><div><b>P4</b>Chrome 对齐</div><div><b>P5</b>扩展基线</div><div><b>P6</b>子 Agent 与并行</div><div><b>P7</b>生产加固</div></div>
+<p>P1/P2 是下一阶段重点；P3 与 P1/P2 可穿插；P5 只建立未来客户端扩展基线，不包含 iOS 客户端开发。</p>
 </section>
 <section id="p1">
 <div class="phase-head"><div class="phase-no">P1</div><div><h2>可信赖的 macOS TUI</h2><p><span class="status next">下一阶段</span></p></div></div>
@@ -103,13 +103,13 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 </div>
 </section>
 <section id="p5">
-<div class="phase-head"><div class="phase-no">P5</div><div><h2>iOS 控制与审阅端</h2><p><span class="status later">桌面 Runtime 稳定后</span></p></div></div>
-<div class="rule">iOS 不本地执行任意代码。它是 Mac/远程 Workspace 的安全客户端，用于发起、查看、继续和审阅任务。</div>
+<div class="phase-head"><div class="phase-no">P5</div><div><h2>跨端扩展基线</h2><p><span class="status later">不包含 iOS 实现</span></p></div></div>
+<div class="rule">本阶段的目标是避免未来接入 iOS 或其他客户端时重写 Agent Core；当前不设计设备配对、移动 UI、通知或 App 发布流程。</div>
 <div class="grid">
-<div class="feature"><h3>F5.1 设备配对</h3><div class="goal">安全连接用户自己的 Mac Workspace。</div><ul><li>扫码或同账号配对。</li><li>连接状态和撤销。</li><li>不要求在 iOS 本地保存代码仓库。</li></ul><p class="accept">验收：无需配置开发环境即可连接已运行的 Mac Agent。</p></div>
-<div class="feature"><h3>F5.2 会话控制</h3><div class="goal">在手机上掌握长任务。</div><ul><li>查看任务、工具、测试和耗时。</li><li>继续对话、停止任务、排队补充。</li><li>后台通知任务完成或需要处理。</li></ul><p class="accept">验收：离开 Mac 后仍可判断任务状态并做基本控制。</p></div>
-<div class="feature"><h3>F5.3 移动审阅</h3><div class="goal">利用碎片时间审阅代码。</div><ul><li>文件级 diff、测试结果和风险摘要。</li><li>逐文件查看、标记问题和要求修改。</li><li>不在 iOS 自动 commit/push。</li></ul><p class="accept">验收：手机上能完成一次完整变更审阅并发送修改要求。</p></div>
-<div class="feature"><h3>F5.4 连续会话</h3><div class="goal">Mac 与 iPhone 是同一任务的两个视图。</div><ul><li>Mac 发起、iPhone 查看、回到 Mac 继续。</li><li>断线重连和状态收敛。</li><li>通知与未读状态。</li></ul><p class="accept">验收：切换设备不产生重复任务和历史分叉。</p></div>
+<div class="feature"><h3>F5.1 端无关 Runtime 访问边界</h3><div class="goal">未来客户端可以连接 Runtime，而不依赖 macOS TUI 内部实现。</div><ul><li>Session、任务、队列和审批具有稳定的外部访问语义。</li><li>客户端只消费 Projection 和事件。</li><li>Runtime 不依赖 TUI、Chrome Side Panel 或具体 UI 生命周期。</li></ul><p class="accept">验收：未来客户端只需接入稳定协议，不修改 SessionRuntime 和 AgentLoop。</p></div>
+<div class="feature"><h3>F5.2 可移植的 Session 与审阅数据</h3><div class="goal">代码变更、测试证据和任务状态不绑定桌面 UI。</div><ul><li>Diff、测试报告、风险摘要和 Task Tree 使用端无关数据表达。</li><li>历史 Snapshot 不包含 TUI 或 Chrome 字段。</li><li>不同客户端对同一 Session 得到一致事实。</li></ul><p class="accept">验收：未来客户端能直接渲染现有 Session 和审阅数据。</p></div>
+<div class="feature"><h3>F5.3 客户端能力协商</h3><div class="goal">未来客户端按能力获得功能，而不是假设所有端都一样。</div><ul><li>区分可执行、只读审阅、仅通知等客户端能力。</li><li>不支持的能力明确降级。</li><li>不把浏览器工具和 TUI 工具暴露给不支持的端。</li></ul><p class="accept">验收：低能力客户端不会看到无法执行的功能。</p></div>
+<div class="feature"><h3>F5.4 扩展性验证</h3><div class="goal">证明未来接入不是口头承诺。</div><ul><li>提供轻量 Fake/Headless Client。</li><li>通过独立构建验证 Core 无 TUI/Chrome 依赖。</li><li>保留稳定协议兼容测试和 Session 互通测试。</li></ul><p class="accept">验收：Headless Client 可以启动、读取 Session、接收事件并完成基本控制。</p></div>
 </div>
 </section>
 <section id="p6">
@@ -117,7 +117,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <div class="grid">
 <div class="feature"><h3>F6.1 通用子 Agent</h3><div class="goal">不是固定 Researcher/Reviewer，而是由任务动态定义。</div><ul><li>任意 Profile、目标和工具子集。</li><li>前台与后台任务。</li><li>结果、证据、未解决项和预算。</li></ul><p class="accept">验收：用户可定义“迁移模块”“补测试”“调查构建失败”等任意子任务。</p></div>
 <div class="feature"><h3>F6.2 隔离 Workspace</h3><div class="goal">并行修改不互相污染。</div><ul><li>独立分支或工作树。</li><li>文件所有权与冲突提示。</li><li>显式合并和审阅。</li></ul><p class="accept">验收：两个子 Agent 并行修改后，主 Agent 能安全审阅并合并。</p></div>
-<div class="feature"><h3>F6.3 跨端子 Agent 可视化</h3><div class="goal">用户能看见每个子任务的进展和影响范围。</div><ul><li>TUI 树状任务视图。</li><li>iOS 任务摘要与通知。</li><li>停止、继续和查看子任务。</li></ul><p class="accept">验收：并行任务不隐藏失败，不混淆父子上下文。</p></div>
+<div class="feature"><h3>F6.3 跨端子 Agent 可视化</h3><div class="goal">用户能看见每个子任务的进展和影响范围。</div><ul><li>TUI 树状任务视图。</li><li>Chrome 中的任务摘要与状态。</li><li>停止、继续和查看子任务。</li></ul><p class="accept">验收：并行任务不隐藏失败，不混淆父子上下文。</p></div>
 </div>
 </section>
 <section id="p7">
@@ -125,7 +125,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <div class="grid">
 <div class="feature"><h3>F7.1 可观测性</h3><div class="goal">问题可定位、成本可解释。</div><ul><li>模型、工具、审批、测试和失败 Trace。</li><li>Token、耗时、重试和成本统计。</li><li>隐私安全的诊断导出。</li></ul><p class="accept">验收：任何失败任务都有足够证据定位是模型、工具、环境还是用户中断。</p></div>
 <div class="feature"><h3>F7.2 质量评测</h3><div class="goal">持续衡量真实 Coding 能力。</div><ul><li>多语言仓库任务集。</li><li>Bug 修复、测试补齐、重构和大仓库检索。</li><li>误完成率、恢复率、成本和安全回归。</li></ul><p class="accept">验收：每次发布都有可比较的质量报告。</p></div>
-<div class="feature"><h3>F7.3 发布与升级</h3><div class="goal">Mac、浏览器、iOS 三端持续可用。</div><ul><li>版本兼容和 Session 迁移。</li><li>签名、公证、安装和回滚。</li><li>服务端连接与 iOS 审核要求。</li></ul><p class="accept">验收：升级不丢 Session，旧版本客户端有明确兼容策略。</p></div>
+<div class="feature"><h3>F7.3 发布与升级</h3><div class="goal">macOS 与浏览器持续可用。</div><ul><li>版本兼容和 Session 迁移。</li><li>签名、公证、安装和回滚。</li><li>Chrome 扩展升级与 Runtime 兼容。</li></ul><p class="accept">验收：升级不丢 Session，旧版本客户端有明确兼容策略。</p></div>
 <div class="feature"><h3>F7.4 性能与体验</h3><div class="goal">大型仓库仍保持响应。</div><ul><li>启动、搜索、索引、流式渲染和大 diff 性能。</li><li>低资源模式。</li><li>终端无障碍和不同屏幕尺寸。</li></ul><p class="accept">验收：大型仓库操作不阻塞输入，内存和 CPU 有明确上限。</p></div>
 </div>
 </section>
@@ -136,7 +136,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <tr><td>P2</td><td>可信 Coding 闭环</td><td>P1</td><td>是</td></tr>
 <tr><td>P3</td><td>可靠 Workspace 与恢复</td><td>P1</td><td>是</td></tr>
 <tr><td>P4</td><td>Chrome 与 Mac 连续工作流</td><td>P1/P2</td><td>是</td></tr>
-<tr><td>P5</td><td>iOS Companion</td><td>P1-P4 稳定接口</td><td>TestFlight</td></tr>
+<tr><td>P5</td><td>扩展基线（不交付 iOS）</td><td>P1/P2 稳定数据</td><td>是</td></tr>
 <tr><td>P6</td><td>子 Agent 与并行 Workspace</td><td>P2/P3</td><td>实验功能</td></tr>
 <tr><td>P7</td><td>正式生产版</td><td>全部</td><td>正式发布</td></tr>
 </tbody></table>
@@ -147,13 +147,13 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <div class="card"><h3>可靠性</h3><p>任务中断恢复成功；崩溃后无重复危险操作；测试失败不会误报完成。</p></div>
 <div class="card"><h3>开发效率</h3><p>常见修复任务减少人工复制、切窗和手动测试次数；从输入到首个可见动作时间稳定。</p></div>
 <div class="card"><h3>质量</h3><p>内置评测上的任务完成率、测试通过率、回归率、误改率和平均修复轮次持续改善。</p></div>
-<div class="card"><h3>跨端</h3><p>Mac→iOS→Chrome 连续会话无分叉；断网重连后状态一致。</p></div>
+<div class="card"><h3>跨端</h3><p>Mac 与 Chrome 连续会话无分叉；断网重连后状态一致；未来客户端可通过稳定协议接入。</p></div>
 <div class="card"><h3>安全</h3><p>无越界文件访问；无未请求网络；无未确认破坏性操作；密钥不进入日志。</p></div>
 <div class="card"><h3>体验</h3><p>长任务可中断、可恢复、可审阅；用户不必阅读原始内部日志才能判断状态。</p></div>
 </div>
-<div class="rule">建议下一开发顺序：P1.1 交互式 TUI + P1.3 会话恢复 + P2.2 精确编辑 + P2.3 测试修复闭环。完成这四项后，才值得把体验扩展到 iOS。</div>
+<div class="rule">建议下一开发顺序：P1.1 交互式 TUI + P1.3 会话恢复 + P2.2 精确编辑 + P2.3 测试修复闭环。iOS 不在当前路线内，只需保持 P5 的扩展边界。</div>
 <h3>明确非目标</h3>
-<ul><li>Linux/Windows 原生客户端。</li><li>企业级 RBAC、复杂审批矩阵和合规工作流。</li><li>iOS 本地执行任意代码。</li><li>默认自动 commit、push 或发布。</li><li>为并行而并行的大规模 Agent 集群。</li></ul>
+<ul><li>Linux/Windows 原生客户端。</li><li>iOS App、设备配对、移动通知和移动审阅 UI。</li><li>企业级 RBAC、复杂审批矩阵和合规工作流。</li><li>默认自动 commit、push 或发布。</li><li>为并行而并行的大规模 Agent 集群。</li></ul>
 </section>
 </div>
 </body>
