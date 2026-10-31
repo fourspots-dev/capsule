@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tinyai 生产级通用 Coding Agent 测试设计</title>
+<style>
+:root{--bg:#f4f5f7;--paper:#fff;--text:#191a1e;--muted:#6f7179;--line:#e2e3e8;--accent:#5145d8;--ok:#137a4b;--warn:#986100;--danger:#b42318;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.72 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1220px;margin:auto;padding:36px 24px 100px}
+.hero{padding:37px;border-radius:25px;background:radial-gradient(circle at 90% 10%,#a89fff 0,transparent 27%),linear-gradient(135deg,#171724,#30299a 60%,#6557e8);color:#fff}.hero small{opacity:.72;letter-spacing:.11em}.hero h1{font-size:36px;line-height:1.2;margin:12px 0}.hero p{max-width:900px;margin:0;color:#e7e4ff}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}
+nav{position:sticky;top:0;z-index:5;display:flex;gap:14px;overflow:auto;margin:18px 0;padding:10px 14px;border:1px solid var(--line);border-radius:13px;background:#f4f5f7ed;backdrop-filter:blur(12px)}nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}
+section{margin:18px 0;padding:25px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:22px;margin:0 0 14px}h3{font-size:16px;margin:21px 0 8px}p{color:#45464c}.muted{color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafafa}.card h3{margin:0 0 8px}.card p{margin:0}.card ul{margin:8px 0 0;padding-left:18px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafafa;color:var(--muted);font-weight:600}
+code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{padding:16px;overflow:auto;border-radius:11px;background:#181820;color:#edecff;font:12px/1.6 var(--mono)}
+.rule{padding:12px 14px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#f5f3ff}.warn{border-color:var(--warn);background:#fff8e8}.danger{border-color:var(--danger);background:#fff1f0}
+.tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;background:#eef8f2;color:var(--ok)}.tag.unit{background:#f0efff;color:var(--accent)}.tag.risk{background:#fff6e5;color:var(--warn)}.tag.gap{background:#fff0ef;color:var(--danger)}
+@media(max-width:850px){.grid3{grid-template-columns:1fr}}@media(max-width:720px){.grid{grid-template-columns:1fr}.hero h1{font-size:28px}.wrap{padding:20px 12px 70px}section{padding:20px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+<small>TINYAI / PRODUCTION GENERAL CODING AGENT / TEST PLAN</small>
+<h1>生产级通用 Coding Agent<br>详细测试设计</h1>
+<p>用功能验收、状态空间、真实仓库、故障注入、TUI E2E、Chrome E2E、安全边界、性能与长期运行共同判断生产可用性。iOS 不测试，因为不在交付范围；只验证未来 Headless Client 扩展基线。</p>
+<div class="chips"><span class="chip">当前：187 deterministic</span><span class="chip">5 Chrome E2E</span><span class="chip">55.86% statements</span><span class="chip">目标：可信完成</span></div>
+</header>
+<nav><a href="#strategy">策略</a><a href="#levels">层级</a><a href="#trace">追踪矩阵</a><a href="#tui">TUI</a><a href="#coding">Coding</a><a href="#workspace">Workspace</a><a href="#chrome">Chrome</a><a href="#ext">扩展基线</a><a href="#subagent">子Agent</a><a href="#ops">生产加固</a><a href="#state">状态与故障</a><a href="#ci">CI门禁</a></nav>
+<section id="strategy">
+<h2>1. 测试策略</h2>
+<div class="grid">
+<div class="card"><h3>核心原则</h3><ul><li>不把“模型说完成”当完成。</li><li>不把“终端显示了文字”当成工具已执行。</li><li>所有危险副作用可观察、可取消、可恢复。</li><li>Core 测试不依赖真实 TUI、Chrome 或系统网络。</li></ul></div>
+<div class="card"><h3>生产判据</h3><ul><li>行为正确、状态一致、异常可恢复。</li><li>真实仓库可完成闭环。</li><li>长期运行无资源泄漏。</li><li>客户端替换不需要修改 Agent Core。</li></ul></div>
+</div>
+<div class="rule">测试组合：小型状态机穷举 + 有界属性测试 + 真实仓库 Benchmark + macOS Sandbox E2E + TUI E2E + Chrome E2E + 故障注入 + Soak。</div>
+</section>
+<section id="levels">
+<h2>2. 测试层级</h2>
+<table><thead><tr><th>层级</th><th>范围</th><th>目标</th></tr></thead><tbody>
+<tr><td>Unit</td><td>状态机、Patch、Context、Policy、Verifier、Projection</td><td>输入输出与边界正确</td></tr>
+<tr><td>Contract</td><td>Model、SessionStore、Sandbox、Workspace、ToolPack、PromptProfile</td><td>相同契约可由多个实现满足</td></tr>
+<tr><td>Integration</td><td>Agent Loop + Tools + Verification + Persistence</td><td>核心业务闭环</td></tr>
+<tr><td>State Space</td><td>Workspace、Tab、Task、Session、Subagent、Queue</td><td>事件交错和状态不变量</td></tr>
+<tr><td>TUI E2E</td><td>真实终端、输入、渲染、恢复和中断</td><td>用户主流程可用</td></tr>
+<tr><td>Chrome E2E</td><td>真实 Chrome、Service Worker、标签和审批</td><td>浏览器能力与跨端连续</td></tr>
+<tr><td>Benchmark</td><td>多语言仓库与真实任务</td><td>衡量通用 Coding 能力</td></tr>
+<tr><td>Soak / Fault</td><td>长时间、断网、崩溃、磁盘与资源故障</td><td>生产稳定性</td></tr>
+</tbody></table>
+</section>
+<section id="trace">
+<h2>3. 需求追踪矩阵</h2>
+<table><thead><tr><th>设计需求</th><th>核心测试</th><th>发布层级</th></tr></thead><tbody>
+<tr><td>FR-TUI-01..05</td><td>TUI-01..12</td><td>P1 必须</td></tr>
+<tr><td>FR-CODE-01..06</td><td>CODE-01..18</td><td>P2 必须</td></tr>
+<tr><td>FR-WS-01..04</td><td>WS-01..14</td><td>P1/P3 必须</td></tr>
+<tr><td>FR-CHROME-01..03</td><td>CHR-01..10</td><td>P4 必须</td></tr>
+<tr><td>FR-EXT-01..03</td><td>EXT-01..06</td><td>生产扩展门禁</td></tr>
+<tr><td>FR-AGENT-01..03</td><td>SA-01..12</td><td>P6</td></tr>
+<tr><td>FR-OPS-01..04</td><td>OPS-01..14</td><td>正式发布必须</td></tr>
+</tbody></table>
+</section>
+<section id="tui">
+<h2>4. macOS TUI 测试</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>层级</th></tr></thead><tbody>
+<tr><td>TUI-01</td><td>启动并创建 Session</td><td>展示 Workspace、分支和模型状态</td><td><span class="tag">E2E</span></td></tr>
+<tr><td>TUI-02</td><td>流式回答与工具混合</td><td>顺序、状态和耗时正确</td><td><span class="tag">E2E</span></td></tr>
+<tr><td>TUI-03</td><td>多行输入、粘贴和历史</td><td>内容不丢失、不误提交</td><td><span class="tag">E2E</span></td></tr>
+<tr><td>TUI-04</td><td>任务运行中输入补充</td><td>进入 Guide/Queue，符合 Runtime 决策</td><td><span class="tag">Integration</span></td></tr>
+<tr><td>TUI-05</td><td>Ctrl+C 中断工具</td><td>命令终止，任务取消，光标恢复</td><td><span class="tag risk">E2E</span></td></tr>
+<tr><td>TUI-06</td><td>关闭重开后恢复</td><td>Session、任务与审查位置恢复</td><td><span class="tag">E2E</span></td></tr>
+<tr><td>TUI-07</td><td>80/120/200 列 resize</td><td>不溢出、不遮挡 composer</td><td><span class="tag">E2E</span></td></tr>
+<tr><td>TUI-08</td><td>无颜色与色盲模式</td><td>状态不只依赖颜色</td><td><span class="tag">Accessibility</span></td></tr>
+<tr><td>TUI-09</td><td>Diff 展开与折叠</td><td>文件/行高亮和滚动正确</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>TUI-10</td><td>审批出现、切 Session</td><td>审批归属不丢失</td><td><span class="tag risk">E2E</span></td></tr>
+<tr><td>TUI-11</td><td>后台任务通知</td><td>完成/失败可见，不覆盖当前输入</td><td><span class="tag">E2E</span></td></tr>
+<tr><td>TUI-12</td><td>未知终端能力</td><td>降级到基础文本，不崩溃</td><td><span class="tag">Compatibility</span></td></tr>
+</tbody></table>
+</section>
+<section id="coding">
+<h2>5. 通用 Coding 闭环测试</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>层级</th></tr></thead><tbody>
+<tr><td>CODE-01</td><td>Node/Python/Go/Rust/Java 项目发现</td><td>正确识别源文件、构建和测试入口</td><td><span class="tag">Benchmark</span></td></tr>
+<tr><td>CODE-02</td><td>脏工作区开始任务</td><td>记录用户 Diff，后续不覆盖</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>CODE-03</td><td>大仓库符号/文本搜索</td><td>相关文件命中，上下文不超预算</td><td><span class="tag">E2E</span></td></tr>
+<tr><td>CODE-04</td><td>大文件分页读取</td><td>行号稳定、哈希可验证</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>CODE-05</td><td>唯一上下文 Patch</td><td>只修改目标位置</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>CODE-06</td><td>Patch 冲突</td><td>拒绝修改并返回冲突证据</td><td><span class="tag risk">Integration</span></td></tr>
+<tr><td>CODE-07</td><td>文件在 Agent 编辑前被外部修改</td><td>检测哈希变化并重读/中止</td><td><span class="tag risk">Integration</span></td></tr>
+<tr><td>CODE-08</td><td>新增、删除、重命名文件</td><td>Diff 完整，忽略规则正确</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>CODE-09</td><td>最小相关测试选择</td><td>覆盖受影响模块且不过度运行</td><td><span class="tag">Benchmark</span></td></tr>
+<tr><td>CODE-10</td><td>首次测试失败</td><td>进入 Repair Loop，注入失败证据</td><td><span class="tag">Integration</span></td></tr>
+<tr><td>CODE-11</td><td>修复后通过</td><td>进入最终验证和审阅</td><td><span class="tag">E2E</span></td></tr>
+<tr><td>CODE-12</td><td>多轮仍失败</td><td>标记失败，不显示完成</td><td><span class="tag">Integration</span></td></tr>
+<tr><td>CODE-13</td><td>缺失测试入口</td><td>要求用户配置或执行替代验证</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>CODE-14</td><td>模型宣称完成但未调用工具</td><td>验证门禁拒绝完成</td><td><span class="tag risk">Integration</span></td></tr>
+<tr><td>CODE-15</td><td>上下文压缩后继续</td><td>目标、已改文件、失败证据保留</td><td><span class="tag">Integration</span></td></tr>
+<tr><td>CODE-16</td><td>最终 Diff 与用户修改并存</td><td>只标记 Agent 改动，不误回滚</td><td><span class="tag">E2E</span></td></tr>
+<tr><td>CODE-17</td><td>默认不 commit</td><td>任务完成后工作区保持未提交</td><td><span class="tag">E2E</span></td></tr>
+<tr><td>CODE-18</td><td>任意大输出</td><td>Artifact 化，模型只接收摘要</td><td><span class="tag unit">Unit</span></td></tr>
+</tbody></table>
+</section>
+<section id="workspace">
+<h2>6. Workspace 与 Sandbox</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>WS-01</td><td>项目外路径读取/写入</td><td>拒绝；无 TOCTOU 绕过</td></tr>
+<tr><td>WS-02</td><td>符号链接指向项目外</td><td>realpath 后拒绝</td></tr>
+<tr><td>WS-03</td><td>默认网络请求</td><td>阻止并记录</td></tr>
+<tr><td>WS-04</td><td>项目允许特定域名</td><td>仅允许目标域名</td></tr>
+<tr><td>WS-05</td><td>命令超时</td><td>进程树终止，无残留</td></tr>
+<tr><td>WS-06</td><td>用户中断长命令</td><td>1 秒级进入取消状态</td></tr>
+<tr><td>WS-07</td><td>PTY open/write/resize/close</td><td>状态一致，关闭后无句柄</td></tr>
+<tr><td>WS-08</td><td>关闭 TUI 后任务继续</td><td>后台产出持久化</td></tr>
+<tr><td>WS-09</td><td>TUI 重开恢复</td><td>恢复最后任务与检查点</td></tr>
+<tr><td>WS-10</td><td>崩溃时正在进行写文件</td><td>原子写入，无半文件</td></tr>
+<tr><td>WS-11</td><td>回滚 Agent 改动</td><td>用户修改保留</td></tr>
+<tr><td>WS-12</td><td>磁盘满/权限变化</td><td>明确失败并进入可恢复状态</td></tr>
+<tr><td>WS-13</td><td>Artifact 大文件与敏感信息</td><td>限制大小并脱敏</td></tr>
+<tr><td>WS-14</td><td>退出与资源清理</td><td>无 PTY、Debugger、子进程、timer 泄漏</td></tr>
+</tbody></table>
+</section>
+<section id="chrome">
+<h2>7. Chrome 与跨端</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>CHR-01</td><td>网页选中内容引用到 Session</td><td>来源、时间和页面标识清楚</td></tr>
+<tr><td>CHR-02</td><td>网页 Prompt Injection</td><td>内容作为不可信上下文，不视为用户指令</td></tr>
+<tr><td>CHR-03</td><td>标签组共享 Session</td><td>组内切换不换对话</td></tr>
+<tr><td>CHR-04</td><td>组外标签独立</td><td>自动切换独立 Session</td></tr>
+<tr><td>CHR-05</td><td>关闭当前标签存在旧 activate</td><td>无 BROWSER_TAB_NOT_FOUND</td></tr>
+<tr><td>CHR-06</td><td>手工 group/ungroup</td><td>Workspace 映射即时收敛</td></tr>
+<tr><td>CHR-07</td><td>Agent new_tab</td><td>只显式创建并加入当前 Workspace</td></tr>
+<tr><td>CHR-08</td><td>Runtime reload</td><td>恢复 Tab Session</td></tr>
+<tr><td>CHR-09</td><td>Chrome 中发起，TUI 继续</td><td>同一 Session、同一审查状态</td></tr>
+<tr><td>CHR-10</td><td>前端修复验证</td><td>代码 Diff、测试和页面证据关联</td></tr>
+</tbody></table>
+</section>
+<section id="ext">
+<h2>8. 未来客户端扩展基线</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>EXT-01</td><td>Core 依赖扫描</td><td>不引用 TUI、Chrome、Side Panel</td></tr>
+<tr><td>EXT-02</td><td>Headless Client 启动</td><td>可创建和订阅 Session</td></tr>
+<tr><td>EXT-03</td><td>Session Snapshot 读取</td><td>无终端/Chrome 特有字段</td></tr>
+<tr><td>EXT-04</td><td>低能力客户端</td><td>只看到审阅和状态能力</td></tr>
+<tr><td>EXT-05</td><td>客户端断开重连</td><td>Session 不丢失</td></tr>
+<tr><td>EXT-06</td><td>未来客户端兼容测试</td><td>无需修改 Core 或 Snapshot 迁移</td></tr>
+</tbody></table>
+<div class="rule">不测试 iOS App、设备配对、移动通知或移动 UI，因为不在交付范围。</div>
+</section>
+<section id="subagent">
+<h2>9. 子 Agent 与并行 Workspace</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>SA-01</td><td>自定义 Profile</td><td>不得修改代码即可定义新子 Agent</td></tr>
+<tr><td>SA-02</td><td>前台子任务</td><td>父任务等待并接收结构化结果</td></tr>
+<tr><td>SA-03</td><td>后台子任务</td><td>父任务可继续，状态可查看</td></tr>
+<tr><td>SA-04</td><td>两个 Worktree 并行编辑</td><td>文件不互相污染</td></tr>
+<tr><td>SA-05</td><td>相同文件并发编辑</td><td>冲突检测或所有权阻止</td></tr>
+<tr><td>SA-06</td><td>合并子任务</td><td>显式审阅，不自动覆盖用户修改</td></tr>
+<tr><td>SA-07</td><td>取消父任务</td><td>取消向下传播，Worktree 回收</td></tr>
+<tr><td>SA-08</td><td>子任务失败</td><td>失败在 TUI 树中明确可见</td></tr>
+<tr><td>SA-09</td><td>预算耗尽</td><td>停止并返回部分证据</td></tr>
+<tr><td>SA-10</td><td>子 Agent 缺工具</td><td>请求被拒绝，不越权</td></tr>
+<tr><td>SA-11</td><td>Worktree 遗留进程</td><td>退出或崩溃后清理</td></tr>
+<tr><td>SA-12</td><td>父子 Session 隔离</td><td>上下文不隐式串写</td></tr>
+</tbody></table>
+</section>
+<section id="ops">
+<h2>10. 生产加固、评测与 Soak</h2>
+<div class="grid">
+<div class="card"><h3>OPS-01..04 可观测性</h3><p>Trace 覆盖模型、工具、验证、恢复、子 Agent；费用与 token 统计可核对；日志脱敏。</p></div>
+<div class="card"><h3>OPS-05..07 质量评测</h3><p>多语言 Benchmark、误完成率、平均修复轮次、回归率、任务成本和人工干预次数。</p></div>
+<div class="card"><h3>OPS-08..10 发布兼容</h3><p>升级 Session、配置、旧 Snapshot、旧客户端和 Chrome Runtime 兼容。</p></div>
+<div class="card"><h3>OPS-11..14 性能/Soak</h3><p>大仓库、10k 行日志、大 Diff、8 小时运行、内存、FD、子进程和 PTY 无泄漏。</p></div>
+</div>
+<h3>Benchmark 组成</h3>
+<table><thead><tr><th>类别</th><th>样例</th><th>指标</th></tr></thead><tbody>
+<tr><td>Bug Fix</td><td>真实仓库已知缺陷</td><td>测试通过率、Diff 精确度</td></tr>
+<tr><td>Feature</td><td>小功能跨文件实现</td><td>完成率、回归率</td></tr>
+<tr><td>Test Addition</td><td>为现有代码补测试</td><td>测试有效性和覆盖率增量</td></tr>
+<tr><td>Refactor</td><td>小步重构</td><td>行为不变、测试通过</td></tr>
+<tr><td>Repo Understanding</td><td>定位入口和依赖</td><td>命中率、无关读取量</td></tr>
+<tr><td>Large Repo</td><td>大型多语言仓库</td><td>搜索效率、上下文和耗时</td></tr>
+</tbody></table>
+</section>
+<section id="state">
+<h2>11. 状态空间与故障注入</h2>
+<pre>有界模型：
+  Tabs ≤ 3
+  Groups ≤ 2
+  Sessions ≤ 2
+  event sequences ≤ 6
+  API outcomes = success | delay | not-found | throw
+不变量：
+  单 Target 单 Binding
+  单 Group 单 Session
+  无死亡 Target
+  Active Target 属于 Workspace
+  旧事件不覆盖新 generation
+  UI 最终订阅最新 Session
+  new_tab 是唯一建页路径</pre>
+<p>已有参考模型、顺序矩阵、关闭/延迟/分组失败和 Projection 组合测试。后续增加窗口移动、10 步以上序列、TLA+ 和 mutation testing。</p>
+</section>
+<section id="ci">
+<h2>12. CI 分层与发布门禁</h2>
+<table><thead><tr><th>阶段</th><th>内容</th><th>时限</th></tr></thead><tbody>
+<tr><td>PR Fast</td><td>typecheck、Core boundary、state short、unit、integration</td><td>&lt; 3 min</td></tr>
+<tr><td>PR Browser</td><td>Chrome E2E 核心路径与竞态 trace</td><td>&lt; 15 min</td></tr>
+<tr><td>PR TUI</td><td>TUI smoke、输入、中断、恢复、Diff</td><td>&lt; 10 min</td></tr>
+<tr><td>Nightly</td><td>deep state、fault matrix、Benchmark 子集、4h soak</td><td>报告趋势</td></tr>
+<tr><td>Release</td><td>全语言 Benchmark、8h soak、migration、coverage、diagnostics</td><td>阻断发布</td></tr>
+</tbody></table>
+<h3>发布前必须全绿</h3>
+<ul><li>所有确定性测试、Core boundary、覆盖率阈值。</li><li>TUI 主流程和恢复 E2E。</li><li>Chrome 跨端与标签竞态 E2E。</li><li>macOS Sandbox 越界、网络、进程清理。</li><li>测试失败不得完成。</li><li>大 Diff、大日志和长时间任务资源稳定。</li><li>Session 与配置升级兼容。</li></ul>
+<div class="rule">正式生产标准不是“能回答代码问题”，而是能可靠修改真实仓库、证明结果、在中断后恢复，并让用户安全审阅。</div>
+</section>
+</div>
+</body>
+</html>

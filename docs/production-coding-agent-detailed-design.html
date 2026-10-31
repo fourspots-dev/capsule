@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tinyai 生产级通用 Coding Agent 详细设计</title>
+<style>
+:root{--bg:#f4f5f7;--paper:#fff;--text:#191a1e;--muted:#6f7179;--line:#e2e3e8;--accent:#5145d8;--ok:#137a4b;--warn:#986100;--danger:#b42318;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.72 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1220px;margin:auto;padding:36px 24px 100px}
+.hero{padding:38px;border-radius:26px;background:radial-gradient(circle at 91% 10%,#a99fff 0,transparent 28%),linear-gradient(135deg,#151521,#30299a 62%,#6657e9);color:#fff}.hero small{letter-spacing:.11em;opacity:.72}.hero h1{font-size:37px;line-height:1.2;margin:12px 0}.hero p{max-width:900px;margin:0;color:#e7e4ff}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}
+nav{position:sticky;top:0;z-index:5;display:flex;gap:14px;overflow:auto;margin:18px 0;padding:10px 14px;border:1px solid var(--line);border-radius:13px;background:#f4f5f7ed;backdrop-filter:blur(12px)}nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}
+section{margin:18px 0;padding:26px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:23px;margin:0 0 14px}h3{font-size:16px;margin:20px 0 8px}p{color:#45464d}.muted{color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafafa}.card h3{margin:0 0 8px}.card p{margin:0}.card ul{margin:8px 0 0;padding-left:18px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafafa;color:var(--muted);font-weight:600}
+code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{padding:16px;overflow:auto;border-radius:11px;background:#181820;color:#edecff;font:12px/1.6 var(--mono)}
+.rule{padding:12px 14px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#f5f3ff}.warn{border-color:var(--warn);background:#fff8e8}.danger{border-color:var(--danger);background:#fff1f0}
+.phase{display:flex;align-items:center;gap:11px;margin-bottom:13px}.phase-no{display:grid;place-items:center;width:42px;height:42px;border-radius:12px;background:#efedff;color:var(--accent);font-weight:750}.phase h2{margin:0;font-size:22px}.phase p{margin:2px 0 0;color:var(--muted);font-size:12px}
+.req{display:inline-block;padding:1px 7px;border-radius:6px;background:#f0efff;color:var(--accent);font-size:11px;font-family:var(--mono)}
+@media(max-width:850px){.grid3{grid-template-columns:1fr}}@media(max-width:720px){.grid{grid-template-columns:1fr}.hero h1{font-size:28px}.wrap{padding:20px 12px 70px}section{padding:20px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+<small>TINYAI / PRODUCTION GENERAL CODING AGENT / DETAILED DESIGN</small>
+<h1>生产级通用 Coding Agent<br>详细方案设计</h1>
+<p>面向 macOS TUI 与 Chrome，支持通用语言和仓库。核心目标是让 Agent 能可靠地理解代码、修改代码、验证结果、恢复中断、审阅变更，并为未来客户端保留稳定扩展面；不实现 iOS 客户端。</p>
+<div class="chips"><span class="chip">macOS TUI</span><span class="chip">Chrome</span><span class="chip">通用仓库</span><span class="chip">可恢复执行</span><span class="chip">测试闭环</span><span class="chip">未来扩展</span></div>
+</header>
+<nav><a href="#scope">范围</a><a href="#quality">质量目标</a><a href="#arch">架构</a><a href="#states">状态机</a><a href="#flows">核心流程</a><a href="#p1">P1 TUI</a><a href="#p2">P2 Coding</a><a href="#p3">P3 Workspace</a><a href="#p4">P4 Chrome</a><a href="#p5">P5 扩展基线</a><a href="#p6">P6 子Agent</a><a href="#p7">P7 生产加固</a><a href="#data">数据</a><a href="#risks">风险</a></nav>
+<section id="scope">
+<h2>1. 产品范围</h2>
+<div class="grid3">
+<div class="card"><h3>macOS TUI</h3><p>当前唯一代码执行主端。负责交互、任务进度、文件审阅、命令输出、审批、恢复和多 Agent 运行。</p></div>
+<div class="card"><h3>Chrome</h3><p>浏览网页、捕获上下文、执行浏览器 Workspace、参与同一 Session 的查看与补充。</p></div>
+<div class="card"><h3>未来客户端</h3><p>只保留端无关协议和数据模型。iOS 不在交付范围，不设计配对、通知、移动 UI 或 App 发布。</p></div>
+</div>
+<h3>当前基线</h3>
+<table><thead><tr><th>能力</th><th>已有</th><th>仍需补齐</th></tr></thead><tbody>
+<tr><td>Agent Core</td><td>SessionRuntime、AgentLoop、队列、Projection、Policy、Verifier、SubagentCoordinator</td><td>完成协议、可靠恢复、上下文预算、质量闭环</td></tr>
+<tr><td>代码执行</td><td>macOS Seatbelt、Docker、文件/Exec/PTY</td><td>Patch、Search、Git、测试发现、长任务恢复</td></tr>
+<tr><td>前端</td><td>Chrome Side Panel、批处理 CLI</td><td>生产 macOS TUI</td></tr>
+<tr><td>扩展性</td><td>Browser Adapter 已剥离、Platform 端口已出现</td><td>端无关 Runtime 访问和审阅数据</td></tr>
+</tbody></table>
+</section>
+<section id="quality">
+<h2>2. 生产质量目标</h2>
+<table><thead><tr><th>属性</th><th>目标</th><th>不可接受状态</th></tr></thead><tbody>
+<tr><td>可靠性</td><td>中断后 Session 与 Workspace 可恢复；危险操作不重复执行。</td><td>系统崩溃后重复写文件、重复提交或丢失任务。</td></tr>
+<tr><td>正确性</td><td>所有完成声明都有测试、静态检查或明确证据。</td><td>测试失败仍显示完成；只描述动作但未执行工具。</td></tr>
+<tr><td>可审阅性</td><td>最终提供文件级 Diff、测试结果、风险和未完成项。</td><td>只给自然语言总结，没有变更证据。</td></tr>
+<tr><td>响应性</td><td>输入后快速出现状态反馈；长命令持续显示进度。</td><td>TUI 长时间无输出、无法取消。</td></tr>
+<tr><td>隔离性</td><td>默认在受限 Workspace 内执行；网络和破坏性动作按项目策略处理。</td><td>越界读取、写入项目外文件或泄露密钥。</td></tr>
+<tr><td>通用性</td><td>支持多语言仓库、不同构建系统和任意目录结构。</td><td>只识别 Node 项目或固定框架。</td></tr>
+<tr><td>扩展性</td><td>未来客户端可读取 Session 与审阅数据，无需修改 Core。</td><td>TUI/Chrome 字段进入 Session Snapshot。</td></tr>
+<tr><td>可观测性</td><td>任务、模型、工具、验证、费用和失败都有 Trace。</td><td>失败后无法判断是模型、环境还是用户中断。</td></tr>
+</tbody></table>
+</section>
+<section id="arch">
+<h2>3. 总体架构</h2>
+<pre>macOS TUI / Chrome
+  ↓ Projection + Commands
+Shared Client Protocol
+  ↓
+Workspace / Session Control
+  ↓
+Agent Core
+├── AgentLoop + Task Queue
+├── SessionTree + Context Manager + Compaction
+├── ToolPack Registry + Policy + Verification Gate
+├── Subagent Coordinator
+└── Trace / Metrics / Artifact
+  ↓
+Platform Adapters
+├── macOS Seatbelt / Docker Workspace
+├── Chrome Tabs / Tab Groups / DevTools
+├── Model Transport
+└── Session / Artifact / Skill Storage</pre>
+<div class="rule">单一事实源：任务状态和执行权只属于权威 Runtime；TUI 与 Chrome 是客户端。UI 本地只保存输入草稿、展开/滚动、焦点和未提交编辑。</div>
+<h3>模块责任</h3>
+<table><thead><tr><th>模块</th><th>责任</th><th>不负责</th></tr></thead><tbody>
+<tr><td>Agent Loop</td><td>模型调用、工具循环、中断和预算</td><td>具体 TUI 渲染</td></tr>
+<tr><td>Task/Session</td><td>任务队列、状态、历史、恢复</td><td>语言测试命令实现</td></tr>
+<tr><td>Context</td><td>项目信息、对话、摘要、文件记忆</td><td>工具执行</td></tr>
+<tr><td>ToolPack</td><td>文件、搜索、Patch、Exec、Git、Browser、Subagent</td><td>权威任务状态</td></tr>
+<tr><td>Workspace</td><td>沙箱、PTY、文件系统边界、资源配额</td><td>模型决策</td></tr>
+<tr><td>Verification</td><td>测试发现、执行、结果判定和完成门禁</td><td>自动修改代码</td></tr>
+<tr><td>Projection</td><td>向各客户端提供稳定可渲染事实</td><td>客户端布局</td></tr>
+</tbody></table>
+</section>
+<section id="states">
+<h2>4. 核心状态机</h2>
+<h3>Task</h3>
+<pre>queued → running → verifying
+                ├→ waiting_approval → running
+                ├→ repairing → verifying
+                ├→ completed
+                ├→ failed
+                └→ cancelled</pre>
+<p>验证失败不能直接进入 completed。进入 repairing 必须携带失败证据，修复轮次和总预算受任务约束。</p>
+<h3>Workspace</h3>
+<pre>creating → ready → executing → checkpointing → ready
+                     ├→ interrupted → restoring → ready
+                     ├→ failed
+                     └→ releasing → released</pre>
+<h3>Verification</h3>
+<pre>not_started → running → passed
+                    ├→ failed → repair_requested
+                    ├→ skipped_with_risk
+                    └→ cancelled</pre>
+<h3>Subagent</h3>
+<pre>queued → running → reviewing_merge → merged
+                ├→ completed_unmerged
+                ├→ failed
+                └→ cancelled</pre>
+</section>
+<section id="flows">
+<h2>5. 核心用户流程</h2>
+<div class="grid">
+<div class="card"><h3>进入仓库并开始任务</h3><ol><li>确认 Workspace 根目录和 Git 状态。</li><li>读取项目约定、构建配置和最近状态。</li><li>创建 Session 与任务预算。</li><li>展开展示计划或直接执行。</li></ol></div>
+<div class="card"><h3>编码与验证</h3><ol><li>搜索相关代码和测试。</li><li>应用增量 Patch。</li><li>运行最小相关验证。</li><li>失败后分析证据并修复。</li><li>运行最终验证并生成 Diff。</li></ol></div>
+<div class="card"><h3>中断与恢复</h3><ol><li>保存任务、文件检查点与最后成功验证。</li><li>TUI 退出不终止后台任务。</li><li>恢复时展示已执行动作和未解决项。</li><li>危险操作需要重新确认执行条件。</li></ol></div>
+<div class="card"><h3>浏览器上下文交接</h3><ol><li>用户引用网页、日志或选中文本。</li><li>生成明确 Context Artifact。</li><li>Mac TUI 中建立或继续 Coding Task。</li><li>浏览器中查看任务状态和结果。</li></ol></div>
+</div>
+</section>
+<section id="p1">
+<div class="phase"><div class="phase-no">P1</div><div><h2>macOS TUI</h2><p>首个生产可用交付</p></div></div>
+<div class="grid">
+<div class="card"><h3><span class="req">FR-TUI-01</span> Session 工作台</h3><ul><li>创建、恢复、重命名、删除 Session。</li><li>展示项目、分支、Workspace 和任务阶段。</li><li>支持多轮输入、队列和补充指令。</li></ul><p>验收：关闭并重开 TUI 后可以继续未完成任务。</p></div>
+<div class="card"><h3><span class="req">FR-TUI-02</span> 实时任务时间线</h3><ul><li>流式回答、Reasoning、工具、命令、验证和子 Agent。</li><li>长输出可折叠和滚动。</li><li>失败、等待与运行状态明确。</li></ul><p>验收：任何超过 2 秒的工具动作都有可见状态。</p></div>
+<div class="card"><h3><span class="req">FR-TUI-03</span> 键盘与终端体验</h3><ul><li>多行编辑、粘贴、历史、快捷键、中断。</li><li>适配 80 列和常见窗口 resize。</li><li>支持无颜色和基础明暗主题。</li></ul><p>验收：不依赖鼠标即可完成主要开发流程。</p></div>
+<div class="card"><h3><span class="req">FR-TUI-04</span> Diff 与验证审阅</h3><ul><li>最终变更按文件展示。</li><li>显示测试、类型检查、Lint 和风险。</li><li>支持查看原始命令与输出。</li></ul><p>验收：用户能在 TUI 内判断改动是否可接受。</p></div>
+<div class="card"><h3><span class="req">FR-TUI-05</span> 基础模式与审批</h3><ul><li>Plan、Build、Review。</li><li>项目级安全默认，高风险动作确认。</li><li>可停止、回滚与重新执行验证。</li></ul><p>验收：普通沙箱操作不被频繁打断，破坏性操作有明确确认。</p></div>
+</div>
+</section>
+<section id="p2">
+<div class="phase"><div class="phase-no">P2</div><div><h2>通用编码能力与完成闭环</h2><p>生产质量的核心</p></div></div>
+<div class="grid">
+<div class="card"><h3><span class="req">FR-CODE-01</span> 通用项目理解</h3><ul><li>识别多语言源码、构建系统、测试入口和项目约定。</li><li>读取 Git 分支、脏状态和忽略规则。</li><li>自动生成项目摘要和修改范围。</li></ul><p>验收：对 Node、Python、Go、Rust、Java 等代表性仓库能发现正确验证入口。</p></div>
+<div class="card"><h3><span class="req">FR-CODE-02</span> 搜索与文件读取</h3><ul><li>文本搜索、文件匹配、行范围读取。</li><li>大文件分页和二进制识别。</li><li>读取结果标注路径、行号和哈希。</li></ul><p>验收：无需一次性加载整个大文件即可定位和修改目标。</p></div>
+<div class="card"><h3><span class="req">FR-CODE-03</span> 精确编辑</h3><ul><li>Patch/Edit 基于唯一上下文和文件版本。</li><li>冲突停止，不覆盖用户并发修改。</li><li>原子写入与编辑后语法检查。</li></ul><p>验收：多文件和并行修改中不发生静默覆盖。</p></div>
+<div class="card"><h3><span class="req">FR-CODE-04</span> 测试发现与修复循环</h3><ul><li>根据改动选择最小相关测试。</li><li>失败结果形成结构化证据。</li><li>自动进入至少一轮基于证据的修复。</li></ul><p>验收：测试失败时不能标记完成。</p></div>
+<div class="card"><h3><span class="req">FR-CODE-05</span> Git 与变更审阅</h3><ul><li>Git status/diff 只读能力。</li><li>最终 Diff、未跟踪文件和风险摘要。</li><li>默认无自动 commit/push。</li></ul><p>验收：用户可以看到完整改动范围并决定后续操作。</p></div>
+<div class="card"><h3><span class="req">FR-CODE-06</span> 上下文预算</h3><ul><li>根据模型窗口管理对话和文件上下文。</li><li>主动压缩、按需重读和文件记忆。</li><li>任务目标与验证证据不因压缩丢失。</li></ul><p>验收：长任务跨上下文压缩后仍保持目标和决策。</p></div>
+</div>
+</section>
+<section id="p3">
+<div class="phase"><div class="phase-no">P3</div><div><h2>Workspace、Sandbox 与恢复</h2><p>可靠执行基础</p></div></div>
+<div class="grid">
+<div class="card"><h3><span class="req">FR-WS-01</span> macOS Workspace</h3><ul><li>项目目录授权和路径边界。</li><li>默认网络限制，项目级例外。</li><li>命令超时、进程树清理、输出上限。</li></ul><p>验收：项目外文件不可读写，长命令可取消且无残留进程。</p></div>
+<div class="card"><h3><span class="req">FR-WS-02</span> PTY 与长任务</h3><ul><li>交互式进程、输入输出和 resize。</li><li>后台运行、日志、状态和中断。</li><li>终端进程崩溃后的清理。</li></ul><p>验收：关闭 TUI 后任务可继续，重开可查看输出。</p></div>
+<div class="card"><h3><span class="req">FR-WS-03</span> 检查点与回滚</h3><ul><li>自动文件快照、任务检查点和最后验证点。</li><li>只回滚 Agent 修改。</li><li>保留用户手工编辑。</li></ul><p>验收：失败实验可以恢复，用户修改不被回滚。</p></div>
+<div class="card"><h3><span class="req">FR-WS-04</span> Artifact 与诊断</h3><ul><li>测试报告、日志、Diff、截图和 Trace。</li><li>敏感信息脱敏。</li><li>可导出诊断包。</li></ul><p>验收：失败任务可在不泄露密钥的前提下定位。</p></div>
+</div>
+</section>
+<section id="p4">
+<div class="phase"><div class="phase-no">P4</div><div><h2>Chrome 工作流</h2><p>浏览器上下文与跨端继续</p></div></div>
+<div class="grid">
+<div class="card"><h3><span class="req">FR-CHROME-01</span> 页面上下文捕获</h3><ul><li>选中文本、页面、日志或错误信息形成 Context Artifact。</li><li>用户明确引用，不把网页指令当用户指令。</li><li>Mac TUI 中可查看来源。</li></ul><p>验收：从网页 Bug 到开始代码任务无需手工复制。</p></div>
+<div class="card"><h3><span class="req">FR-CHROME-02</span> 标签组 Workspace</h3><ul><li>组内共享 Session，组外独立。</li><li>Agent 可在组内显式新开和切换标签。</li><li>不隐式创建页面。</li></ul><p>验收：组内任务上下文连续，组外切换不串话。</p></div>
+<div class="card"><h3><span class="req">FR-CHROME-03</span> Web 修复验证</h3><ul><li>页面问题关联代码文件、测试和截图。</li><li>修复后自动重新验证。</li><li>最终生成统一证据。</li></ul><p>验收：从前端缺陷到 Diff、测试和页面验证形成闭环。</p></div>
+</div>
+</section>
+<section id="p5">
+<div class="phase"><div class="phase-no">P5</div><div><h2>跨端扩展基线</h2><p>不交付 iOS</p></div></div>
+<div class="grid">
+<div class="card"><h3><span class="req">FR-EXT-01</span> Headless Runtime 访问</h3><ul><li>客户端通过稳定协议读取 Session、事件、任务和审阅数据。</li><li>Core 不依赖 TUI 或 Chrome。</li><li>不包含 iOS App 或配对功能。</li></ul><p>验收：Headless Client 可创建、读取和控制 Session。</p></div>
+<div class="card"><h3><span class="req">FR-EXT-02</span> 端口无关能力协商</h3><ul><li>区分执行端、审阅端和只读端能力。</li><li>不支持的功能明确隐藏或降级。</li><li>Session Snapshot 无宿主 UI 字段。</li></ul><p>验收：未来客户端无需修改 Core 即可使用现有 Session。</p></div>
+<div class="card"><h3><span class="req">FR-EXT-03</span> 审阅数据可移植</h3><ul><li>Diff、测试、Trace、Artifact 使用通用表达。</li><li>不同客户端渲染一致事实。</li><li>无终端控制字符或 Chrome 特有大对象进入核心数据。</li></ul><p>验收：同一审阅上下文可在 TUI 与 Headless Client 中一致显示。</p></div>
+</div>
+</section>
+<section id="p6">
+<div class="phase"><div class="phase-no">P6</div><div><h2>通用子 Agent 与并行开发</h2><p>按任务定义角色</p></div></div>
+<div class="grid">
+<div class="card"><h3><span class="req">FR-AGENT-01</span> 动态 Profile</h3><ul><li>用户/项目可定义任意目标、工具和权限子集。</li><li>支持 foreground/background。</li><li>结果包含摘要、证据、未解决项和变更。</li></ul><p>验收：不修改代码即可创建调查、迁移、补测试等不同子 Agent。</p></div>
+<div class="card"><h3><span class="req">FR-AGENT-02</span> 隔离 Worktree</h3><ul><li>每个并行任务独立工作树。</li><li>文件所有权和冲突检测。</li><li>显式合并与审阅，不自动覆盖主分支。</li></ul><p>验收：两个子 Agent 并行修改后可以安全合并或丢弃。</p></div>
+<div class="card"><h3><span class="req">FR-AGENT-03</span> 父任务协调</h3><ul><li>预算、并发、依赖和停止传播。</li><li>子任务失败不隐藏。</li><li>TUI 树状展示父子关系。</li></ul><p>验收：子 Agent 不共享隐式文件写入，不混淆父子 Session。</p></div>
+</div>
+</section>
+<section id="p7">
+<div class="phase"><div class="phase-no">P7</div><div><h2>生产加固与发布</h2><p>可持续交付</p></div></div>
+<div class="grid">
+<div class="card"><h3><span class="req">FR-OPS-01</span> 可观测性</h3><ul><li>模型、工具、验证、审批、子 Agent 和恢复 Trace。</li><li>Token、费用、耗时和重试统计。</li><li>隐私安全日志。</li></ul><p>验收：失败可从 trace 判断根因层级。</p></div>
+<div class="card"><h3><span class="req">FR-OPS-02</span> 质量评测</h3><ul><li>多语言仓库任务集。</li><li>Bug 修复、补测试、重构、大仓库检索。</li><li>测试通过率、误完成率、恢复率和成本。</li></ul><p>验收：每个版本都有可比较质量报告。</p></div>
+<div class="card"><h3><span class="req">FR-OPS-03</span> 发布与升级</h3><ul><li>macOS 安装、签名、公证和回滚。</li><li>Chrome Extension 与 Runtime 版本兼容。</li><li>Session 与配置迁移。</li></ul><p>验收：升级不丢历史和未完成任务。</p></div>
+<div class="card"><h3><span class="req">FR-OPS-04</span> 性能与资源</h3><ul><li>大仓库搜索、流式渲染和大 Diff 性能。</li><li>CPU/内存/磁盘上限和低资源模式。</li><li>崩溃与日志诊断。</li></ul><p>验收：大型项目仍保持可交互。</p></div>
+</div>
+</section>
+<section id="data">
+<h2>6. 数据、恢复与安全边界</h2>
+<div class="grid">
+<div class="card"><h3>Session</h3><p>对话、任务、队列、审批、验证、子 Agent、审阅和 Trace 引用。必须可跨客户端读取。</p></div>
+<div class="card"><h3>Workspace</h3><p>项目根目录、Git 状态、Sandbox、PTY、检查点和 Artifact。由 TUI/Mac Runtime 管理。</p></div>
+<div class="card"><h3>客户端</h3><p>草稿、展开状态、滚动、焦点和窗口布局。不得成为任务事实来源。</p></div>
+<div class="card"><h3>安全</h3><p>基础管理即可：安全默认、高风险确认、项目级记住；密钥不入 Session 与日志；网络与路径边界由 Workspace 强制。</p></div>
+</div>
+<h3>恢复原则</h3>
+<ul><li>先恢复事实，再恢复 UI：Session → Task → Workspace → 客户端布局。</li><li>未完成工具先判定是否具有重放安全性。</li><li>验证中中断，恢复后重新运行验证，不沿用旧通过结果。</li><li>子 Agent 工作树必须可回收，不能遗留进程和锁。</li></ul>
+</section>
+<section id="risks">
+<h2>7. 风险与阶段门禁</h2>
+<table><thead><tr><th>风险</th><th>控制</th></tr></thead><tbody>
+<tr><td>Agent 自认为完成但测试未过</td><td>Verification Gate；失败进入 Repair Loop</td></tr>
+<tr><td>TUI 崩溃导致任务丢失</td><td>Session/Workspace 持久化与后台任务</td></tr>
+<tr><td>Patch 覆盖用户修改</td><td>文件哈希、原子 Patch、冲突停止</td></tr>
+<tr><td>长命令无法停止</td><td>进程树取消、超时、PTY 清理</td></tr>
+<tr><td>大仓库上下文溢出</td><td>搜索优先、分页读取、主动压缩</td></tr>
+<tr><td>并行子 Agent 互相污染</td><td>独立 Worktree、文件所有权、显式合并</td></tr>
+<tr><td>浏览器上下文注入</td><td>来源标记、不可信内容边界、用户显式引用</td></tr>
+</tbody></table>
+<div class="rule">正式生产门禁：TUI 主流程、测试修复闭环、恢复、Diff 审阅、基础 Sandbox 和 Chrome 连续工作流全部通过后，才进入大规模子 Agent 和发布加固。</div>
+<p><a href="production-coding-agent-detailed-testing.html">查看配套详细测试设计 →</a></p>
+</section>
+</div>
+</body>
+</html>
