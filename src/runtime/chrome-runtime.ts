@@ -5,6 +5,9 @@ import { ChromeSessionStore } from '../adapters/chrome-session-store';
 import { ChromeSkillStore } from '../adapters/chrome-skill-store';
 import { OpenAIModelTransport } from '../adapters/openai-model';
 import { createSubagentTools } from '../adapters/subagent-tools';
+import { ChromeHostBridge, type ChromeStorageArea } from '../adapters/chrome-host';
+import { createVirtualWorkspaceTools } from '../adapters/virtual-workspace-tools';
+import { VirtualWorkspace } from '../virtual';
 import { createSkillTools } from '../adapters/skill-tools';
 import { registerDeclarativeHooks } from '../adapters/declarative-hooks';
 import { SubagentCoordinator } from '../core/subagent-coordinator';
@@ -102,6 +105,13 @@ export async function createChromeRuntimeBundle(
     createBrowser?: () => ChromeBrowserProvider;
   } = {}
 ): Promise<RuntimeBundle> {
+  const virtualWorkspace = new VirtualWorkspace({
+    host: new ChromeHostBridge({
+      storage: options.storage as unknown as ChromeStorageArea,
+      id: 'tinyai-chrome-virtual-workspace',
+    }),
+    storageKey: 'tinyai:virtual-workspace:v1',
+  });
   const storage = options.storage ?? chromeLocalStorage();
   const sessionStore = new ChromeSessionStore({
     storage: chromeStorageForSessions(storage),
@@ -286,6 +296,11 @@ export async function createChromeRuntimeBundle(
       });
     },
     additionalTools: [
+      ...createVirtualWorkspaceTools(virtualWorkspace).map((definition) => ({
+        definition,
+        source: 'builtin' as const,
+        sourceId: 'virtual-workspace',
+      })),
       ...subagentTools.map((definition) => ({
         definition,
         source: 'builtin' as const,
@@ -339,6 +354,7 @@ export async function createChromeRuntimeBundle(
       unsubscribeChildren();
       approval.dispose();
       await coordinator.dispose();
+      await virtualWorkspace.jobs.dispose();
       await mainWorkspace.dispose();
       await Promise.all(mcpClients.map((client) => client.close()));
     },

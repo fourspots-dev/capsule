@@ -59,6 +59,7 @@ export class TuiApp {
   private filterIndex = 0;
   private agentFilter: AgentFilter = 'all';
   private review?: TuiReviewSnapshot;
+  private readonly mergePreviewed = new Set<string>();
   private readonly renderListeners = new Set<() => void>();
 
   constructor(private readonly options: TuiAppOptions) {
@@ -348,6 +349,7 @@ export class TuiApp {
           this.review = await this.options.agentWorkspace.previewMerge(
             selected.agent.taskId
           );
+          this.mergePreviewed.add(selected.agent.taskId);
           this.routes.push({
             kind: 'review',
             targetSessionId: this.sessionsController.active ?? '',
@@ -366,6 +368,10 @@ export class TuiApp {
         (row) => row.agent.taskId === controls.route.selectedId
       );
       if (selected && this.options.agentWorkspace) {
+        if (!this.mergePreviewed.has(selected.agent.taskId)) {
+          this.statusMessage = 'Preview this merge with M before applying it';
+          return;
+        }
         this.confirmation = {
           kind: 'merge',
           sessionId: this.sessionsController.active ?? '',
@@ -413,6 +419,7 @@ export class TuiApp {
       if (intent.type === 'activate' || intent.type === 'send') {
         try {
           await this.options.agentWorkspace!.applyMerge(confirmation.taskId!);
+          this.mergePreviewed.delete(confirmation.taskId!);
           this.statusMessage = 'Child workspace merged';
           this.confirmation = undefined;
           this.routes.back();

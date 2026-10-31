@@ -300,7 +300,7 @@
         options.frameId ? { frameId: options.frameId } : {},
         options.signal
       );
-      const info = await this.pageInfo(tabId, options.frameId);
+      const info2 = await this.pageInfo(tabId, options.frameId);
       const rendered = this.renderAx(
         tabId,
         options.frameId,
@@ -309,7 +309,7 @@
         options.interactiveOnly ?? false
       );
       return {
-        ...info,
+        ...info2,
         ...options.frameId ? { frameId: options.frameId } : {},
         nodes: rendered.nodes,
         text: rendered.text,
@@ -627,15 +627,15 @@
         (candidate) => candidate.frameId === frameId
       ) : void 0;
       try {
-        const info = await this.evaluate(
+        const info2 = await this.evaluate(
           tabId,
           "({title: document.title, url: location.href})",
           frameId ? { frameId } : void 0
         );
         return {
           tabId,
-          title: String(info?.title ?? fallback?.title ?? ""),
-          url: String(info?.url ?? frame?.url ?? fallback?.url ?? "")
+          title: String(info2?.title ?? fallback?.title ?? ""),
+          url: String(info2?.url ?? frame?.url ?? fallback?.url ?? "")
         };
       } catch {
         return {
@@ -1076,9 +1076,9 @@
       const result = await this.transport.request("tools/list", {}, signal);
       const tools = result?.tools;
       if (!Array.isArray(tools)) return [];
-      return tools.flatMap((tool3) => {
-        if (!tool3 || typeof tool3 !== "object") return [];
-        const value = tool3;
+      return tools.flatMap((tool4) => {
+        if (!tool4 || typeof tool4 !== "object") return [];
+        const value = tool4;
         if (typeof value.name !== "string") return [];
         return [
           {
@@ -1093,17 +1093,17 @@
       return this.transport.request("tools/call", { name, arguments: input }, signal);
     }
     async definitions() {
-      return (await this.tools()).map((tool3) => ({
-        name: `${this.prefix}__${sanitize(tool3.name)}`,
-        description: tool3.description,
-        parameters: tool3.inputSchema,
+      return (await this.tools()).map((tool4) => ({
+        name: `${this.prefix}__${sanitize(tool4.name)}`,
+        description: tool4.description,
+        parameters: tool4.inputSchema,
         risk: "write",
         effect: "network",
         capabilities: ["mcp:call"],
         executionMode: "sequential",
         replay: "never",
         timeoutMs: 12e4,
-        execute: async (input, invocation) => this.call(tool3.name, input, invocation.signal)
+        execute: async (input, invocation) => this.call(tool4.name, input, invocation.signal)
       }));
     }
     close() {
@@ -1523,13 +1523,13 @@
     }
     return { role: message.role, content: message.content };
   }
-  function toOpenAITool(tool3) {
+  function toOpenAITool(tool4) {
     return {
       type: "function",
       function: {
-        name: tool3.name,
-        description: tool3.description,
-        parameters: tool3.parameters
+        name: tool4.name,
+        description: tool4.description,
+        parameters: tool4.parameters
       }
     };
   }
@@ -1707,6 +1707,3087 @@
   function stringChoice(input, key, choices) {
     const value = input[key];
     return typeof value === "string" && choices.includes(value) ? value : void 0;
+  }
+
+  // src/adapters/chrome-host.ts
+  var ChromeHostStorage = class {
+    constructor(storage) {
+      this.storage = storage;
+    }
+    storage;
+    async get(key) {
+      return (await this.storage.get(key))[key];
+    }
+    async set(key, value) {
+      await this.storage.set({ [key]: value });
+    }
+    async remove(key) {
+      await this.storage.remove(key);
+    }
+    async list(prefix = "") {
+      return Object.keys(await this.storage.get(null)).filter((key) => key.startsWith(prefix)).sort();
+    }
+  };
+  var ChromeHostBridge = class {
+    descriptor;
+    storage;
+    clock;
+    scheduler;
+    crypto;
+    clone;
+    constructor(options) {
+      this.storage = new ChromeHostStorage(options.storage);
+      const now = options.now ?? (() => Date.now());
+      this.clock = {
+        now,
+        setTimeout: (callback, delay2) => setTimeout(callback, delay2),
+        clearTimeout: (handle) => clearTimeout(handle)
+      };
+      this.scheduler = {
+        setTimeout: (callback, delay2) => setTimeout(callback, delay2),
+        clearTimeout: (handle) => clearTimeout(handle),
+        queueMicrotask: (callback) => queueMicrotask(callback)
+      };
+      this.crypto = chromeCrypto;
+      this.clone = { clone: (value) => structuredClone(value) };
+      const capabilities = [
+        "storage",
+        "clock",
+        "scheduler",
+        "crypto",
+        "clone"
+      ];
+      this.descriptor = {
+        id: options.id ?? "chrome-extension-host",
+        platform: "chrome",
+        capabilities
+      };
+    }
+  };
+  var chromeCrypto = {
+    async digest(algorithm, data) {
+      if (algorithm !== "SHA-256") {
+        throw new Error(`Unsupported digest algorithm: ${algorithm}`);
+      }
+      const digest2 = await crypto.subtle.digest(
+        algorithm,
+        data.buffer.slice(
+          data.byteOffset,
+          data.byteOffset + data.byteLength
+        )
+      );
+      return new Uint8Array(digest2);
+    },
+    randomBytes(length) {
+      const bytes = new Uint8Array(length);
+      crypto.getRandomValues(bytes);
+      return bytes;
+    }
+  };
+
+  // src/virtual/path.ts
+  function normalizeVirtualPath(path) {
+    const normalized = path.replaceAll("\\", "/").replace(/^\/+/, "");
+    const parts = [];
+    for (const part of normalized.split("/")) {
+      if (!part || part === ".") continue;
+      if (part === "..") {
+        throw new AgentError(
+          "VFS_PATH_INVALID",
+          `Path escapes virtual workspace: ${path}`
+        );
+      }
+      parts.push(part);
+    }
+    return parts.join("/");
+  }
+  function parentVirtualPath(path) {
+    const normalized = normalizeVirtualPath(path);
+    const index = normalized.lastIndexOf("/");
+    return index < 0 ? "" : normalized.slice(0, index);
+  }
+  function pathSegments(path) {
+    const normalized = normalizeVirtualPath(path);
+    return normalized ? normalized.split("/") : [];
+  }
+  function isPathInside(path, parent) {
+    const normalizedPath = normalizeVirtualPath(path);
+    const normalizedParent = normalizeVirtualPath(parent);
+    return normalizedPath === normalizedParent || normalizedPath.startsWith(`${normalizedParent}/`);
+  }
+
+  // src/virtual/search.ts
+  async function searchVirtualFiles(vfs, options) {
+    if (!options.pattern) {
+      throw new AgentError("SEARCH_PATTERN_EMPTY", "Search pattern cannot be empty");
+    }
+    const matcher = compileMatcher(options);
+    const include = (options.include ?? []).map(globToRegExp);
+    const exclude = (options.exclude ?? []).map(globToRegExp);
+    const maxResults = Math.max(1, options.maxResults ?? 200);
+    const contextLines = Math.max(0, options.contextLines ?? 0);
+    const files = await vfs.list(normalizeVirtualPath(options.path ?? ""), {
+      recursive: true,
+      signal: options.signal
+    });
+    const matches = [];
+    for (const file of files) {
+      if (options.signal?.aborted) {
+        throw new AgentError("SEARCH_ABORTED", "Virtual search was cancelled");
+      }
+      if (file.kind !== "file") continue;
+      if (include.length && !include.some((matcher2) => matcher2.test(file.path))) continue;
+      if (exclude.some((matcher2) => matcher2.test(file.path))) continue;
+      const text = decodeText(await vfs.read(file.path, { signal: options.signal }));
+      if (text === void 0) continue;
+      const lines = text.split("\n");
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index].endsWith("\r") ? lines[index].slice(0, -1) : lines[index];
+        const match = matcher.exec(line);
+        matcher.lastIndex = 0;
+        if (!match) continue;
+        matches.push({
+          path: file.path,
+          line: index + 1,
+          column: match.index + 1,
+          text: line,
+          before: lines.slice(Math.max(0, index - contextLines), index),
+          after: lines.slice(index + 1, index + 1 + contextLines)
+        });
+        if (matches.length >= maxResults) return matches;
+      }
+    }
+    return matches;
+  }
+  async function globVirtualFiles(vfs, patterns, options = {}) {
+    if (!patterns.length) {
+      throw new AgentError("GLOB_PATTERN_EMPTY", "At least one glob pattern is required");
+    }
+    const includes = patterns.map(globToRegExp);
+    const excludes = (options.exclude ?? []).map(globToRegExp);
+    const entries = await vfs.list(normalizeVirtualPath(options.path ?? ""), {
+      recursive: true,
+      signal: options.signal
+    });
+    return entries.filter((entry) => entry.kind === "file").map((entry) => entry.path).filter((path) => includes.some((pattern) => pattern.test(path))).filter((path) => !excludes.some((pattern) => pattern.test(path))).sort();
+  }
+  function globToRegExp(pattern) {
+    const normalized = pattern.replaceAll("\\", "/").replace(/^\/+/, "");
+    let source = "";
+    for (let index = 0; index < normalized.length; index += 1) {
+      const char = normalized[index];
+      if (char === "*") {
+        if (normalized[index + 1] === "*") {
+          index += 1;
+          if (normalized[index + 1] === "/") {
+            index += 1;
+            source += "(?:.*/)?";
+          } else {
+            source += ".*";
+          }
+        } else {
+          source += "[^/]*";
+        }
+        continue;
+      }
+      if (char === "?") {
+        source += "[^/]";
+        continue;
+      }
+      if (char === "[") {
+        const end = normalized.indexOf("]", index + 1);
+        if (end > index) {
+          const body = normalized.slice(index + 1, end);
+          source += `[${body.startsWith("!") ? `^${body.slice(1)}` : body}]`;
+          index = end;
+          continue;
+        }
+      }
+      source += escapeRegExp(char);
+    }
+    return new RegExp(`^${source}$`, "u");
+  }
+  function hashVirtualBytes(data) {
+    let hash = 1469598103934665603n;
+    for (const byte of data) {
+      hash ^= BigInt(byte);
+      hash = hash * 1099511628211n & 0xffffffffffffffffn;
+    }
+    return `${data.byteLength.toString(16)}-${hash.toString(16).padStart(16, "0")}`;
+  }
+  function decodeVirtualText(value) {
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(value);
+    } catch {
+      return void 0;
+    }
+  }
+  function compileMatcher(options) {
+    const flags = options.caseSensitive ? "u" : "iu";
+    if (options.regex) {
+      try {
+        return new RegExp(options.pattern, flags);
+      } catch (error) {
+        throw new AgentError(
+          "SEARCH_REGEX_INVALID",
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+    }
+    const escaped = escapeRegExp(options.pattern);
+    return new RegExp(options.wholeWord ? `\\b${escaped}\\b` : escaped, flags);
+  }
+  function decodeText(value) {
+    const text = decodeVirtualText(value);
+    return text?.includes("\0") ? void 0 : text;
+  }
+  function escapeRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  // src/virtual/patch.ts
+  async function applyUnifiedPatch(vfs, patch, options = {}) {
+    const parsed = parseUnifiedPatch(patch);
+    const originals = /* @__PURE__ */ new Map();
+    const writes = /* @__PURE__ */ new Map();
+    const deletes = /* @__PURE__ */ new Set();
+    let additions = 0;
+    let deletions = 0;
+    for (const file of parsed) {
+      if (options.signal?.aborted) throw cancelled();
+      const oldPath = file.oldPath;
+      const newPath = file.newPath;
+      const target = newPath ?? oldPath;
+      if (!oldPath && newPath && await vfs.stat(newPath, options.signal)) {
+        throw new AgentError("PATCH_TARGET_EXISTS", `Patch target already exists: ${newPath}`);
+      }
+      const before = oldPath === void 0 ? new Uint8Array() : await vfs.read(oldPath, { signal: options.signal });
+      const beforeInfo = oldPath ? await vfs.stat(oldPath, options.signal) : void 0;
+      if (oldPath && !beforeInfo) {
+        throw new AgentError("PATCH_FILE_MISSING", `Patch target is missing: ${oldPath}`);
+      }
+      if (beforeInfo && oldPath && options.expectedVersions?.[oldPath] !== void 0) {
+        if (beforeInfo.version !== options.expectedVersions[oldPath]) {
+          throw conflict(oldPath, "version");
+        }
+      }
+      if (beforeInfo && oldPath && options.expectedHashes?.[oldPath]) {
+        if (hashVirtualBytes(before) !== options.expectedHashes[oldPath]) {
+          throw conflict(oldPath, "hash");
+        }
+      }
+      const beforeText = decodeVirtualText(before);
+      if (beforeText === void 0) {
+        throw new AgentError("PATCH_BINARY_UNSUPPORTED", `Binary patch is not supported: ${oldPath}`);
+      }
+      const applied = applyHunks(beforeText, file.hunks);
+      additions += applied.additions;
+      deletions += applied.deletions;
+      const oldOriginal = oldPath ? await remember(vfs, oldPath, originals) : void 0;
+      const newOriginal = await remember(vfs, target, originals);
+      if (oldPath === target && !oldOriginal?.existed && !newOriginal?.existed) {
+        originals.set(target, { path: target, existed: false, version: 0 });
+      }
+      if (newPath) {
+        writes.set(target, {
+          data: new TextEncoder().encode(applied.text),
+          ...oldOriginal?.mode === void 0 ? {} : { mode: oldOriginal.mode }
+        });
+      } else {
+        deletes.add(target);
+      }
+      if (oldPath && newPath && oldPath !== newPath) deletes.add(oldPath);
+    }
+    try {
+      for (const [path, write] of writes) {
+        await vfs.write(path, write.data, {
+          ...write.mode === void 0 ? {} : { mode: write.mode },
+          signal: options.signal
+        });
+      }
+      for (const path of deletes) {
+        await vfs.remove(path, { recursive: true });
+      }
+    } catch (error) {
+      await rollback(vfs, originals);
+      throw error;
+    }
+    const resultFiles = [];
+    for (const file of parsed) {
+      const path = file.newPath ?? file.oldPath;
+      const original = originals.get(path);
+      const after = file.newPath ? await vfs.stat(path) : void 0;
+      resultFiles.push({
+        path,
+        status: !file.oldPath ? "added" : !file.newPath ? "deleted" : "modified",
+        beforeVersion: original?.existed ? original.version : 0,
+        afterVersion: after?.version ?? 0
+      });
+    }
+    return { files: resultFiles, additions, deletions };
+  }
+  function parseUnifiedPatch(patch) {
+    const lines = patch.replaceAll("\r\n", "\n").split("\n");
+    const files = [];
+    let current;
+    let hunk;
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index];
+      if (line.startsWith("--- ")) {
+        if (current) {
+          if (hunk) current.hunks.push(hunk);
+          files.push(current);
+        }
+        const oldPath = parseHeaderPath(line.slice(4));
+        const next = lines[index + 1];
+        if (!next?.startsWith("+++ ")) {
+          throw invalid("Patch file header must be followed by +++");
+        }
+        current = {
+          ...oldPath ? { oldPath } : {},
+          newPath: parseHeaderPath(next.slice(4)) ?? void 0,
+          hunks: []
+        };
+        hunk = void 0;
+        index += 1;
+        continue;
+      }
+      if (!current) {
+        if (!line.trim()) continue;
+        throw invalid("Patch must start with a file header");
+      }
+      const match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+      if (match) {
+        if (hunk) current.hunks.push(hunk);
+        hunk = {
+          oldStart: Number(match[1]),
+          oldCount: Number(match[2] ?? 1),
+          newStart: Number(match[3]),
+          newCount: Number(match[4] ?? 1),
+          lines: []
+        };
+        continue;
+      }
+      if (line.startsWith("\\ No newline at end of file")) continue;
+      if (!hunk) continue;
+      if (line.startsWith("+")) hunk.lines.push({ kind: "add", text: line.slice(1) });
+      else if (line.startsWith("-")) hunk.lines.push({ kind: "remove", text: line.slice(1) });
+      else if (line.startsWith(" ")) hunk.lines.push({ kind: "context", text: line.slice(1) });
+      else if (line !== "") throw invalid(`Unknown patch line: ${line.slice(0, 20)}`);
+    }
+    if (current) {
+      if (hunk) current.hunks.push(hunk);
+      files.push(current);
+    }
+    if (!files.length) throw invalid("Patch contains no file changes");
+    for (const file of files) {
+      if (!file.hunks.length) throw invalid("Patch file contains no hunks");
+      if (!file.oldPath && !file.newPath) throw invalid("Patch must identify a path");
+    }
+    return files;
+  }
+  function applyHunks(before, hunks) {
+    const lines = before ? before.split("\n") : [];
+    const hadFinalNewline = before.endsWith("\n");
+    if (hadFinalNewline) lines.pop();
+    const output = [];
+    let cursor = 0;
+    let additions = 0;
+    let deletions = 0;
+    for (const hunk of hunks) {
+      const start = hunk.oldStart === 0 ? 0 : hunk.oldStart - 1;
+      if (start < cursor || start > lines.length) throw invalid("Patch hunk overlaps or is out of range");
+      output.push(...lines.slice(cursor, start));
+      cursor = start;
+      let oldSeen = 0;
+      let newSeen = 0;
+      for (const line of hunk.lines) {
+        if (line.kind === "add") {
+          output.push(line.text);
+          newSeen += 1;
+          additions += 1;
+        } else if (line.kind === "remove") {
+          if (lines[cursor] !== line.text) throw conflictLine(cursor + 1);
+          cursor += 1;
+          oldSeen += 1;
+          deletions += 1;
+        } else {
+          if (lines[cursor] !== line.text) throw conflictLine(cursor + 1);
+          output.push(line.text);
+          cursor += 1;
+          oldSeen += 1;
+          newSeen += 1;
+        }
+      }
+      if (oldSeen !== hunk.oldCount || newSeen !== hunk.newCount) {
+        throw invalid("Patch hunk line counts do not match its header");
+      }
+    }
+    output.push(...lines.slice(cursor));
+    return {
+      text: `${output.join("\n")}${hadFinalNewline || before === "" ? "\n" : ""}`,
+      additions,
+      deletions
+    };
+  }
+  async function remember(vfs, path, originals) {
+    const existing = originals.get(path);
+    if (existing) return existing;
+    const info2 = await vfs.stat(path);
+    const original = info2 ? {
+      path,
+      existed: true,
+      data: await vfs.read(path),
+      mode: info2.mode,
+      version: info2.version
+    } : { path, existed: false, version: 0 };
+    originals.set(path, original);
+    return original;
+  }
+  async function rollback(vfs, originals) {
+    for (const original of originals.values()) {
+      if (original.existed) {
+        await vfs.write(original.path, original.data, {
+          ...original.mode === void 0 ? {} : { mode: original.mode }
+        });
+      } else {
+        await vfs.remove(original.path, { recursive: true });
+      }
+    }
+  }
+  function parseHeaderPath(value) {
+    const path = value.split("	")[0].trim();
+    if (!path || path === "/dev/null") return void 0;
+    return normalizeVirtualPath(path.replace(/^[ab]\//, ""));
+  }
+  function conflict(path, kind) {
+    return new AgentError(
+      "PATCH_CONFLICT",
+      `Patch expected ${kind} does not match current file: ${path}`
+    );
+  }
+  function conflictLine(line) {
+    return new AgentError(
+      "PATCH_CONTEXT_MISMATCH",
+      `Patch context does not match at line ${line}`
+    );
+  }
+  function invalid(message) {
+    return new AgentError("PATCH_INVALID", message);
+  }
+  function cancelled() {
+    return new AgentError("PATCH_CANCELLED", "Virtual patch was cancelled");
+  }
+
+  // src/adapters/virtual-workspace-tools.ts
+  function createVirtualWorkspaceTools(workspace) {
+    return [
+      tool2(
+        "read_file",
+        "Read a UTF-8 or base64 file from the virtual workspace.",
+        schema2(
+          {
+            path: { type: "string" },
+            encoding: { type: "string", enum: ["utf8", "base64"] },
+            offset: { type: "integer" },
+            length: { type: "integer" }
+          },
+          ["path"]
+        ),
+        "read",
+        "read",
+        async (input, invocation) => {
+          const path = requiredString2(input, "path");
+          const data = await workspace.fs.read(path, {
+            signal: invocation.signal,
+            ...optionalNumber(input, "offset") === void 0 ? {} : { offset: optionalNumber(input, "offset") },
+            ...optionalNumber(input, "length") === void 0 ? {} : { length: optionalNumber(input, "length") }
+          });
+          return {
+            path,
+            bytes: data.byteLength,
+            ...input.encoding === "base64" ? { dataBase64: bytesToBase642(data) } : { text: new TextDecoder().decode(data) }
+          };
+        }
+      ),
+      tool2(
+        "write_file",
+        "Atomically write a UTF-8 or base64 file in the virtual workspace.",
+        schema2(
+          {
+            path: { type: "string" },
+            text: { type: "string" },
+            dataBase64: { type: "string" },
+            expected_version: { type: "integer" },
+            mode: { type: "integer" }
+          },
+          ["path"]
+        ),
+        "write",
+        "write",
+        async (input, invocation) => {
+          const path = requiredString2(input, "path");
+          const text = optionalString2(input, "text");
+          const base64 = optionalString2(input, "dataBase64");
+          if (text === void 0 && base64 === void 0) {
+            throw new AgentError(
+              "TOOL_ARGUMENTS_INVALID",
+              "write_file requires text or dataBase64"
+            );
+          }
+          const expected = optionalNumber(input, "expected_version");
+          return workspace.fs.write(
+            path,
+            base64 === void 0 ? new TextEncoder().encode(text) : base64ToBytes2(base64),
+            {
+              signal: invocation.signal,
+              ...expected === void 0 ? {} : { expectedVersion: expected },
+              ...optionalNumber(input, "mode") === void 0 ? {} : { mode: optionalNumber(input, "mode") }
+            }
+          );
+        }
+      ),
+      tool2(
+        "list_files",
+        "List files and directories in the virtual workspace.",
+        schema2({
+          path: { type: "string" },
+          recursive: { type: "boolean" }
+        }),
+        "read",
+        "read",
+        async (input, invocation) => workspace.fs.list(optionalString2(input, "path") ?? "", {
+          recursive: input.recursive === true,
+          signal: invocation.signal
+        })
+      ),
+      tool2(
+        "delete_file",
+        "Delete a file or directory tree in the virtual workspace.",
+        schema2({
+          path: { type: "string" },
+          recursive: { type: "boolean" }
+        }, ["path"]),
+        "write",
+        "write",
+        async (input, invocation) => ({
+          deleted: await workspace.fs.remove(requiredString2(input, "path"), {
+            recursive: input.recursive === true
+          })
+        })
+      ),
+      tool2(
+        "search",
+        "Search text in virtual files with optional regex, glob and context filters.",
+        schema2(
+          {
+            pattern: { type: "string" },
+            path: { type: "string" },
+            regex: { type: "boolean" },
+            case_sensitive: { type: "boolean" },
+            whole_word: { type: "boolean" },
+            include: { type: "array", items: { type: "string" } },
+            exclude: { type: "array", items: { type: "string" } },
+            context_lines: { type: "integer" },
+            max_results: { type: "integer" }
+          },
+          ["pattern"]
+        ),
+        "read",
+        "read",
+        async (input, invocation) => searchVirtualFiles(workspace.fs, {
+          pattern: requiredString2(input, "pattern"),
+          signal: invocation.signal,
+          caseSensitive: input.case_sensitive === true,
+          regex: input.regex === true,
+          wholeWord: input.whole_word === true,
+          ...optionalString2(input, "path") ? { path: optionalString2(input, "path") } : {},
+          ...stringArray(input.include) ? { include: stringArray(input.include) } : {},
+          ...stringArray(input.exclude) ? { exclude: stringArray(input.exclude) } : {},
+          ...optionalNumber(input, "context_lines") === void 0 ? {} : { contextLines: optionalNumber(input, "context_lines") },
+          ...optionalNumber(input, "max_results") === void 0 ? {} : { maxResults: optionalNumber(input, "max_results") }
+        })
+      ),
+      tool2(
+        "glob",
+        "Find virtual files using one or more glob patterns.",
+        schema2(
+          {
+            patterns: { type: "array", items: { type: "string" } },
+            path: { type: "string" },
+            exclude: { type: "array", items: { type: "string" } }
+          },
+          ["patterns"]
+        ),
+        "read",
+        "read",
+        async (input, invocation) => {
+          const patterns = stringArray(input.patterns);
+          if (!patterns) {
+            throw new AgentError("TOOL_ARGUMENTS_INVALID", "patterns must be an array");
+          }
+          return globVirtualFiles(workspace.fs, patterns, {
+            signal: invocation.signal,
+            ...optionalString2(input, "path") ? { path: optionalString2(input, "path") } : {},
+            ...stringArray(input.exclude) ? { exclude: stringArray(input.exclude) } : {}
+          });
+        }
+      ),
+      tool2(
+        "apply_patch",
+        "Validate and atomically apply a unified diff to virtual files.",
+        schema2(
+          {
+            patch: { type: "string" },
+            expected_versions: { type: "object" },
+            expected_hashes: { type: "object" }
+          },
+          ["patch"]
+        ),
+        "write",
+        "write",
+        async (input, invocation) => applyUnifiedPatch(
+          workspace.fs,
+          requiredString2(input, "patch"),
+          {
+            signal: invocation.signal,
+            ...numberRecord(input.expected_versions) ? { expectedVersions: numberRecord(input.expected_versions) } : {},
+            ...stringRecord(input.expected_hashes) ? { expectedHashes: stringRecord(input.expected_hashes) } : {}
+          }
+        )
+      ),
+      tool2(
+        "exec",
+        "Execute the supported Virtual Shell subset without host Bash.",
+        schema2(
+          {
+            script: { type: "string" },
+            stdin: { type: "string" }
+          },
+          ["script"]
+        ),
+        "dangerous",
+        "execute",
+        async (input, invocation) => workspace.shell.execute(requiredString2(input, "script"), {
+          signal: invocation.signal,
+          ...optionalString2(input, "stdin") === void 0 ? {} : { stdin: optionalString2(input, "stdin") }
+        })
+      ),
+      tool2(
+        "job_start",
+        "Start a cancellable background Virtual Shell job.",
+        schema2({
+          script: { type: "string" },
+          stdin: { type: "string" }
+        }, ["script"]),
+        "dangerous",
+        "execute",
+        async (input) => workspace.jobs.start(requiredString2(input, "script"), {
+          ...optionalString2(input, "stdin") === void 0 ? {} : { stdin: optionalString2(input, "stdin") }
+        })
+      ),
+      tool2(
+        "job_read",
+        "Read a background job status and captured output.",
+        schema2({ job_id: { type: "string" } }, ["job_id"]),
+        "read",
+        "read",
+        async (input) => workspace.jobs.read(requiredString2(input, "job_id"))
+      ),
+      tool2(
+        "job_list",
+        "List background jobs newest first.",
+        schema2({}),
+        "read",
+        "read",
+        async () => workspace.jobs.list()
+      ),
+      tool2(
+        "job_cancel",
+        "Cancel a queued or running background job.",
+        schema2({ job_id: { type: "string" } }, ["job_id"]),
+        "dangerous",
+        "execute",
+        async (input) => workspace.jobs.cancel(requiredString2(input, "job_id"))
+      )
+    ];
+  }
+  function tool2(name, description, parameters, risk, effect, execute) {
+    return {
+      name,
+      description,
+      parameters,
+      risk,
+      effect,
+      capabilities: [
+        `workspace:${effect}`,
+        ...name.startsWith("job_") ? ["workspace:jobs"] : []
+      ],
+      executionMode: effect === "read" ? "parallel" : "sequential",
+      replay: effect === "read" ? "safe" : "never",
+      timeoutMs: name === "exec" ? 3e5 : 12e4,
+      execute: async (input, invocation) => await execute(asObject2(input), invocation)
+    };
+  }
+  function schema2(properties, required = []) {
+    return { type: "object", properties, ...required.length ? { required } : {} };
+  }
+  function asObject2(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new AgentError("TOOL_ARGUMENTS_INVALID", "Tool input must be an object");
+    }
+    return value;
+  }
+  function requiredString2(input, key) {
+    const value = input[key];
+    if (typeof value !== "string" || !value.trim()) {
+      throw new AgentError("TOOL_ARGUMENTS_INVALID", `${key} must be a non-empty string`);
+    }
+    return value;
+  }
+  function optionalString2(input, key) {
+    const value = input[key];
+    return typeof value === "string" && value ? value : void 0;
+  }
+  function optionalNumber(input, key) {
+    const value = input[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : void 0;
+  }
+  function stringArray(value) {
+    return Array.isArray(value) ? value.filter((item) => typeof item === "string") : void 0;
+  }
+  function numberRecord(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return void 0;
+    return Object.fromEntries(
+      Object.entries(value).filter((entry) => typeof entry[1] === "number")
+    );
+  }
+  function stringRecord(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return void 0;
+    return Object.fromEntries(
+      Object.entries(value).filter((entry) => typeof entry[1] === "string")
+    );
+  }
+  function bytesToBase642(value) {
+    let binary = "";
+    for (const byte of value) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  }
+  function base64ToBytes2(value) {
+    const binary = atob(value);
+    const result = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      result[index] = binary.charCodeAt(index);
+    }
+    return result;
+  }
+
+  // src/virtual/memory-fs.ts
+  var MemoryFileSystem = class {
+    constructor(now = () => Date.now()) {
+      this.now = now;
+    }
+    now;
+    files = /* @__PURE__ */ new Map();
+    directories = /* @__PURE__ */ new Set([""]);
+    locks = /* @__PURE__ */ new Map();
+    watchers = /* @__PURE__ */ new Set();
+    sequence = /* @__PURE__ */ new Map();
+    async read(path, options = {}) {
+      this.assertActive(options.signal);
+      const normalized = normalizeVirtualPath(path);
+      const entry = this.files.get(normalized);
+      if (!entry) throw fileNotFound(normalized);
+      const offset = Math.max(0, options.offset ?? 0);
+      const end = options.length === void 0 ? entry.data.byteLength : offset + Math.max(0, options.length);
+      return new Uint8Array(entry.data.subarray(offset, end));
+    }
+    async write(path, data, options = {}) {
+      const normalized = normalizeVirtualPath(path);
+      return this.withLock(normalized, async () => {
+        this.assertActive(options.signal);
+        const existing = this.files.get(normalized);
+        if (options.expectedVersion !== void 0 && (existing?.version ?? 0) !== options.expectedVersion) {
+          throw new AgentError(
+            "VFS_VERSION_CONFLICT",
+            `Virtual file changed: ${normalized}`
+          );
+        }
+        this.ensureParents(normalized);
+        const version = (this.sequence.get(normalized) ?? existing?.version ?? 0) + 1;
+        this.sequence.set(normalized, version);
+        const entry = {
+          data: new Uint8Array(data),
+          modifiedAt: this.now(),
+          mode: options.mode ?? existing?.mode ?? 420,
+          version
+        };
+        this.files.set(normalized, entry);
+        this.emit(existing ? "changed" : "created", normalized);
+        return info(normalized, entry);
+      });
+    }
+    async list(path = "", options = {}) {
+      this.assertActive(options.signal);
+      const normalized = normalizeVirtualPath(path);
+      if (normalized && !this.directories.has(normalized)) {
+        const file = this.files.get(normalized);
+        return file ? [info(normalized, file)] : [];
+      }
+      const prefix = normalized ? `${normalized}/` : "";
+      const result = [];
+      for (const directory of [...this.directories].sort()) {
+        if (directory === normalized || !directory.startsWith(prefix)) continue;
+        if (!options.recursive && directory.slice(prefix.length).includes("/")) continue;
+        result.push({
+          path: directory,
+          kind: "directory",
+          size: 0,
+          modifiedAt: 0,
+          mode: 493,
+          version: 0
+        });
+      }
+      for (const [filePath, entry] of [...this.files.entries()].sort()) {
+        if (!filePath.startsWith(prefix)) continue;
+        if (!options.recursive && filePath.slice(prefix.length).includes("/")) continue;
+        result.push(info(filePath, entry));
+      }
+      return result;
+    }
+    async stat(path, signal) {
+      this.assertActive(signal);
+      const normalized = normalizeVirtualPath(path);
+      const file = this.files.get(normalized);
+      if (file) return info(normalized, file);
+      return this.directories.has(normalized) ? {
+        path: normalized,
+        kind: "directory",
+        size: 0,
+        modifiedAt: 0,
+        mode: 493,
+        version: 0
+      } : void 0;
+    }
+    async mkdir(path, options = {}) {
+      const normalized = normalizeVirtualPath(path);
+      if (this.files.has(normalized)) {
+        throw new AgentError("VFS_NOT_DIRECTORY", `Not a directory: ${normalized}`);
+      }
+      const segments = pathSegments(normalized);
+      for (let index = 1; index <= segments.length; index += 1) {
+        const current = segments.slice(0, index).join("/");
+        if (!options.recursive && current !== normalized && !this.directories.has(current)) {
+          throw new AgentError("VFS_PARENT_MISSING", `Parent missing: ${parentVirtualPath(current)}`);
+        }
+        this.directories.add(current);
+      }
+    }
+    async remove(path, options = {}) {
+      const normalized = normalizeVirtualPath(path);
+      const deletedFile = this.files.delete(normalized);
+      const descendants = [...this.files.keys()].filter(
+        (item) => item.startsWith(`${normalized}/`)
+      );
+      const descendantDirs = [...this.directories].filter(
+        (item) => item.startsWith(`${normalized}/`)
+      );
+      if ((descendants.length || descendantDirs.length) && !options.recursive) {
+        this.files.delete(normalized);
+        throw new AgentError("VFS_NOT_EMPTY", `Directory is not empty: ${normalized}`);
+      }
+      for (const item of descendants) this.files.delete(item);
+      for (const item of descendantDirs) this.directories.delete(item);
+      const deletedDirectory = this.directories.delete(normalized);
+      if (deletedFile || deletedDirectory || descendants.length) {
+        this.emit("deleted", normalized);
+        return true;
+      }
+      return false;
+    }
+    async rename(from, to) {
+      const source = normalizeVirtualPath(from);
+      const target = normalizeVirtualPath(to);
+      if (!this.files.has(source) && !this.directories.has(source)) {
+        throw fileNotFound(source);
+      }
+      if (this.files.has(target) || this.directories.has(target)) {
+        throw new AgentError("VFS_ALREADY_EXISTS", `Path exists: ${target}`);
+      }
+      const file = this.files.get(source);
+      if (file) {
+        this.ensureParents(target);
+        this.files.set(target, file);
+        this.files.delete(source);
+        this.emit("deleted", source);
+        this.emit("created", target);
+        return;
+      }
+      this.ensureParents(target);
+      for (const directory of [...this.directories]) {
+        if (directory === source || directory.startsWith(`${source}/`)) {
+          this.directories.delete(directory);
+          this.directories.add(`${target}${directory.slice(source.length)}`);
+        }
+      }
+      for (const [path, entry] of [...this.files]) {
+        if (!path.startsWith(`${source}/`)) continue;
+        this.files.delete(path);
+        this.files.set(`${target}${path.slice(source.length)}`, entry);
+      }
+    }
+    async copy(from, to) {
+      const source = normalizeVirtualPath(from);
+      const target = normalizeVirtualPath(to);
+      const file = this.files.get(source);
+      if (file) {
+        await this.write(target, file.data, { mode: file.mode });
+        return;
+      }
+      if (!this.directories.has(source)) throw fileNotFound(source);
+      await this.mkdir(target, { recursive: true });
+      const entries = await this.list(source, { recursive: true });
+      for (const entry of entries) {
+        const relative = entry.path.slice(source.length);
+        if (entry.kind === "directory") {
+          await this.mkdir(`${target}${relative}`, { recursive: true });
+        } else {
+          const data = await this.read(entry.path);
+          await this.write(`${target}${relative}`, data, { mode: entry.mode });
+        }
+      }
+    }
+    watch(listener) {
+      this.watchers.add(listener);
+      return () => this.watchers.delete(listener);
+    }
+    ensureParents(path) {
+      let parent = parentVirtualPath(path);
+      while (parent) {
+        if (this.files.has(parent)) {
+          throw new AgentError("VFS_NOT_DIRECTORY", `Not a directory: ${parent}`);
+        }
+        this.directories.add(parent);
+        parent = parentVirtualPath(parent);
+      }
+    }
+    emit(type, path) {
+      const event = { type, path };
+      for (const watcher of this.watchers) watcher(event);
+    }
+    assertActive(signal) {
+      if (signal?.aborted) {
+        throw new AgentError("VFS_ABORTED", "Virtual file operation was cancelled");
+      }
+    }
+    async withLock(path, operation) {
+      const previous = this.locks.get(path) ?? Promise.resolve();
+      let release;
+      const current = new Promise((resolve) => {
+        release = resolve;
+      });
+      this.locks.set(path, current);
+      await previous;
+      try {
+        return await operation();
+      } finally {
+        release();
+        if (this.locks.get(path) === current) this.locks.delete(path);
+      }
+    }
+  };
+  function info(path, entry) {
+    return {
+      path,
+      kind: "file",
+      size: entry.data.byteLength,
+      modifiedAt: entry.modifiedAt,
+      mode: entry.mode,
+      version: entry.version
+    };
+  }
+  function fileNotFound(path) {
+    return new AgentError("VFS_NOT_FOUND", `Virtual file not found: ${path}`);
+  }
+
+  // src/virtual/overlay-fs.ts
+  var OverlayFileSystem = class {
+    constructor(base, now = () => Date.now()) {
+      this.base = base;
+      this.overlay = new MemoryFileSystem(now);
+    }
+    base;
+    overlay;
+    deleted = /* @__PURE__ */ new Set();
+    async read(path, options = {}) {
+      const normalized = normalizeVirtualPath(path);
+      if (this.deleted.has(normalized)) throw notFound(normalized);
+      try {
+        return await this.overlay.read(normalized, options);
+      } catch (error) {
+        if (!(error instanceof AgentError) || error.code !== "VFS_NOT_FOUND") throw error;
+        return this.base.read(normalized, options);
+      }
+    }
+    async write(path, data, options = {}) {
+      const normalized = normalizeVirtualPath(path);
+      if (this.deleted.has(normalized)) this.deleted.delete(normalized);
+      return this.overlay.write(normalized, data, options);
+    }
+    async list(path = "", options = {}) {
+      const normalized = normalizeVirtualPath(path);
+      const merged = /* @__PURE__ */ new Map();
+      for (const item of await this.base.list(normalized, {
+        recursive: true,
+        signal: options.signal
+      })) {
+        if (!this.deleted.has(item.path)) merged.set(item.path, item);
+      }
+      for (const item of await this.overlay.list(normalized, { recursive: true })) {
+        merged.set(item.path, item);
+      }
+      for (const path2 of this.deleted) {
+        merged.delete(path2);
+      }
+      if (!options.recursive) {
+        for (const item of [...merged.values()]) {
+          const parent = parentVirtualPath(item.path);
+          if (parent !== normalized) merged.delete(item.path);
+        }
+      }
+      return [...merged.values()].sort((a, b) => a.path.localeCompare(b.path));
+    }
+    async stat(path, signal) {
+      const normalized = normalizeVirtualPath(path);
+      if (this.deleted.has(normalized)) return void 0;
+      return await this.overlay.stat(normalized, signal) ?? await this.base.stat(normalized, signal);
+    }
+    async mkdir(path, options = {}) {
+      const normalized = normalizeVirtualPath(path);
+      this.deleted.delete(normalized);
+      await this.overlay.mkdir(normalized, options);
+    }
+    async remove(path, options = {}) {
+      const normalized = normalizeVirtualPath(path);
+      const baseItems = (await this.base.list(normalized, { recursive: true })).filter(
+        (item) => isPathInside(item.path, normalized)
+      );
+      if (baseItems.some((item) => item.kind === "directory") && baseItems.some((item) => item.kind === "file") && !options.recursive) {
+        throw new AgentError("VFS_NOT_EMPTY", `Directory is not empty: ${normalized}`);
+      }
+      const overlayDeleted = await this.overlay.remove(normalized, {
+        recursive: true
+      });
+      let changed = false;
+      if (baseItems.length || await this.base.stat(normalized)) {
+        this.deleted.add(normalized);
+        changed = true;
+      }
+      return changed || overlayDeleted;
+    }
+    async rename(from, to) {
+      const source = normalizeVirtualPath(from);
+      const target = normalizeVirtualPath(to);
+      const data = await this.read(source);
+      await this.write(target, data);
+      await this.remove(source, { recursive: true });
+    }
+    async copy(from, to) {
+      const source = normalizeVirtualPath(from);
+      const target = normalizeVirtualPath(to);
+      const sourceInfo = await this.stat(source);
+      if (!sourceInfo) throw notFound(source);
+      if (sourceInfo.kind === "file") {
+        await this.write(target, await this.read(source), { mode: sourceInfo.mode });
+        return;
+      }
+      await this.mkdir(target, { recursive: true });
+      for (const item of await this.list(source, { recursive: true })) {
+        const relative = item.path.slice(source.length);
+        if (item.kind === "file") {
+          await this.write(`${target}${relative}`, await this.read(item.path), {
+            mode: item.mode
+          });
+        }
+      }
+    }
+    watch(listener) {
+      return this.overlay.watch(listener);
+    }
+    async changes() {
+      const written = [];
+      for (const item of await this.overlay.list("", { recursive: true })) {
+        if (item.kind !== "file") continue;
+        written.push({
+          path: item.path,
+          data: await this.overlay.read(item.path),
+          mode: item.mode
+        });
+      }
+      return { written, deleted: [...this.deleted].sort() };
+    }
+    async discard() {
+      for (const item of await this.overlay.list("", { recursive: true })) {
+        await this.overlay.remove(item.path, { recursive: true });
+      }
+      this.deleted.clear();
+    }
+  };
+  function notFound(path) {
+    return new AgentError("VFS_NOT_FOUND", `Virtual file not found: ${path}`);
+  }
+
+  // src/virtual/persistent-fs.ts
+  var PersistentFileSystem = class {
+    constructor(storage, storageKey = "tinyai:vfs:v1", now = () => Date.now()) {
+      this.storage = storage;
+      this.storageKey = storageKey;
+      this.memory = new MemoryFileSystem(now);
+    }
+    storage;
+    storageKey;
+    memory;
+    loaded;
+    mutationTail = Promise.resolve();
+    async read(path, options = {}) {
+      await this.ensureLoaded();
+      await this.mutationTail;
+      return this.memory.read(path, options);
+    }
+    async write(path, data, options = {}) {
+      await this.ensureLoaded();
+      return this.mutate(async () => {
+        const info2 = await this.memory.write(path, data, options);
+        await this.persist();
+        return info2;
+      });
+    }
+    async list(path = "", options = {}) {
+      await this.ensureLoaded();
+      await this.mutationTail;
+      return this.memory.list(path, options);
+    }
+    async stat(path, signal) {
+      await this.ensureLoaded();
+      await this.mutationTail;
+      return this.memory.stat(path, signal);
+    }
+    async mkdir(path, options = {}) {
+      await this.ensureLoaded();
+      await this.mutate(async () => {
+        await this.memory.mkdir(path, options);
+        await this.persist();
+      });
+    }
+    async remove(path, options = {}) {
+      await this.ensureLoaded();
+      return this.mutate(async () => {
+        const removed = await this.memory.remove(path, options);
+        if (removed) await this.persist();
+        return removed;
+      });
+    }
+    async rename(from, to) {
+      await this.ensureLoaded();
+      await this.mutate(async () => {
+        await this.memory.rename(from, to);
+        await this.persist();
+      });
+    }
+    async copy(from, to) {
+      await this.ensureLoaded();
+      await this.mutate(async () => {
+        await this.memory.copy(from, to);
+        await this.persist();
+      });
+    }
+    watch(listener) {
+      return this.memory.watch(listener);
+    }
+    async ensureLoaded() {
+      this.loaded ??= this.load();
+      await this.loaded;
+    }
+    mutate(operation) {
+      const current = this.mutationTail.then(operation);
+      this.mutationTail = current.then(
+        () => void 0,
+        () => void 0
+      );
+      return current;
+    }
+    async load() {
+      const raw = await this.storage.get(this.storageKey);
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
+      const manifest = raw;
+      if (manifest.schemaVersion !== 1) {
+        throw new AgentError(
+          "VFS_SCHEMA_UNSUPPORTED",
+          `Unsupported VFS schema: ${String(manifest.schemaVersion)}`
+        );
+      }
+      for (const directory of manifest.directories ?? []) {
+        await this.memory.mkdir(normalizeVirtualPath(directory), { recursive: true });
+      }
+      for (const file of manifest.files ?? []) {
+        const path = normalizeVirtualPath(file.path);
+        await this.memory.write(path, base64ToBytes3(file.data), {
+          mode: file.mode
+        });
+      }
+    }
+    async persist() {
+      const items = await this.memory.list("", { recursive: true });
+      const manifest = {
+        schemaVersion: 1,
+        directories: items.filter((item) => item.kind === "directory").map((item) => item.path),
+        files: []
+      };
+      for (const item of items) {
+        if (item.kind !== "file") continue;
+        manifest.files.push({
+          path: item.path,
+          data: bytesToBase643(await this.memory.read(item.path)),
+          mode: item.mode,
+          modifiedAt: item.modifiedAt,
+          version: item.version
+        });
+      }
+      await this.storage.set(this.storageKey, manifest);
+    }
+  };
+  function bytesToBase643(value) {
+    let binary = "";
+    for (const byte of value) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  }
+  function base64ToBytes3(value) {
+    const binary = atob(value);
+    const result = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      result[index] = binary.charCodeAt(index);
+    }
+    return result;
+  }
+
+  // src/virtual/archive-fs.ts
+  var WORKSPACE_BUNDLE_FORMAT = "tinyai.workspace.bundle";
+  var WORKSPACE_BUNDLE_SCHEMA_VERSION = 1;
+  var ArchiveFileSystem = class {
+    bundle;
+    source;
+    loading;
+    constructor(bundle, now = () => 0) {
+      this.bundle = parseWorkspaceBundle(bundle);
+      this.source = new MemoryFileSystem(now);
+      this.loading = this.load();
+    }
+    async read(path, options = {}) {
+      await this.ready();
+      return this.source.read(path, options);
+    }
+    async list(path = "", options = {}) {
+      await this.ready();
+      return this.source.list(path, options);
+    }
+    async stat(path, signal) {
+      await this.ready();
+      return this.source.stat(path, signal);
+    }
+    async write(_path, _data, _options = {}) {
+      throw readOnly();
+    }
+    async mkdir(_path, _options = {}) {
+      throw readOnly();
+    }
+    async remove(_path, _options = {}) {
+      throw readOnly();
+    }
+    async rename(_from, _to) {
+      throw readOnly();
+    }
+    async copy(_from, _to) {
+      throw readOnly();
+    }
+    watch(_listener) {
+      return () => void 0;
+    }
+    exportBundle() {
+      return cloneBundle(this.bundle);
+    }
+    async load() {
+      for (const directory of this.bundle.directories) {
+        await this.source.mkdir(directory, { recursive: true });
+      }
+      for (const file of this.bundle.files) {
+        await this.source.write(
+          file.path,
+          base64ToBytes4(file.dataBase64, file.path),
+          { ...file.mode === void 0 ? {} : { mode: file.mode } }
+        );
+      }
+    }
+    async ready() {
+      await this.loading;
+    }
+  };
+  function parseWorkspaceBundle(input) {
+    const value = input instanceof Uint8Array ? parseJson(input) : input;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw invalidBundle("Bundle must be an object");
+    }
+    const candidate = value;
+    if (candidate.format !== WORKSPACE_BUNDLE_FORMAT) {
+      throw invalidBundle(`Unsupported workspace bundle format: ${String(candidate.format)}`);
+    }
+    if (candidate.schemaVersion !== WORKSPACE_BUNDLE_SCHEMA_VERSION) {
+      throw invalidBundle(
+        `Unsupported workspace bundle schema: ${String(candidate.schemaVersion)}`
+      );
+    }
+    if (!Array.isArray(candidate.files) || !Array.isArray(candidate.directories)) {
+      throw invalidBundle("Bundle directories and files must be arrays");
+    }
+    const paths = /* @__PURE__ */ new Set();
+    const directories = candidate.directories.map((directory) => {
+      const normalized = normalizeVirtualPath(directory);
+      if (!normalized) {
+        throw invalidBundle("Bundle root directory is implicit");
+      }
+      if (paths.has(normalized)) {
+        throw invalidBundle(`Duplicate bundle path: ${normalized}`);
+      }
+      paths.add(normalized);
+      return normalized;
+    });
+    const files = candidate.files.map((file) => {
+      if (!file || typeof file.path !== "string" || typeof file.dataBase64 !== "string") {
+        throw invalidBundle("Bundle file entry is invalid");
+      }
+      const path = normalizeVirtualPath(file.path);
+      if (!path) throw invalidBundle("Bundle file path cannot be empty");
+      if (paths.has(path)) {
+        throw invalidBundle(`Duplicate bundle path: ${path}`);
+      }
+      paths.add(path);
+      const mode = file.mode === void 0 ? void 0 : Number.isInteger(file.mode) && file.mode >= 0 ? file.mode : invalidBundle(`Invalid file mode: ${path}`);
+      base64ToBytes4(file.dataBase64, path);
+      return {
+        path,
+        dataBase64: file.dataBase64,
+        ...mode === void 0 ? {} : { mode },
+        ...Number.isFinite(file.modifiedAt) ? { modifiedAt: Number(file.modifiedAt) } : {}
+      };
+    });
+    validateBundleHierarchy(directories, files);
+    return {
+      format: WORKSPACE_BUNDLE_FORMAT,
+      schemaVersion: WORKSPACE_BUNDLE_SCHEMA_VERSION,
+      ...Number.isFinite(candidate.createdAt) ? { createdAt: Number(candidate.createdAt) } : {},
+      ...typeof candidate.revision === "string" ? { revision: candidate.revision } : {},
+      ...candidate.metadata ? { metadata: sanitizeMetadata(candidate.metadata) } : {},
+      directories: [...new Set(directories)].sort(),
+      files: files.sort((left, right) => left.path.localeCompare(right.path))
+    };
+  }
+  function validateBundleHierarchy(directories, files) {
+    const directorySet = new Set(directories);
+    const fileSet = new Set(files.map((file) => file.path));
+    for (const path of fileSet) {
+      let parent = parentPath(path);
+      while (parent) {
+        if (fileSet.has(parent)) {
+          throw invalidBundle(`Bundle file cannot contain another path: ${parent}`);
+        }
+        parent = parentPath(parent);
+      }
+    }
+    for (const path of directorySet) {
+      let parent = parentPath(path);
+      while (parent) {
+        if (fileSet.has(parent)) {
+          throw invalidBundle(`Bundle file cannot contain another path: ${parent}`);
+        }
+        parent = parentPath(parent);
+      }
+    }
+  }
+  function parentPath(path) {
+    const index = path.lastIndexOf("/");
+    return index < 0 ? "" : path.slice(0, index);
+  }
+  function serializeWorkspaceBundle(bundle) {
+    return new TextEncoder().encode(JSON.stringify(parseWorkspaceBundle(bundle)));
+  }
+  function cloneBundle(bundle) {
+    return {
+      ...bundle,
+      ...bundle.metadata ? { metadata: { ...bundle.metadata } } : {},
+      directories: [...bundle.directories],
+      files: bundle.files.map((file) => ({ ...file }))
+    };
+  }
+  function parseJson(value) {
+    try {
+      return JSON.parse(new TextDecoder().decode(value));
+    } catch {
+      throw invalidBundle("Workspace bundle is not valid JSON");
+    }
+  }
+  function sanitizeMetadata(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw invalidBundle("Bundle metadata must be an object");
+    }
+    const result = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (typeof item !== "string") {
+        throw invalidBundle(`Bundle metadata value must be a string: ${key}`);
+      }
+      result[key] = item;
+    }
+    return result;
+  }
+  function base64ToBytes4(value, path) {
+    try {
+      const binary = atob(value);
+      const result = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) {
+        result[index] = binary.charCodeAt(index);
+      }
+      return result;
+    } catch {
+      throw invalidBundle(`Invalid base64 data: ${path}`);
+    }
+  }
+  function readOnly() {
+    return new AgentError("VFS_READ_ONLY", "Archive workspace is read-only");
+  }
+  function invalidBundle(message) {
+    throw new AgentError("VFS_BUNDLE_INVALID", message);
+  }
+
+  // src/virtual/vcs.ts
+  var SnapshotVcs = class {
+    constructor(vfs, now = () => Date.now(), options = {}) {
+      this.vfs = vfs;
+      this.now = now;
+      this.storage = options.storage;
+      this.storageKey = options.storageKey ?? "tinyai:vcs:v1";
+    }
+    vfs;
+    now;
+    snapshots = /* @__PURE__ */ new Map();
+    objects = /* @__PURE__ */ new Map();
+    storage;
+    storageKey;
+    sequence = 0;
+    head;
+    initialized;
+    get headId() {
+      return this.head;
+    }
+    async commit(label) {
+      await this.initialize();
+      const files = {};
+      for (const item of await this.vfs.list("", { recursive: true })) {
+        if (item.kind !== "file") continue;
+        const data = await this.vfs.read(item.path);
+        const hash = hashBytes(data);
+        let objectId = hash;
+        let collision = 1;
+        while (this.objects.has(objectId) && !bytesEqual(this.objects.get(objectId), data)) {
+          objectId = `${hash}-${++collision}`;
+        }
+        this.objects.set(objectId, new Uint8Array(data));
+        files[item.path] = {
+          objectId,
+          mode: item.mode,
+          version: item.version
+        };
+      }
+      const id = `snapshot_${++this.sequence}`;
+      const snapshot = {
+        id,
+        ...this.head ? { parentId: this.head } : {},
+        ...label?.trim() ? { label: label.trim() } : {},
+        createdAt: this.now(),
+        files
+      };
+      this.snapshots.set(id, snapshot);
+      this.head = id;
+      await this.persist();
+      return summarize(snapshot);
+    }
+    async diff(fromId, toId = this.head) {
+      await this.initialize();
+      if (!toId) throw new AgentError("VCS_NO_HEAD", "No snapshot is available");
+      const to = this.required(toId);
+      const from = fromId ? this.required(fromId) : to.parentId ? this.required(to.parentId) : void 0;
+      const paths = /* @__PURE__ */ new Set([
+        ...Object.keys(from?.files ?? {}),
+        ...Object.keys(to.files)
+      ]);
+      const files = [];
+      for (const path of [...paths].sort()) {
+        const before = from?.files[path];
+        const after = to.files[path];
+        if (!before) {
+          files.push({
+            path,
+            status: "added",
+            ...textPatch(new Uint8Array(), this.object(after.objectId), path)
+          });
+          continue;
+        }
+        if (!after) {
+          files.push({
+            path,
+            status: "deleted",
+            ...textPatch(this.object(before.objectId), new Uint8Array(), path)
+          });
+          continue;
+        }
+        if (before.objectId === after.objectId) continue;
+        const beforeData = this.object(before.objectId);
+        const afterData = this.object(after.objectId);
+        const patch = textPatch(beforeData, afterData, path);
+        files.push({ path, status: patch.patch ? "modified" : "binary", ...patch });
+      }
+      return {
+        from: from?.id ?? "empty",
+        to: to.id,
+        files
+      };
+    }
+    async restore(snapshotId) {
+      await this.initialize();
+      const snapshot = this.required(snapshotId);
+      const existing = await this.vfs.list("", { recursive: true });
+      for (const item of existing.sort((a, b) => b.path.length - a.path.length)) {
+        if (item.kind === "file") await this.vfs.remove(item.path);
+        else await this.vfs.remove(item.path, { recursive: true });
+      }
+      for (const [path, file] of Object.entries(snapshot.files)) {
+        await this.vfs.write(path, this.object(file.objectId), { mode: file.mode });
+      }
+      this.head = snapshot.id;
+      await this.persist();
+    }
+    fork() {
+      return new OverlayFileSystem(this.vfs, this.now);
+    }
+    async applyChanges(changes) {
+      await this.initialize();
+      for (const file of changes.written) {
+        await this.vfs.write(file.path, file.data, { mode: file.mode });
+      }
+      for (const path of changes.deleted) {
+        await this.vfs.remove(path, { recursive: true });
+      }
+      await this.persist();
+    }
+    async list() {
+      await this.initialize();
+      return [...this.snapshots.values()].map(summarize);
+    }
+    async initialize() {
+      this.initialized ??= this.load();
+      await this.initialized;
+    }
+    object(id) {
+      const data = this.objects.get(id);
+      if (!data) throw new AgentError("VCS_OBJECT_MISSING", `Snapshot object missing: ${id}`);
+      return data;
+    }
+    required(id) {
+      const snapshot = this.snapshots.get(id);
+      if (!snapshot) throw new AgentError("VCS_SNAPSHOT_NOT_FOUND", `Snapshot not found: ${id}`);
+      return snapshot;
+    }
+    async load() {
+      const raw = await this.storage?.get(this.storageKey);
+      if (!raw) return;
+      if (!raw || typeof raw !== "object" || Array.isArray(raw) || raw.schemaVersion !== 1 || !Array.isArray(raw.snapshots) || !raw.objects || typeof raw.objects !== "object") {
+        throw new AgentError("VCS_STATE_INVALID", "Persisted VCS state is invalid");
+      }
+      const state = raw;
+      this.sequence = Math.max(0, Number(state.sequence) || 0);
+      this.head = state.head;
+      for (const snapshot of state.snapshots) this.snapshots.set(snapshot.id, snapshot);
+      for (const [id, encoded] of Object.entries(state.objects)) {
+        this.objects.set(id, base64ToBytes5(encoded));
+      }
+    }
+    async persist() {
+      if (!this.storage) return;
+      const state = {
+        schemaVersion: 1,
+        sequence: this.sequence,
+        ...this.head ? { head: this.head } : {},
+        snapshots: [...this.snapshots.values()].map((snapshot) => ({
+          ...snapshot,
+          files: Object.fromEntries(
+            Object.entries(snapshot.files).map(([path, file]) => [path, { ...file }])
+          )
+        })),
+        objects: Object.fromEntries(
+          [...this.objects].map(([id, data]) => [id, bytesToBase644(data)])
+        )
+      };
+      await this.storage.set(this.storageKey, state);
+    }
+  };
+  function unifiedDiff(before, after, path) {
+    const beforeText = decodeText2(before);
+    const afterText = decodeText2(after);
+    if (beforeText === void 0 || afterText === void 0) return { status: "binary" };
+    return { patch: buildPatch(beforeText, afterText, path), status: "modified" };
+  }
+  function summarize(snapshot) {
+    return {
+      id: snapshot.id,
+      ...snapshot.parentId ? { parentId: snapshot.parentId } : {},
+      ...snapshot.label ? { label: snapshot.label } : {},
+      createdAt: snapshot.createdAt,
+      fileCount: Object.keys(snapshot.files).length
+    };
+  }
+  function textPatch(before, after, path) {
+    return unifiedDiff(before, after, path).patch ? { patch: unifiedDiff(before, after, path).patch } : {};
+  }
+  function buildPatch(before, after, path) {
+    const oldLines = splitLines(before);
+    const newLines = splitLines(after);
+    const lcs = longestCommonSubsequence(oldLines, newLines);
+    if (lcs === oldLines.length && lcs === newLines.length) return "";
+    const lines = [`--- a/${path}`, `+++ b/${path}`, `@@ -1,${oldLines.length} +1,${newLines.length} @@`];
+    let oldIndex = 0;
+    let newIndex = 0;
+    for (const [commonOld, commonNew] of commonPairs(oldLines, newLines)) {
+      while (oldIndex < commonOld) lines.push(`-${oldLines[oldIndex++]}`);
+      while (newIndex < commonNew) lines.push(`+${newLines[newIndex++]}`);
+      lines.push(` ${oldLines[oldIndex]}`);
+      oldIndex += 1;
+      newIndex += 1;
+    }
+    while (oldIndex < oldLines.length) lines.push(`-${oldLines[oldIndex++]}`);
+    while (newIndex < newLines.length) lines.push(`+${newLines[newIndex++]}`);
+    return `${lines.join("\n")}
+`;
+  }
+  function longestCommonSubsequence(left, right) {
+    const previous = new Array(right.length + 1).fill(0);
+    for (let i = 1; i <= left.length; i += 1) {
+      const current = new Array(right.length + 1).fill(0);
+      for (let j = 1; j <= right.length; j += 1) {
+        current[j] = left[i - 1] === right[j - 1] ? previous[j - 1] + 1 : Math.max(previous[j], current[j - 1]);
+      }
+      previous.splice(0, previous.length, ...current);
+    }
+    return previous[right.length];
+  }
+  function commonPairs(left, right) {
+    const dp = Array.from(
+      { length: left.length + 1 },
+      () => new Array(right.length + 1).fill(0)
+    );
+    for (let i2 = left.length - 1; i2 >= 0; i2 -= 1) {
+      for (let j2 = right.length - 1; j2 >= 0; j2 -= 1) {
+        dp[i2][j2] = left[i2] === right[j2] ? dp[i2 + 1][j2 + 1] + 1 : Math.max(dp[i2 + 1][j2], dp[i2][j2 + 1]);
+      }
+    }
+    const result = [];
+    let i = 0;
+    let j = 0;
+    while (i < left.length && j < right.length) {
+      if (left[i] === right[j]) {
+        result.push([i, j]);
+        i += 1;
+        j += 1;
+      } else if (dp[i + 1][j] >= dp[i][j + 1]) i += 1;
+      else j += 1;
+    }
+    return result;
+  }
+  function splitLines(value) {
+    if (!value) return [];
+    const lines = value.split("\n");
+    if (lines.at(-1) === "") lines.pop();
+    return lines;
+  }
+  function decodeText2(value) {
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(value);
+    } catch {
+      return void 0;
+    }
+  }
+  function hashBytes(value) {
+    let hash = 1469598103934665603n;
+    for (const byte of value) {
+      hash ^= BigInt(byte);
+      hash = hash * 1099511628211n & 0xffffffffffffffffn;
+    }
+    return `${value.byteLength.toString(16)}-${hash.toString(16).padStart(16, "0")}`;
+  }
+  function bytesEqual(left, right) {
+    if (left.byteLength !== right.byteLength) return false;
+    return left.every((byte, index) => byte === right[index]);
+  }
+  function bytesToBase644(value) {
+    let binary = "";
+    for (const byte of value) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  }
+  function base64ToBytes5(value) {
+    const binary = atob(value);
+    const result = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      result[index] = binary.charCodeAt(index);
+    }
+    return result;
+  }
+
+  // src/virtual/shell.ts
+  var VirtualShell = class {
+    constructor(vfs, options = {}) {
+      this.vfs = vfs;
+      this.cwd = normalizeVirtualPath(options.cwd ?? "");
+      this.env = { ...options.env ?? {} };
+      this.providers = [...options.providers ?? []];
+      this.maxOutputChars = options.maxOutputChars ?? 1e6;
+    }
+    vfs;
+    providers;
+    maxOutputChars;
+    cwd;
+    env;
+    lastExitCode = 0;
+    get currentDirectory() {
+      return this.cwd;
+    }
+    get environment() {
+      return { ...this.env };
+    }
+    addProvider(provider) {
+      this.providers.push(provider);
+      return () => {
+        const index = this.providers.indexOf(provider);
+        if (index >= 0) this.providers.splice(index, 1);
+      };
+    }
+    async execute(script, options = {}) {
+      assertSupportedSyntax(script);
+      const logicalParts = splitOutsideQuotes(script, ["&&", "||", ";"]);
+      const logical = logicalParts.map((item) => ({
+        value: item.value,
+        operator: item.operator
+      }));
+      let stdin = options.stdin ?? "";
+      let stdout = "";
+      let stderr = "";
+      for (const item of logical) {
+        if (!item.value.trim()) continue;
+        const shouldRun = item.operator === ";" || item.operator === "&&" && this.lastExitCode === 0 || item.operator === "||" && this.lastExitCode !== 0 || item.operator === void 0;
+        if (!shouldRun) continue;
+        const pipeline = await this.runPipeline(item.value.trim(), stdin, options.signal);
+        stdout += pipeline.stdout;
+        stderr += pipeline.stderr;
+        stdin = pipeline.stdout;
+        this.lastExitCode = pipeline.exitCode;
+      }
+      return {
+        exitCode: this.lastExitCode,
+        stdout: truncate(stdout, this.maxOutputChars),
+        stderr: truncate(stderr, this.maxOutputChars)
+      };
+    }
+    async runPipeline(chain, initialStdin, signal) {
+      const commands = splitOutsideQuotes(chain, ["|"]).filter((item) => item.value.trim()).map((item) => item.value.trim());
+      let stdin = initialStdin;
+      let stdout = "";
+      let stderr = "";
+      let exitCode = 0;
+      for (const command of commands) {
+        if (signal?.aborted) {
+          throw new AgentError("SHELL_ABORTED", "Virtual shell command was cancelled");
+        }
+        const parsed = parseCommand(tokenize(command), this.env, this.lastExitCode);
+        if (!parsed.args.length) {
+          Object.assign(this.env, parsed.assignments);
+          continue;
+        }
+        if (parsed.redirectIn) {
+          stdin = decode(await this.vfs.read(this.resolve(parsed.redirectIn), { signal }));
+        }
+        let result;
+        if (BUILTINS.has(parsed.args[0])) {
+          result = await this.runBuiltin(parsed.args[0], parsed.args.slice(1), stdin, {
+            ...this.env,
+            ...parsed.assignments
+          }, signal);
+        } else {
+          const provider = this.providers.find(
+            (item) => item.canExecute(parsed.args[0])
+          );
+          result = provider ? await provider.execute({
+            command: parsed.args[0],
+            args: parsed.args.slice(1),
+            cwd: this.cwd,
+            env: { ...this.env, ...parsed.assignments },
+            stdin,
+            signal
+          }) : {
+            exitCode: 127,
+            stdout: "",
+            stderr: `${parsed.args[0]}: command not found
+`
+          };
+        }
+        stdout = result.stdout;
+        stderr += result.stderr;
+        exitCode = result.exitCode;
+        if (parsed.redirectOut) {
+          const redirectPath = this.resolve(parsed.redirectOut.path);
+          const previous = parsed.redirectOut.append ? decode(await this.vfs.read(redirectPath, { signal }).catch(() => new Uint8Array())) : "";
+          await this.vfs.write(
+            redirectPath,
+            encode(previous + result.stdout),
+            { signal }
+          );
+          stdout = "";
+        }
+        stdin = result.stdout;
+      }
+      return { exitCode, stdout, stderr };
+    }
+    async runBuiltin(command, args, stdin, env, signal) {
+      const ok = (stdout = "") => ({ exitCode: 0, stdout, stderr: "" });
+      const fail = (stderr, exitCode = 1) => ({
+        exitCode,
+        stdout: "",
+        stderr: `${stderr}
+`
+      });
+      if (command === "true") return ok();
+      if (command === "false") return fail("", 1);
+      if (command === "pwd") return ok(`${this.cwd || "."}
+`);
+      if (command === "echo") return ok(`${args.join(" ")}
+`);
+      if (command === "env") {
+        return ok(
+          Object.entries(env).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}=${value}`).join("\n") + "\n"
+        );
+      }
+      if (command === "export") {
+        for (const item of args) {
+          const [key, ...value] = item.split("=");
+          if (key && value.length) this.env[key] = value.join("=");
+        }
+        return ok();
+      }
+      if (command === "cd") {
+        const target = args[0] ?? "";
+        const next = normalizeVirtualPath(
+          target.startsWith("/") ? target : `${this.cwd}${this.cwd && target ? "/" : ""}${target}`
+        );
+        if (next && (await this.vfs.stat(next, signal))?.kind !== "directory") {
+          return fail(`cd: no such directory: ${target}`);
+        }
+        this.cwd = next;
+        return ok();
+      }
+      if (command === "ls") {
+        const recursive = args.includes("-R");
+        const pathArg = args.find((item) => !item.startsWith("-")) ?? this.cwd;
+        const items = await this.vfs.list(pathArg, { recursive, signal });
+        const prefix = normalizeVirtualPath(pathArg);
+        return ok(
+          items.map((item) => {
+            const relative = prefix ? item.path.slice(prefix.length + 1) : item.path;
+            return item.kind === "directory" ? `${relative}/` : relative;
+          }).join("\n") + (items.length ? "\n" : "")
+        );
+      }
+      if (command === "cat") {
+        if (!args.length) return ok(stdin);
+        const output = [];
+        for (const path of args) {
+          output.push(decode(await this.vfs.read(this.resolve(path), { signal })));
+        }
+        return ok(output.join(""));
+      }
+      if (command === "mkdir") {
+        const recursive = args.includes("-p");
+        const paths = args.filter((item) => item !== "-p");
+        for (const path of paths) await this.vfs.mkdir(this.resolve(path), { recursive });
+        return ok();
+      }
+      if (command === "rm") {
+        const recursive = args.includes("-r") || args.includes("-rf");
+        const paths = args.filter((item) => !item.startsWith("-"));
+        for (const path of paths) await this.vfs.remove(this.resolve(path), { recursive });
+        return ok();
+      }
+      if (command === "cp" || command === "mv") {
+        if (args.length !== 2) return fail(`${command}: source and destination required`);
+        const from = this.resolve(args[0]);
+        const to = this.resolve(args[1]);
+        if (command === "cp") await this.vfs.copy(from, to);
+        else await this.vfs.rename(from, to);
+        return ok();
+      }
+      if (command === "grep" || command === "rg") {
+        if (!args.length) return fail(`${command}: pattern required`);
+        const pattern = args[0];
+        const paths = args.slice(1);
+        if (!paths.length && stdin) {
+          const output2 = stdin.split("\n").map((line, index) => ({ line, index })).filter(({ line }) => line.includes(pattern)).map(({ line, index }) => `${index + 1}:${line}`);
+          return {
+            exitCode: output2.length ? 0 : 1,
+            stdout: output2.length ? `${output2.join("\n")}
+` : "",
+            stderr: ""
+          };
+        }
+        const files = paths.length ? paths.map((path) => this.resolve(path)) : (await this.vfs.list("", { recursive: true, signal })).filter((item) => item.kind === "file").map((item) => item.path);
+        const output = [];
+        for (const path of files) {
+          const lines = decode(await this.vfs.read(path, { signal })).split("\n");
+          for (let index = 0; index < lines.length; index += 1) {
+            if (lines[index].includes(pattern)) {
+              output.push(`${paths.length > 1 ? `${path}:` : ""}${index + 1}:${lines[index]}`);
+            }
+          }
+        }
+        return { exitCode: output.length ? 0 : 1, stdout: output.length ? `${output.join("\n")}
+` : "", stderr: "" };
+      }
+      if (command === "find") {
+        const path = this.resolve(args[0] ?? "");
+        return ok(
+          (await this.vfs.list(path, { recursive: true, signal })).map((item) => item.path).sort().join("\n") + "\n"
+        );
+      }
+      if (command === "diff") {
+        if (args.length !== 2) return fail("diff: two files required");
+        const before = await this.vfs.read(this.resolve(args[0]), { signal });
+        const after = await this.vfs.read(this.resolve(args[1]), { signal });
+        const result = unifiedDiff(before, after, `${args[0]} -> ${args[1]}`);
+        return {
+          exitCode: result.patch ? 1 : 0,
+          stdout: result.patch ?? (result.status === "binary" ? "Binary files differ\n" : ""),
+          stderr: ""
+        };
+      }
+      if (command === "patch") {
+        const source = args[0] && args[0] !== "-" ? decode(await this.vfs.read(this.resolve(args[0]), { signal })) : stdin;
+        if (!source.trim()) return fail("patch: input is required");
+        try {
+          const result = await applyUnifiedPatch(this.vfs, source, { signal });
+          return ok(
+            `patched ${result.files.length} file(s) (+${result.additions}/-${result.deletions})
+`
+          );
+        } catch (error) {
+          return fail(
+            error instanceof Error ? `patch: ${error.message}` : "patch: failed"
+          );
+        }
+      }
+      if (command === "test") {
+        return args[0] === "-e" && args[1] && await this.vfs.stat(this.resolve(args[1]), signal) ? ok() : fail("", 1);
+      }
+      return fail(`${command}: builtin not implemented`, 127);
+    }
+    resolve(path) {
+      if (path.startsWith("/")) return normalizeVirtualPath(path);
+      return normalizeVirtualPath(`${this.cwd}${this.cwd && path ? "/" : ""}${path}`);
+    }
+  };
+  var BUILTINS = /* @__PURE__ */ new Set([
+    "true",
+    "false",
+    "pwd",
+    "echo",
+    "env",
+    "export",
+    "cd",
+    "ls",
+    "cat",
+    "mkdir",
+    "rm",
+    "cp",
+    "mv",
+    "grep",
+    "rg",
+    "find",
+    "diff",
+    "patch",
+    "test"
+  ]);
+  function parseCommand(tokens, env, lastExitCode) {
+    const args = [];
+    const assignments = {};
+    let redirectOut;
+    let redirectIn;
+    for (let index = 0; index < tokens.length; index += 1) {
+      const token = expand(tokens[index], env, lastExitCode);
+      if (token === ">" || token === ">>") {
+        const path = tokens[++index];
+        if (!path) throw new AgentError("SHELL_REDIRECT_INVALID", "Missing redirect path");
+        redirectOut = {
+          path,
+          append: token === ">>"
+        };
+        continue;
+      }
+      if (token === "<") {
+        const path = tokens[++index];
+        if (!path) throw new AgentError("SHELL_REDIRECT_INVALID", "Missing input path");
+        redirectIn = path;
+        continue;
+      }
+      if (!args.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) {
+        const [key, ...value] = token.split("=");
+        assignments[key] = value.join("=");
+        continue;
+      }
+      args.push(token);
+    }
+    return { args, assignments, ...redirectOut ? { redirectOut } : {}, ...redirectIn ? { redirectIn } : {} };
+  }
+  function tokenize(value) {
+    const tokens = [];
+    let current = "";
+    let quote;
+    let escaped = false;
+    const push = () => {
+      if (current) tokens.push(current);
+      current = "";
+    };
+    for (let index = 0; index < value.length; index += 1) {
+      const char = value[index];
+      if (escaped) {
+        current += char;
+        escaped = false;
+        continue;
+      }
+      if (char === "\\" && quote !== "'") {
+        escaped = true;
+        continue;
+      }
+      if (quote) {
+        if (char === quote) quote = void 0;
+        else current += char;
+        continue;
+      }
+      if (char === "'" || char === '"') {
+        quote = char;
+        continue;
+      }
+      if (/\s/.test(char)) {
+        push();
+        continue;
+      }
+      if ((char === ">" || char === "<") && current) push();
+      if (char === ">") {
+        const next = value[index + 1];
+        tokens.push(next === ">" ? ">>" : ">");
+        if (next === ">") index += 1;
+        continue;
+      }
+      if (char === "<") {
+        tokens.push("<");
+        continue;
+      }
+      current += char;
+    }
+    if (quote) throw new AgentError("SHELL_QUOTE_UNTERMINATED", "Unterminated quote");
+    if (escaped) current += "\\";
+    push();
+    return tokens;
+  }
+  function splitOutsideQuotes(value, operators) {
+    const sorted = [...operators].sort((a, b) => b.length - a.length);
+    const result = [];
+    let current = "";
+    let quote;
+    let escaped = false;
+    let pendingOperator;
+    for (let index = 0; index < value.length; index += 1) {
+      const char = value[index];
+      if (escaped) {
+        current += char;
+        escaped = false;
+        continue;
+      }
+      if (char === "\\" && quote !== "'") {
+        current += char;
+        escaped = true;
+        continue;
+      }
+      if (quote) {
+        current += char;
+        if (char === quote) quote = void 0;
+        continue;
+      }
+      if (char === "'" || char === '"') {
+        quote = char;
+        current += char;
+        continue;
+      }
+      const operator = sorted.find((item) => value.startsWith(item, index));
+      if (operator) {
+        if (current || pendingOperator !== void 0) {
+          result.push({ value: current.trim(), ...pendingOperator ? { operator: pendingOperator } : {} });
+        }
+        current = "";
+        pendingOperator = operator;
+        index += operator.length - 1;
+        continue;
+      }
+      current += char;
+    }
+    if (quote) throw new AgentError("SHELL_QUOTE_UNTERMINATED", "Unterminated quote");
+    if (current || pendingOperator !== void 0) {
+      result.push({ value: current.trim(), ...pendingOperator ? { operator: pendingOperator } : {} });
+    }
+    return result;
+  }
+  function expand(value, env, lastExitCode) {
+    return value.replace(/\$(\?|\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))/g, (_match, token, braced, plain) => {
+      if (token === "?") return String(lastExitCode);
+      const key = braced ?? plain;
+      return env[key] ?? "";
+    });
+  }
+  function encode(value) {
+    return new TextEncoder().encode(value);
+  }
+  function decode(value) {
+    return new TextDecoder().decode(value);
+  }
+  function truncate(value, max) {
+    return value.length > max ? `${value.slice(0, max)}
+\u2026(truncated)` : value;
+  }
+  function assertSupportedSyntax(value) {
+    let quote;
+    let escaped = false;
+    for (let index = 0; index < value.length; index += 1) {
+      const char = value[index];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\" && quote !== "'") {
+        escaped = true;
+        continue;
+      }
+      if (quote) {
+        if (char === quote) quote = void 0;
+        continue;
+      }
+      if (char === "'" || char === '"') {
+        quote = char;
+        continue;
+      }
+      if (char === "`" || char === "$" && value[index + 1] === "(" || (char === "<" || char === ">") && value[index + 1] === "(") {
+        throw new AgentError(
+          "SHELL_SYNTAX_UNSUPPORTED",
+          "Command substitution and process substitution are not supported"
+        );
+      }
+    }
+  }
+
+  // src/virtual/jobs.ts
+  var VirtualJobManager = class {
+    constructor(shell, options = {}) {
+      this.shell = shell;
+      this.storage = options.storage;
+      this.storageKey = options.storageKey ?? "tinyai:virtual-jobs:v1";
+      this.nextId = options.ids ?? (() => `job_${++this.sequence}`);
+      this.now = options.now ?? (() => Date.now());
+      this.maxConcurrent = Math.max(1, options.maxConcurrent ?? 2);
+      this.maxJobs = Math.max(1, options.maxJobs ?? 100);
+      this.maxOutputChars = Math.max(1e3, options.maxOutputChars ?? 1e6);
+    }
+    shell;
+    jobs = /* @__PURE__ */ new Map();
+    queue = [];
+    controllers = /* @__PURE__ */ new Map();
+    waiters = /* @__PURE__ */ new Map();
+    storage;
+    storageKey;
+    nextId;
+    now;
+    maxConcurrent;
+    maxJobs;
+    maxOutputChars;
+    loading;
+    running = 0;
+    sequence = 0;
+    async start(script, options = {}) {
+      await this.ensureLoaded();
+      const normalized = script.trim();
+      if (!normalized) {
+        throw new AgentError("JOB_SCRIPT_EMPTY", "Virtual job script cannot be empty");
+      }
+      this.prune();
+      const id = this.nextId();
+      const job = {
+        id,
+        script: normalized,
+        cwd: this.shell.currentDirectory,
+        status: "queued",
+        createdAt: this.now(),
+        stdout: "",
+        stderr: ""
+      };
+      this.jobs.set(id, job);
+      this.queue.push({ id, script: normalized, stdin: options.stdin ?? "" });
+      await this.persist();
+      this.drain();
+      return cloneJob(job);
+    }
+    async list() {
+      await this.ensureLoaded();
+      return [...this.jobs.values()].sort((left, right) => right.createdAt - left.createdAt).map(cloneJob);
+    }
+    async get(id) {
+      await this.ensureLoaded();
+      const job = this.jobs.get(id);
+      return job ? cloneJob(job) : void 0;
+    }
+    async read(id) {
+      const job = await this.get(id);
+      if (!job) throw notFound2(id);
+      return job;
+    }
+    async wait(id) {
+      await this.ensureLoaded();
+      const current = this.jobs.get(id);
+      if (!current) throw notFound2(id);
+      if (isTerminal(current.status)) return cloneJob(current);
+      await new Promise((resolve) => {
+        const waiters = this.waiters.get(id) ?? /* @__PURE__ */ new Set();
+        waiters.add(resolve);
+        this.waiters.set(id, waiters);
+      });
+      return cloneJob(this.jobs.get(id));
+    }
+    async cancel(id) {
+      await this.ensureLoaded();
+      const job = this.jobs.get(id);
+      if (!job) throw notFound2(id);
+      if (isTerminal(job.status)) return cloneJob(job);
+      if (job.status === "queued") {
+        const index = this.queue.findIndex((item) => item.id === id);
+        if (index >= 0) this.queue.splice(index, 1);
+        finish(job, "cancelled", this.now(), {
+          exitCode: 130,
+          error: "Cancelled before execution"
+        });
+        this.wake(id);
+        await this.persist();
+        return cloneJob(job);
+      }
+      this.controllers.get(id)?.abort();
+      return cloneJob(job);
+    }
+    async dispose() {
+      const active = [...this.jobs.values()].filter(
+        (job) => job.status === "queued" || job.status === "running"
+      );
+      await Promise.all(active.map((job) => this.cancel(job.id)));
+    }
+    drain() {
+      while (this.running < this.maxConcurrent && this.queue.length) {
+        const next = this.queue.shift();
+        const job = this.jobs.get(next.id);
+        if (!job || job.status !== "queued") continue;
+        this.running += 1;
+        void this.run(next).finally(() => {
+          this.running -= 1;
+          this.drain();
+        });
+      }
+    }
+    async run(item) {
+      const job = this.jobs.get(item.id);
+      if (!job) return;
+      const controller = new AbortController();
+      this.controllers.set(item.id, controller);
+      job.status = "running";
+      job.startedAt = this.now();
+      await this.persist();
+      try {
+        const result = await this.shell.execute(item.script, {
+          stdin: item.stdin,
+          signal: controller.signal
+        });
+        applyResult(job, result, this.now(), this.maxOutputChars);
+      } catch (error) {
+        const cancelled3 = controller.signal.aborted;
+        finish(job, cancelled3 ? "cancelled" : "failed", this.now(), {
+          exitCode: cancelled3 ? 130 : 1,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      } finally {
+        this.controllers.delete(item.id);
+        this.wake(item.id);
+        await this.persist();
+      }
+    }
+    wake(id) {
+      const waiters = this.waiters.get(id);
+      if (!waiters) return;
+      for (const resolve of waiters) resolve();
+      this.waiters.delete(id);
+    }
+    prune() {
+      if (this.jobs.size < this.maxJobs) return;
+      const removable = [...this.jobs.values()].filter((job) => isTerminal(job.status)).sort((left, right) => left.createdAt - right.createdAt);
+      while (this.jobs.size >= this.maxJobs && removable.length) {
+        this.jobs.delete(removable.shift().id);
+      }
+      if (this.jobs.size >= this.maxJobs) {
+        throw new AgentError(
+          "JOB_LIMIT_REACHED",
+          `Virtual job limit reached: ${this.maxJobs}`
+        );
+      }
+    }
+    async ensureLoaded() {
+      this.loading ??= this.load();
+      await this.loading;
+    }
+    async load() {
+      const raw = await this.storage?.get(this.storageKey);
+      if (!raw) return;
+      if (!isPersistedJobs(raw)) {
+        throw new AgentError(
+          "JOB_STORAGE_INVALID",
+          "Persisted virtual job state is invalid"
+        );
+      }
+      for (const persisted of raw.jobs) {
+        const job = cloneJob(persisted);
+        if (job.status === "queued" || job.status === "running") {
+          finish(job, "interrupted", this.now(), {
+            exitCode: 1,
+            error: "Runtime restarted before the job completed"
+          });
+        }
+        this.jobs.set(job.id, job);
+      }
+    }
+    async persist() {
+      if (!this.storage) return;
+      const state = {
+        schemaVersion: 1,
+        jobs: [...this.jobs.values()].map(cloneJob)
+      };
+      await this.storage.set(this.storageKey, state);
+    }
+  };
+  function applyResult(job, result, completedAt, maxOutputChars) {
+    job.stdout = truncate2(result.stdout, maxOutputChars);
+    job.stderr = truncate2(result.stderr, maxOutputChars);
+    job.exitCode = result.exitCode;
+    job.completedAt = completedAt;
+    job.status = result.exitCode === 0 ? "completed" : "failed";
+    if (result.exitCode !== 0) {
+      job.error = `Virtual command exited with code ${result.exitCode}`;
+    }
+  }
+  function finish(job, status, completedAt, details) {
+    job.status = status;
+    job.completedAt = completedAt;
+    job.exitCode = details.exitCode;
+    job.error = details.error;
+  }
+  function isTerminal(status) {
+    return status !== "queued" && status !== "running";
+  }
+  function cloneJob(job) {
+    return { ...job };
+  }
+  function truncate2(value, max) {
+    return value.length > max ? `${value.slice(0, max)}
+\u2026(truncated ${value.length - max} chars)` : value;
+  }
+  function notFound2(id) {
+    return new AgentError("JOB_NOT_FOUND", `Virtual job not found: ${id}`);
+  }
+  function isPersistedJobs(value) {
+    return Boolean(
+      value && typeof value === "object" && !Array.isArray(value) && value.schemaVersion === 1 && Array.isArray(value.jobs)
+    );
+  }
+
+  // src/virtual/sync.ts
+  var WorkspaceSyncService = class {
+    constructor(vfs, options = {}) {
+      this.vfs = vfs;
+      this.storage = options.storage;
+      this.storageKey = options.storageKey ?? "tinyai:workspace-sync:v1";
+    }
+    vfs;
+    baseline;
+    loading;
+    storage;
+    storageKey;
+    async initialize() {
+      this.loading ??= this.load();
+      await this.loading;
+    }
+    async captureBaseline(bundle) {
+      const parsed = parseWorkspaceBundle(bundle);
+      this.baseline = Object.fromEntries(
+        parsed.files.map((file) => [file.path, hashBase64(file.dataBase64)])
+      );
+      await this.persist();
+    }
+    async inspect(bundle) {
+      await this.initialize();
+      const parsed = parseWorkspaceBundle(bundle);
+      const baseline = this.baseline ?? {};
+      const local = await currentHashes(this.vfs);
+      const external = Object.fromEntries(
+        parsed.files.map((file) => [file.path, hashBase64(file.dataBase64)])
+      );
+      const paths = /* @__PURE__ */ new Set([
+        ...Object.keys(baseline),
+        ...Object.keys(local),
+        ...Object.keys(external)
+      ]);
+      const changes = [];
+      const conflicts = [];
+      for (const path of [...paths].sort()) {
+        const baseHash = baseline[path];
+        const localHash = local[path];
+        const externalHash = external[path];
+        if (baseHash === externalHash) continue;
+        const localChanged = baseHash !== localHash;
+        const externalChanged = baseHash !== externalHash;
+        if (localChanged && externalChanged && localHash !== externalHash) {
+          conflicts.push({
+            path,
+            ...baseHash ? { baselineHash: baseHash } : {},
+            ...localHash ? { localHash } : {},
+            ...externalHash ? { externalHash } : {}
+          });
+        }
+        changes.push({
+          path,
+          status: !baseHash && externalHash ? "added" : baseHash && !externalHash ? "deleted" : "modified"
+        });
+      }
+      return { changes, conflicts };
+    }
+    async apply(bundle, options = {}) {
+      await this.initialize();
+      const preview = await this.inspect(bundle);
+      const strategy = options.strategy ?? "reject";
+      if (preview.conflicts.length && strategy === "reject") {
+        throw new AgentError(
+          "WORKSPACE_SYNC_CONFLICT",
+          `Workspace sync conflicts: ${preview.conflicts.map((item) => item.path).join(", ")}`,
+          {
+            details: {
+              conflicts: preview.conflicts
+            }
+          }
+        );
+      }
+      const parsed = parseWorkspaceBundle(bundle);
+      const conflictPaths = new Set(preview.conflicts.map((item) => item.path));
+      const external = new Map(parsed.files.map((file) => [file.path, file]));
+      for (const change of preview.changes) {
+        if (options.signal?.aborted) {
+          throw new AgentError("WORKSPACE_SYNC_CANCELLED", "Workspace sync was cancelled");
+        }
+        if (strategy === "ours" && conflictPaths.has(change.path)) continue;
+        const file = external.get(change.path);
+        if (file) {
+          await this.vfs.write(
+            normalizeVirtualPath(file.path),
+            base64ToBytes6(file.dataBase64),
+            {
+              ...file.mode === void 0 ? {} : { mode: file.mode },
+              signal: options.signal
+            }
+          );
+        } else {
+          await this.vfs.remove(change.path, { recursive: true });
+        }
+      }
+      this.baseline = Object.fromEntries(
+        parsed.files.map((file) => [file.path, hashBase64(file.dataBase64)])
+      );
+      await this.persist();
+      return preview;
+    }
+    async load() {
+      const raw = await this.storage?.get(this.storageKey);
+      if (!raw) return;
+      if (!raw || typeof raw !== "object" || Array.isArray(raw) || raw.schemaVersion !== 1 || !raw.files || typeof raw.files !== "object") {
+        throw new AgentError("WORKSPACE_SYNC_STATE_INVALID", "Workspace sync state is invalid");
+      }
+      this.baseline = { ...raw.files };
+    }
+    async persist() {
+      if (!this.storage) return;
+      const state = {
+        schemaVersion: 1,
+        files: { ...this.baseline ?? {} }
+      };
+      await this.storage.set(this.storageKey, state);
+    }
+  };
+  async function currentHashes(vfs) {
+    const result = {};
+    for (const file of await vfs.list("", { recursive: true })) {
+      if (file.kind === "file") {
+        result[file.path] = hashVirtualBytes(await vfs.read(file.path));
+      }
+    }
+    return result;
+  }
+  function hashBase64(value) {
+    return hashVirtualBytes(base64ToBytes6(value));
+  }
+  function base64ToBytes6(value) {
+    const binary = atob(value);
+    const result = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      result[index] = binary.charCodeAt(index);
+    }
+    return result;
+  }
+
+  // src/host/capabilities.ts
+  var capabilityOrder = [
+    "storage",
+    "workspace.import",
+    "workspace.export",
+    "workspace.picker",
+    "terminal",
+    "process",
+    "pty",
+    "network",
+    "clock",
+    "scheduler",
+    "crypto",
+    "clone"
+  ];
+  function inspectHostCapabilities(host) {
+    const rawDeclared = host.descriptor?.capabilities;
+    const declarations = Array.isArray(rawDeclared) ? rawDeclared : [];
+    const declared = [
+      ...new Set(declarations.filter(isKnownCapability))
+    ];
+    const available = capabilityOrder.filter(
+      (capability) => isCapabilityImplemented(host, capability)
+    );
+    const diagnostics = [];
+    if (!host.descriptor?.id?.trim()) {
+      diagnostics.push({
+        capability: "storage",
+        severity: "error",
+        code: "HOST_DESCRIPTOR_INVALID",
+        message: "Host descriptor must include a non-empty id"
+      });
+    }
+    if (!Array.isArray(rawDeclared)) {
+      diagnostics.push({
+        capability: "storage",
+        severity: "error",
+        code: "HOST_DESCRIPTOR_INVALID",
+        message: "Host capabilities must be an array"
+      });
+    }
+    const seen = /* @__PURE__ */ new Set();
+    for (const capability of declarations) {
+      if (!isKnownCapability(capability)) {
+        diagnostics.push({
+          capability: String(capability),
+          severity: "error",
+          code: "HOST_CAPABILITY_UNKNOWN",
+          message: `Host declared an unknown capability: ${String(capability)}`
+        });
+        continue;
+      }
+      if (seen.has(capability)) {
+        diagnostics.push({
+          capability,
+          severity: "error",
+          code: "HOST_CAPABILITY_DUPLICATE",
+          message: `Host declared capability more than once: ${capability}`
+        });
+      }
+      seen.add(capability);
+    }
+    for (const capability of declared) {
+      if (!available.includes(capability)) {
+        diagnostics.push({
+          capability,
+          severity: "error",
+          code: "HOST_CAPABILITY_MISSING",
+          message: `Host declared ${capability} but did not provide its bridge`
+        });
+      }
+    }
+    for (const capability of available) {
+      if (!declared.includes(capability)) {
+        diagnostics.push({
+          capability,
+          severity: "warning",
+          code: "HOST_CAPABILITY_UNDECLARED",
+          message: `Host provides ${capability} but did not declare it`
+        });
+      }
+    }
+    return {
+      declared,
+      available,
+      diagnostics,
+      healthy: diagnostics.every((item) => item.severity !== "error")
+    };
+  }
+  function assertHostCapabilities(host, required) {
+    const report = inspectHostCapabilities(host);
+    const invalid2 = report.diagnostics.find(
+      (diagnostic) => diagnostic.severity === "error"
+    );
+    if (invalid2) {
+      throw new AgentError(invalid2.code, invalid2.message, {
+        details: { capability: invalid2.capability }
+      });
+    }
+    const missing = required.filter(
+      (capability) => !report.declared.includes(capability)
+    );
+    if (missing.length) {
+      throw new AgentError(
+        "HOST_CAPABILITY_MISSING",
+        `Host ${host.descriptor.id} is missing required capabilities: ${missing.join(", ")}`,
+        { details: { missing } }
+      );
+    }
+    return report;
+  }
+  function hasHostCapability(host, capability) {
+    return host.descriptor.capabilities.includes(capability) && isCapabilityImplemented(host, capability);
+  }
+  function isCapabilityImplemented(host, capability) {
+    switch (capability) {
+      case "storage":
+        return Boolean(host.storage);
+      case "workspace.import":
+        return typeof host.workspace?.importWorkspace === "function";
+      case "workspace.export":
+        return typeof host.workspace?.exportWorkspace === "function";
+      case "workspace.picker":
+        return typeof host.workspace?.pickWorkspace === "function";
+      case "terminal":
+        return Boolean(
+          host.terminal && typeof host.terminal.write === "function" && typeof host.terminal.onInput === "function"
+        );
+      case "process":
+        return typeof host.process?.execute === "function";
+      case "pty":
+        return typeof host.pty?.execute === "function";
+      case "network":
+        return typeof host.network?.request === "function";
+      case "clock":
+        return Boolean(
+          host.clock && typeof host.clock.now === "function" && typeof host.clock.setTimeout === "function" && typeof host.clock.clearTimeout === "function"
+        );
+      case "scheduler":
+        return Boolean(
+          host.scheduler && typeof host.scheduler.setTimeout === "function" && typeof host.scheduler.clearTimeout === "function" && typeof host.scheduler.queueMicrotask === "function"
+        );
+      case "crypto":
+        return typeof host.crypto?.digest === "function";
+      case "clone":
+        return typeof host.clone?.clone === "function";
+    }
+  }
+  function isKnownCapability(value) {
+    return typeof value === "string" && capabilityOrder.includes(value);
+  }
+
+  // src/host/memory-host.ts
+  var MemoryHostStorage = class {
+    values = /* @__PURE__ */ new Map();
+    async get(key) {
+      return structuredClone(this.values.get(key));
+    }
+    async set(key, value) {
+      this.values.set(key, structuredClone(value));
+    }
+    async remove(key) {
+      this.values.delete(key);
+    }
+    async list(prefix = "") {
+      return [...this.values.keys()].filter((key) => key.startsWith(prefix)).sort();
+    }
+  };
+  var MemoryHostBridge = class {
+    descriptor;
+    storage;
+    clock;
+    scheduler;
+    crypto;
+    clone;
+    constructor(options = {}) {
+      this.storage = options.storage ?? new MemoryHostStorage();
+      this.clock = options.clock ?? systemHostClock;
+      this.scheduler = {
+        setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
+        clearTimeout: (handle) => globalThis.clearTimeout(
+          handle
+        ),
+        queueMicrotask: (callback) => globalThis.queueMicrotask(callback)
+      };
+      this.crypto = options.crypto ?? systemHostCrypto;
+      this.clone = {
+        clone: options.clone ?? ((value) => structuredClone(value))
+      };
+      const provided = [
+        "storage",
+        "clock",
+        "scheduler",
+        "crypto",
+        "clone"
+      ];
+      this.descriptor = {
+        id: options.descriptor?.id ?? "memory-host",
+        platform: options.descriptor?.platform ?? "portable",
+        capabilities: options.descriptor?.capabilities ?? provided
+      };
+    }
+  };
+  var systemHostClock = {
+    now: () => Date.now(),
+    setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
+    clearTimeout: (handle) => globalThis.clearTimeout(
+      handle
+    )
+  };
+  var systemHostCrypto = {
+    async digest(algorithm, data) {
+      if (algorithm !== "SHA-256" || !globalThis.crypto?.subtle) {
+        throw new Error("SHA-256 is unavailable in this host");
+      }
+      const digest2 = await globalThis.crypto.subtle.digest(
+        algorithm,
+        toArrayBuffer(data)
+      );
+      return new Uint8Array(digest2);
+    },
+    randomBytes(length) {
+      const bytes = new Uint8Array(length);
+      globalThis.crypto.getRandomValues(bytes);
+      return bytes;
+    }
+  };
+  function toArrayBuffer(data) {
+    return data.buffer.slice(
+      data.byteOffset,
+      data.byteOffset + data.byteLength
+    );
+  }
+
+  // src/virtual/workspace.ts
+  var VirtualWorkspace = class _VirtualWorkspace {
+    host;
+    fs;
+    shell;
+    vcs;
+    jobs;
+    sync;
+    workspaceId;
+    parent;
+    forkBaseHashes;
+    id;
+    persistent;
+    providers;
+    now;
+    storageKey;
+    constructor(options = {}) {
+      this.host = options.host ?? new MemoryHostBridge();
+      assertHostCapabilities(this.host, []);
+      this.now = options.now ?? (() => this.host.clock?.now() ?? Date.now());
+      this.providers = [...options.providers ?? []];
+      this.storageKey = options.storageKey ?? "tinyai:workspace:v1";
+      this.id = options.storageKey ?? `workspace_${Math.random().toString(36).slice(2)}`;
+      this.workspaceId = this.id;
+      this.parent = options.parent;
+      this.forkBaseHashes = options.forkBaseHashes ? { ...options.forkBaseHashes } : void 0;
+      if (options.vfs) {
+        this.fs = options.vfs;
+        this.persistent = false;
+      } else if (hasHostCapability(this.host, "storage") && this.host.storage) {
+        this.fs = new PersistentFileSystem(
+          this.host.storage,
+          this.storageKey,
+          this.now
+        );
+        this.persistent = true;
+      } else {
+        this.fs = new MemoryFileSystem(this.now);
+        this.persistent = false;
+      }
+      this.shell = new VirtualShell(this.fs, {
+        ...options.shell ?? {},
+        providers: this.providers
+      });
+      this.vcs = new SnapshotVcs(this.fs, this.now, {
+        ...options.persistVcs !== false && hasHostCapability(this.host, "storage") && this.host.storage ? {
+          storage: this.host.storage,
+          storageKey: options.vcsStorageKey ?? `${this.storageKey}:vcs`
+        } : {}
+      });
+      this.jobs = new VirtualJobManager(this.shell, {
+        ...options.persistJobs !== false && hasHostCapability(this.host, "storage") && this.host.storage ? {
+          storage: this.host.storage,
+          storageKey: options.jobsStorageKey ?? `${this.storageKey}:jobs`
+        } : {},
+        now: this.now
+      });
+      this.sync = new WorkspaceSyncService(this.fs, {
+        ...hasHostCapability(this.host, "storage") && this.host.storage ? {
+          storage: this.host.storage,
+          storageKey: `${this.storageKey}:sync`
+        } : {}
+      });
+    }
+    async initialize(bundle, options = {}) {
+      if (bundle) await importWorkspaceBundle(this.fs, bundle, options);
+    }
+    async checkpoint(label) {
+      return this.vcs.commit(label);
+    }
+    async diff(fromId, toId) {
+      return this.vcs.diff(fromId, toId);
+    }
+    async restore(snapshotId) {
+      await this.vcs.restore(snapshotId);
+    }
+    async status() {
+      await this.vcs.initialize();
+      const entries = await this.fs.list("", { recursive: true });
+      return {
+        ...this.vcs.headId ? { head: this.vcs.headId } : {},
+        directory: this.shell.currentDirectory,
+        fileCount: entries.filter((item) => item.kind === "file").length,
+        directoryCount: entries.filter((item) => item.kind === "directory").length,
+        persistent: this.persistent
+      };
+    }
+    async exportBundle(options = {}) {
+      await this.vcs.initialize();
+      const bundle = await exportWorkspaceBundle(this.fs, {
+        now: this.now,
+        metadata: options.metadata,
+        ...this.vcs.headId ? { revision: this.vcs.headId } : {}
+      });
+      if (options.syncToHost) await this.syncToHost(bundle);
+      return bundle;
+    }
+    async syncToHost(bundle) {
+      if (!hasHostCapability(this.host, "workspace.export")) {
+        throw new AgentError(
+          "HOST_CAPABILITY_MISSING",
+          `Host ${this.host.descriptor.id} does not support workspace.export`
+        );
+      }
+      await this.host.workspace.exportWorkspace(
+        serializeWorkspaceBundle(bundle ?? await this.exportBundle())
+      );
+    }
+    async fork() {
+      const baseHashes = await currentHashes2(this.fs);
+      const overlay = this.vcs.fork();
+      return new _VirtualWorkspace({
+        host: this.host,
+        vfs: overlay,
+        now: this.now,
+        providers: this.providers,
+        persistVcs: false,
+        persistJobs: false,
+        parent: this,
+        forkBaseHashes: baseHashes,
+        shell: {
+          cwd: this.shell.currentDirectory,
+          env: { ...this.shell.environment }
+        }
+      });
+    }
+    async previewMerge(child) {
+      if (child.parent !== this || !(child.fs instanceof OverlayFileSystem)) {
+        throw new AgentError(
+          "WORKSPACE_MERGE_INVALID",
+          "Child workspace is not a fork of this workspace"
+        );
+      }
+      const changes = await child.fs.changes();
+      const base = child.forkBaseHashes ?? {};
+      const preview = {
+        parentWorkspaceId: this.workspaceId,
+        childWorkspaceId: child.workspaceId,
+        changes: [],
+        conflicts: []
+      };
+      for (const write of changes.written.sort((left, right) => left.path.localeCompare(right.path))) {
+        const parentData = await this.fs.read(write.path).catch(() => void 0);
+        const parentHash = parentData ? hashVirtualBytes(parentData) : void 0;
+        const childHash = hashVirtualBytes(write.data);
+        if (parentHash !== base[write.path] && parentHash !== childHash) {
+          preview.conflicts.push({
+            path: write.path,
+            reason: parentHash === void 0 ? "parent_deleted" : "parent_changed",
+            ...parentHash ? { parentHash } : {},
+            ...base[write.path] ? { forkBaseHash: base[write.path] } : {},
+            childHash
+          });
+        }
+        const patch = unifiedDiff(
+          parentData ?? new Uint8Array(),
+          write.data,
+          write.path
+        ).patch;
+        preview.changes.push({
+          path: write.path,
+          status: parentData ? "modified" : "added",
+          ...patch ? { patch } : {}
+        });
+      }
+      for (const path of changes.deleted.sort()) {
+        const parentData = await this.fs.read(path).catch(() => void 0);
+        const parentHash = parentData ? hashVirtualBytes(parentData) : void 0;
+        if (parentData && parentHash !== base[path]) {
+          preview.conflicts.push({
+            path,
+            reason: "parent_changed",
+            parentHash,
+            ...base[path] ? { forkBaseHash: base[path] } : {}
+          });
+        }
+        const patch = unifiedDiff(
+          parentData ?? new Uint8Array(),
+          new Uint8Array(),
+          path
+        ).patch;
+        preview.changes.push({
+          path,
+          status: "deleted",
+          ...patch ? { patch } : {}
+        });
+      }
+      return preview;
+    }
+    async applyMerge(child) {
+      const preview = await this.previewMerge(child);
+      if (preview.conflicts.length) {
+        throw new AgentError(
+          "WORKSPACE_MERGE_CONFLICT",
+          `Workspace merge conflicts: ${preview.conflicts.map((item) => item.path).join(", ")}`,
+          {
+            details: {
+              conflicts: preview.conflicts
+            }
+          }
+        );
+      }
+      if (!(child.fs instanceof OverlayFileSystem)) {
+        throw new AgentError("WORKSPACE_MERGE_INVALID", "Child workspace is not an overlay");
+      }
+      await this.vcs.applyChanges(await child.fs.changes());
+      await this.checkpoint(`merge:${child.workspaceId}`);
+      return preview;
+    }
+    async discardFork(child) {
+      if (child.parent !== this || !(child.fs instanceof OverlayFileSystem)) {
+        throw new AgentError("WORKSPACE_MERGE_INVALID", "Child workspace is not a fork");
+      }
+      await child.fs.discard();
+    }
+    async archive() {
+      return new ArchiveFileSystem(await this.exportBundle(), this.now);
+    }
+  };
+  async function currentHashes2(vfs) {
+    const hashes = {};
+    for (const file of await vfs.list("", { recursive: true })) {
+      if (file.kind === "file") {
+        hashes[file.path] = hashVirtualBytes(await vfs.read(file.path));
+      }
+    }
+    return hashes;
+  }
+  async function exportWorkspaceBundle(vfs, options = {}) {
+    const entries = await vfs.list("", { recursive: true });
+    const files = [];
+    const directories = [];
+    for (const entry of entries) {
+      if (entry.kind === "directory") {
+        directories.push(entry.path);
+        continue;
+      }
+      files.push({
+        path: entry.path,
+        dataBase64: bytesToBase645(await vfs.read(entry.path)),
+        mode: entry.mode,
+        modifiedAt: entry.modifiedAt
+      });
+    }
+    return {
+      format: WORKSPACE_BUNDLE_FORMAT,
+      schemaVersion: WORKSPACE_BUNDLE_SCHEMA_VERSION,
+      createdAt: options.now?.() ?? Date.now(),
+      ...options.revision ? { revision: options.revision } : {},
+      ...options.metadata ? { metadata: { ...options.metadata } } : {},
+      directories: directories.sort(),
+      files: files.sort((left, right) => left.path.localeCompare(right.path))
+    };
+  }
+  async function importWorkspaceBundle(vfs, input, options = {}) {
+    const bundle = parseWorkspaceBundle(input);
+    if (options.replace) {
+      const existing = await vfs.list("", { recursive: true });
+      for (const entry of existing.filter((item) => item.kind === "file").sort((left, right) => right.path.length - left.path.length)) {
+        await vfs.remove(entry.path);
+      }
+    }
+    for (const directory of bundle.directories) {
+      await vfs.mkdir(directory, { recursive: true });
+    }
+    for (const file of bundle.files) {
+      await vfs.write(file.path, base64ToBytes7(file.dataBase64), {
+        ...file.mode === void 0 ? {} : { mode: file.mode }
+      });
+    }
+    return cloneBundle(bundle);
+  }
+  function bytesToBase645(value) {
+    let binary = "";
+    for (const byte of value) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  }
+  function base64ToBytes7(value) {
+    const binary = atob(value);
+    const result = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      result[index] = binary.charCodeAt(index);
+    }
+    return result;
   }
 
   // src/core/extension-registry.ts
@@ -2092,9 +5173,9 @@
     }
     return parsed;
   }
-  function validateNode(schema2, value, path) {
-    if (!schema2 || typeof schema2 !== "object" || Array.isArray(schema2)) return;
-    const rule = schema2;
+  function validateNode(schema3, value, path) {
+    if (!schema3 || typeof schema3 !== "object" || Array.isArray(schema3)) return;
+    const rule = schema3;
     if (Array.isArray(rule.enum) && !rule.enum.some((candidate) => Object.is(candidate, value))) {
       throw new AgentError("TOOL_SCHEMA_INVALID", `${path} must be one of the declared enum values`);
     }
@@ -2138,11 +5219,11 @@
       throw new AgentError("TOOL_SCHEMA_INVALID", `${path} must be a boolean`);
     }
   }
-  function validateToolInput(schema2, input) {
-    validateNode(schema2, input, "arguments");
+  function validateToolInput(schema3, input) {
+    validateNode(schema3, input, "arguments");
   }
-  function validateJsonValue(schema2, value, path = "value") {
-    validateNode(schema2, value, path);
+  function validateJsonValue(schema3, value, path = "value") {
+    validateNode(schema3, value, path);
   }
 
   // src/core/subagent-coordinator.ts
@@ -2240,16 +5321,16 @@
           if (child.parentTaskId === taskId) await this.stop(child.taskId, true);
         }
       }
-      if (!isTerminal(task.status)) {
+      if (!isTerminal2(task.status)) {
         this.controllers.get(taskId)?.abort();
         await this.options.driver.stop(taskId);
-        const cancelled2 = {
+        const cancelled3 = {
           status: "cancelled",
           summary: "Cancelled by parent",
           artifacts: [],
           unresolved: []
         };
-        this.finish(task, cancelled2);
+        this.finish(task, cancelled3);
       }
     }
     list(parentTaskId) {
@@ -2300,7 +5381,7 @@
           try {
             validateJsonValue(profile.resultSchema, result.output ?? result.summary, "result");
           } catch (error) {
-            const invalid = {
+            const invalid2 = {
               ...result,
               status: "failed",
               summary: "Child result failed schema validation",
@@ -2314,8 +5395,8 @@
                 retryable: false
               }
             };
-            this.finish(task, invalid);
-            return completionCopy(invalid);
+            this.finish(task, invalid2);
+            return completionCopy(invalid2);
           }
         }
         this.finish(task, result);
@@ -2337,7 +5418,7 @@
       }).finally(() => this.controllers.delete(task.taskId));
     }
     finish(task, result) {
-      if (isTerminal(task.status)) return;
+      if (isTerminal2(task.status)) return;
       task.status = result.status;
       task.completedAt = this.now();
       task.result = completionCopy(result);
@@ -2410,7 +5491,7 @@
   function completionCopy(result) {
     return structuredClone(result);
   }
-  function isTerminal(status) {
+  function isTerminal2(status) {
     return status === "completed" || status === "failed" || status === "cancelled";
   }
 
@@ -3086,7 +6167,7 @@ ${skillListing}` : ""
           }
           this.reply(port, requestId, {
             metadata,
-            dataBase64: bytesToBase642(data)
+            dataBase64: bytesToBase646(data)
           });
           return;
         }
@@ -3154,7 +6235,7 @@ ${skillListing}` : ""
       return this.runtime;
     }
   };
-  function bytesToBase642(value) {
+  function bytesToBase646(value) {
     let binary = "";
     for (const byte of value) binary += String.fromCharCode(byte);
     return btoa(binary);
@@ -3187,7 +6268,7 @@ ${skillListing}` : ""
     constructor(tools, approval, options = {}) {
       this.approval = approval;
       this.options = options;
-      this.tools = new Map([...tools].map((tool3) => [tool3.name, tool3]));
+      this.tools = new Map([...tools].map((tool4) => [tool4.name, tool4]));
     }
     approval;
     options;
@@ -3207,8 +6288,8 @@ ${skillListing}` : ""
     }
     async execute(invocation) {
       const base = { callId: invocation.call.id, name: invocation.call.name };
-      const tool3 = this.tools.get(invocation.call.name);
-      if (!tool3) {
+      const tool4 = this.tools.get(invocation.call.name);
+      if (!tool4) {
         return {
           ...base,
           status: "failed",
@@ -3218,7 +6299,7 @@ ${skillListing}` : ""
       let input;
       try {
         input = parseToolArguments(invocation.call.arguments);
-        validateToolInput(tool3.parameters, input);
+        validateToolInput(tool4.parameters, input);
         this.assertActive(invocation.signal);
       } catch (error) {
         return { ...base, status: "failed", error: toStructuredError(error, "TOOL_VALIDATION_FAILED") };
@@ -3230,7 +6311,7 @@ ${skillListing}` : ""
             sessionId: invocation.sessionId,
             taskId: invocation.taskId,
             callId: invocation.call.id,
-            toolName: tool3.name,
+            toolName: tool4.name,
             input
           },
           invocation.signal
@@ -3241,14 +6322,14 @@ ${skillListing}` : ""
             status: "denied",
             error: new AgentError(
               "TOOL_HOOK_DENIED",
-              hook.reason ?? `A pre-tool hook denied ${tool3.name}`
+              hook.reason ?? `A pre-tool hook denied ${tool4.name}`
             ).toStructured()
           };
         }
         hookRequiresApproval = hook.decision === "ask";
         input = hook.input;
         try {
-          validateToolInput(tool3.parameters, input);
+          validateToolInput(tool4.parameters, input);
         } catch (error) {
           return {
             ...base,
@@ -3265,10 +6346,10 @@ ${skillListing}` : ""
             sessionId: invocation.sessionId,
             taskId: invocation.taskId,
             callId: invocation.call.id,
-            toolName: tool3.name,
-            capabilities: [...tool3.capabilities ?? []],
-            effect: tool3.effect ?? (tool3.risk === "read" ? "read" : "write"),
-            risk: tool3.risk,
+            toolName: tool4.name,
+            capabilities: [...tool4.capabilities ?? []],
+            effect: tool4.effect ?? (tool4.risk === "read" ? "read" : "write"),
+            risk: tool4.risk,
             input
           },
           invocation.signal
@@ -3280,13 +6361,13 @@ ${skillListing}` : ""
             status: "denied",
             error: new AgentError(
               "TOOL_POLICY_DENIED",
-              decision.reason ?? `${tool3.name} is denied by policy`
+              decision.reason ?? `${tool4.name} is denied by policy`
             ).toStructured()
           };
         }
         policyRequiresApproval = decision.decision === "ask";
       }
-      if (tool3.risk !== "read" && !this.options.policy || hookRequiresApproval || policyRequiresApproval) {
+      if (tool4.risk !== "read" && !this.options.policy || hookRequiresApproval || policyRequiresApproval) {
         let approved = false;
         try {
           approved = await this.approval.requestApproval(
@@ -3294,8 +6375,8 @@ ${skillListing}` : ""
               sessionId: invocation.sessionId,
               taskId: invocation.taskId,
               callId: invocation.call.id,
-              toolName: tool3.name,
-              risk: tool3.risk === "read" ? "write" : tool3.risk,
+              toolName: tool4.name,
+              risk: tool4.risk === "read" ? "write" : tool4.risk,
               input,
               ...actionDigest ? { actionDigest } : {}
             },
@@ -3308,13 +6389,13 @@ ${skillListing}` : ""
           return {
             ...base,
             status: "denied",
-            error: new AgentError("TOOL_DENIED", `User denied ${tool3.name}`).toStructured()
+            error: new AgentError("TOOL_DENIED", `User denied ${tool4.name}`).toStructured()
           };
         }
       }
       try {
-        const rawOutput = await this.executeWithTimeout(tool3, input, invocation);
-        if (tool3.outputSchema) validateToolInput(tool3.outputSchema, rawOutput);
+        const rawOutput = await this.executeWithTimeout(tool4, input, invocation);
+        if (tool4.outputSchema) validateToolInput(tool4.outputSchema, rawOutput);
         this.assertActive(invocation.signal);
         const output = await this.artifactize(rawOutput, invocation);
         const result = { ...base, status: "succeeded", output };
@@ -3333,8 +6414,8 @@ ${skillListing}` : ""
     assertActive(signal) {
       if (signal.aborted) throw new AgentError("TASK_CANCELLED", "Task was cancelled");
     }
-    async executeWithTimeout(tool3, input, invocation) {
-      const timeoutMs = tool3.timeoutMs ?? this.options.defaultTimeoutMs ?? 12e4;
+    async executeWithTimeout(tool4, input, invocation) {
+      const timeoutMs = tool4.timeoutMs ?? this.options.defaultTimeoutMs ?? 12e4;
       const controller = new AbortController();
       const abort = () => controller.abort();
       invocation.signal.addEventListener("abort", abort, { once: true });
@@ -3348,7 +6429,7 @@ ${skillListing}` : ""
       });
       try {
         return await Promise.race([
-          tool3.execute(input, { ...invocation, signal: controller.signal }),
+          tool4.execute(input, { ...invocation, signal: controller.signal }),
           timeout
         ]);
       } finally {
@@ -4420,7 +7501,7 @@ ${stringContent(item.content)}`
     }
     cancelTree(taskId, reason = "cancelled") {
       const task = this.required(taskId);
-      const cancelled2 = [];
+      const cancelled3 = [];
       const visit = (current) => {
         for (const childId of current.children) {
           const child = this.tasks.get(childId);
@@ -4431,11 +7512,11 @@ ${stringContent(item.content)}`
           current.revision += 1;
           current.updatedAt = this.now();
           current.checkpoint = { reason };
-          cancelled2.push(current.taskId);
+          cancelled3.push(current.taskId);
         }
       };
       visit(task);
-      return cancelled2;
+      return cancelled3;
     }
     list() {
       return [...this.tasks.values()].map(cloneTask);
@@ -5605,7 +8686,7 @@ ${lines.join("\n")}
   // src/adapters/browser-tools.ts
   function createBrowserTools(browser, dependencies = {}) {
     return [
-      tool2(
+      tool3(
         "list_tabs",
         "List inspectable Chrome tabs with stable ids, URLs, titles and current-session marker.",
         objectSchema({}),
@@ -5624,7 +8705,7 @@ ${lines.join("\n")}
           return tabs.map((tab) => ({ ...tab, current: tab.id === current }));
         }
       ),
-      tool2(
+      tool3(
         "list_frames",
         "List frames in the working tab, including frameId values usable by snapshot and frame-scoped tools.",
         objectSchema({}),
@@ -5638,14 +8719,14 @@ ${lines.join("\n")}
           return await browser.listFrames(tabId);
         }
       ),
-      tool2(
+      tool3(
         "switch_tab",
         "Make an existing tab the working tab for this session.",
         objectSchema({ tabId: { type: "string" } }, ["tabId"]),
         "write",
         ["browser:read"],
         async (input, invocation) => {
-          const tabId = requiredString2(input, "tabId");
+          const tabId = requiredString3(input, "tabId");
           if (dependencies.workspaceTabs) {
             await dependencies.workspaceTabs.switchTab(invocation.sessionId, tabId);
             return { tabId };
@@ -5660,7 +8741,7 @@ ${lines.join("\n")}
           return { tabId };
         }
       ),
-      tool2(
+      tool3(
         "new_tab",
         "Open a new tab and make it the working tab.",
         objectSchema({ url: { type: "string" } }),
@@ -5670,7 +8751,7 @@ ${lines.join("\n")}
           if (dependencies.workspaceTabs) {
             const tab2 = await dependencies.workspaceTabs.createTab(
               invocation.sessionId,
-              optionalString2(input, "url") ?? "about:blank"
+              optionalString3(input, "url") ?? "about:blank"
             );
             return tab2;
           }
@@ -5680,12 +8761,12 @@ ${lines.join("\n")}
               "Tabs are isolated conversations; use the browser tabs UI to open another tab session."
             );
           }
-          const tab = await browser.createTab(optionalString2(input, "url") ?? "about:blank");
+          const tab = await browser.createTab(optionalString3(input, "url") ?? "about:blank");
           await browser.setWorkingTab(invocation.sessionId, tab.id);
           return tab;
         }
       ),
-      tool2(
+      tool3(
         "navigate",
         "Navigate the working tab to a URL and wait for readiness.",
         objectSchema({ url: { type: "string" } }, ["url"]),
@@ -5695,12 +8776,12 @@ ${lines.join("\n")}
           const tabId = await workingTab(browser, invocation.sessionId);
           return await browser.navigate(
             tabId,
-            requiredString2(input, "url"),
+            requiredString3(input, "url"),
             invocation.signal
           );
         }
       ),
-      tool2(
+      tool3(
         "snapshot",
         "Capture a compact accessibility snapshot with @eN refs for interactive elements.",
         objectSchema({
@@ -5713,12 +8794,12 @@ ${lines.join("\n")}
           const tabId = await workingTab(browser, invocation.sessionId);
           return await browser.snapshot(tabId, {
             interactiveOnly: optionalBoolean(input, "interactive") === true,
-            frameId: optionalString2(input, "frameId"),
+            frameId: optionalString3(input, "frameId"),
             signal: invocation.signal
           });
         }
       ),
-      tool2(
+      tool3(
         "find",
         "Find accessibility nodes by name substring and return clickable refs where available.",
         objectSchema({
@@ -5731,13 +8812,13 @@ ${lines.join("\n")}
           const tabId = await workingTab(browser, invocation.sessionId);
           const snapshot = await browser.snapshot(tabId, {
             signal: invocation.signal,
-            frameId: optionalString2(input, "frameId")
+            frameId: optionalString3(input, "frameId")
           });
-          const query = requiredString2(input, "query").toLowerCase();
+          const query = requiredString3(input, "query").toLowerCase();
           return snapshot.nodes.filter((node) => node.name.toLowerCase().includes(query)).slice(0, 20);
         }
       ),
-      tool2(
+      tool3(
         "read_page",
         "Read visible text from the working tab.",
         objectSchema({ maxChars: { type: "integer" }, frameId: { type: "string" } }),
@@ -5745,17 +8826,17 @@ ${lines.join("\n")}
         ["browser:read"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const maxChars = optionalNumber(input, "maxChars") ?? 3e4;
+          const maxChars = optionalNumber2(input, "maxChars") ?? 3e4;
           return {
             tabId,
             text: await browser.readText(tabId, maxChars, {
-              frameId: optionalString2(input, "frameId"),
+              frameId: optionalString3(input, "frameId"),
               signal: invocation.signal
             })
           };
         }
       ),
-      tool2(
+      tool3(
         "evaluate",
         "Evaluate JavaScript in the working tab. This is a high-risk capability.",
         objectSchema({
@@ -5766,14 +8847,14 @@ ${lines.join("\n")}
         ["browser:script"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const output = await browser.evaluate(tabId, requiredString2(input, "code"), {
-            frameId: optionalString2(input, "frameId"),
+          const output = await browser.evaluate(tabId, requiredString3(input, "code"), {
+            frameId: optionalString3(input, "frameId"),
             signal: invocation.signal
           });
           return output === void 0 ? null : output;
         }
       ),
-      tool2(
+      tool3(
         "click",
         "Click an element by @eN snapshot ref or CSS selector.",
         targetSchema(),
@@ -5785,7 +8866,7 @@ ${lines.join("\n")}
           return { clicked: true };
         }
       ),
-      tool2(
+      tool3(
         "mouse_click",
         "Click an element center with real CDP mouse events.",
         targetSchema(),
@@ -5796,7 +8877,7 @@ ${lines.join("\n")}
           return browser.mouseClick(tabId, targetFrom(input));
         }
       ),
-      tool2(
+      tool3(
         "hover",
         "Move the real mouse over an element to reveal hover content.",
         targetSchema(),
@@ -5807,7 +8888,7 @@ ${lines.join("\n")}
           return browser.hover(tabId, targetFrom(input));
         }
       ),
-      tool2(
+      tool3(
         "fill",
         "Fill an input, textarea or contentEditable element by ref or selector.",
         {
@@ -5824,11 +8905,11 @@ ${lines.join("\n")}
         ["browser:interact"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          await browser.fill(tabId, targetFrom(input), requiredString2(input, "value"));
+          await browser.fill(tabId, targetFrom(input), requiredString3(input, "value"));
           return { filled: true };
         }
       ),
-      tool2(
+      tool3(
         "type_text",
         "Insert text at the currently focused element.",
         objectSchema({ text: { type: "string" } }, ["text"]),
@@ -5839,13 +8920,13 @@ ${lines.join("\n")}
           await browser.cdp(
             tabId,
             "Input.insertText",
-            { text: requiredString2(input, "text") },
+            { text: requiredString3(input, "text") },
             invocation.signal
           );
           return { typed: true };
         }
       ),
-      tool2(
+      tool3(
         "select_option",
         "Select options in a native select control by value or visible label.",
         objectSchema({
@@ -5861,7 +8942,7 @@ ${lines.join("\n")}
           return await browser.selectOption(tabId, targetFrom(input), values);
         }
       ),
-      tool2(
+      tool3(
         "drag",
         "Drag one element to another using real mouse events.",
         objectSchema({
@@ -5873,22 +8954,22 @@ ${lines.join("\n")}
         ["browser:interact"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const frameId = optionalString2(input, "frameId");
+          const frameId = optionalString3(input, "frameId");
           await browser.drag(
             tabId,
             {
-              selector: requiredString2(input, "from"),
+              selector: requiredString3(input, "from"),
               ...frameId ? { frameId } : {}
             },
             {
-              selector: requiredString2(input, "to"),
+              selector: requiredString3(input, "to"),
               ...frameId ? { frameId } : {}
             }
           );
           return { dragged: true };
         }
       ),
-      tool2(
+      tool3(
         "scroll",
         "Scroll the page by one viewport, to an edge, selector or text target.",
         objectSchema({
@@ -5902,19 +8983,19 @@ ${lines.join("\n")}
         ["browser:read"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const to = optionalString2(input, "to");
-          const direction = optionalString2(input, "direction");
+          const to = optionalString3(input, "to");
+          const direction = optionalString3(input, "direction");
           return await browser.scroll(tabId, {
             ...to === "top" || to === "bottom" ? { to } : {},
             ...direction === "up" || direction === "down" ? { direction } : {},
-            ...optionalString2(input, "selector") ? { selector: optionalString2(input, "selector") } : {},
-            ...optionalString2(input, "text") ? { text: optionalString2(input, "text") } : {},
-            ...optionalString2(input, "frameId") ? { frameId: optionalString2(input, "frameId") } : {},
+            ...optionalString3(input, "selector") ? { selector: optionalString3(input, "selector") } : {},
+            ...optionalString3(input, "text") ? { text: optionalString3(input, "text") } : {},
+            ...optionalString3(input, "frameId") ? { frameId: optionalString3(input, "frameId") } : {},
             signal: invocation.signal
           });
         }
       ),
-      tool2(
+      tool3(
         "send_keys",
         "Dispatch a keyboard key such as Enter, Tab or Escape.",
         objectSchema({ keys: { type: "string" } }, ["keys"]),
@@ -5922,12 +9003,12 @@ ${lines.join("\n")}
         ["browser:interact"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const keys = requiredString2(input, "keys").split(/\s+/).filter(Boolean);
+          const keys = requiredString3(input, "keys").split(/\s+/).filter(Boolean);
           for (const key of keys) await sendKey(browser, tabId, key, invocation.signal);
           return { sent: keys };
         }
       ),
-      tool2(
+      tool3(
         "wait",
         "Wait for text, text disappearance or a selector in the working tab.",
         objectSchema({
@@ -5945,18 +9026,18 @@ ${lines.join("\n")}
             met: await browser.waitFor(
               tabId,
               {
-                text: optionalString2(input, "text"),
-                textGone: optionalString2(input, "text_gone"),
-                selector: optionalString2(input, "selector"),
-                timeoutMs: optionalNumber(input, "timeout_ms")
+                text: optionalString3(input, "text"),
+                textGone: optionalString3(input, "text_gone"),
+                selector: optionalString3(input, "selector"),
+                timeoutMs: optionalNumber2(input, "timeout_ms")
               },
               invocation.signal,
-              { frameId: optionalString2(input, "frameId") }
+              { frameId: optionalString3(input, "frameId") }
             )
           };
         }
       ),
-      tool2(
+      tool3(
         "screenshot",
         "Capture the working tab viewport as a PNG data URL.",
         objectSchema({ format: { type: "string", enum: ["png", "jpeg"] } }),
@@ -5964,11 +9045,11 @@ ${lines.join("\n")}
         ["browser:read"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const format = optionalString2(input, "format") === "jpeg" ? "jpeg" : "png";
+          const format = optionalString3(input, "format") === "jpeg" ? "jpeg" : "png";
           return await browser.screenshot(tabId, format);
         }
       ),
-      tool2(
+      tool3(
         "upload",
         "Place base64 files into a page file input.",
         objectSchema({
@@ -5983,16 +9064,16 @@ ${lines.join("\n")}
           const files = requiredArray(input, "files").map((entry) => {
             const file = isObject(entry);
             return {
-              name: requiredString2(file, "name"),
-              type: optionalString2(file, "type") ?? "application/octet-stream",
-              base64: requiredString2(file, "base64")
+              name: requiredString3(file, "name"),
+              type: optionalString3(file, "type") ?? "application/octet-stream",
+              base64: requiredString3(file, "base64")
             };
           });
-          const target = optionalString2(input, "ref") || optionalString2(input, "selector") ? targetFrom(input) : void 0;
+          const target = optionalString3(input, "ref") || optionalString3(input, "selector") ? targetFrom(input) : void 0;
           return { uploaded: await browser.upload(tabId, target, files) };
         }
       ),
-      tool2(
+      tool3(
         "save_as_pdf",
         "Render the current page as PDF and save it through the configured download port.",
         objectSchema({
@@ -6009,10 +9090,10 @@ ${lines.join("\n")}
           const result = await browser.printToPdf(tabId, {
             paperFormat: enumValue(input, "paper_format", ["letter", "legal", "a4", "a3", "tabloid"]),
             landscape: optionalBoolean(input, "landscape"),
-            scale: optionalNumber(input, "scale"),
+            scale: optionalNumber2(input, "scale"),
             printBackground: optionalBoolean(input, "print_background")
           });
-          const name = `${(optionalString2(input, "file_name") ?? "page").replace(/\.pdf$/i, "").replace(/[\\/:*?"<>|]+/g, "-")}.pdf`;
+          const name = `${(optionalString3(input, "file_name") ?? "page").replace(/\.pdf$/i, "").replace(/[\\/:*?"<>|]+/g, "-")}.pdf`;
           if (dependencies.download) {
             await dependencies.download(name, "application/pdf", result.dataBase64);
             return { saved: name, bytes: result.bytes };
@@ -6024,7 +9105,7 @@ ${lines.join("\n")}
           };
         }
       ),
-      tool2(
+      tool3(
         "dialog",
         "Inspect, accept or dismiss a blocking JavaScript dialog.",
         objectSchema({
@@ -6035,14 +9116,14 @@ ${lines.join("\n")}
         ["browser:interact"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const action = requiredString2(input, "action");
+          const action = requiredString3(input, "action");
           if (action !== "status" && action !== "accept" && action !== "dismiss") {
             throw new AgentError("TOOL_ARGUMENTS_INVALID", "dialog.action is invalid");
           }
-          return await browser.dialog(tabId, action, optionalString2(input, "text"));
+          return await browser.dialog(tabId, action, optionalString3(input, "text"));
         }
       ),
-      tool2(
+      tool3(
         "network",
         "Start, stop, list or read captured network requests.",
         objectSchema({
@@ -6054,11 +9135,11 @@ ${lines.join("\n")}
         ["browser:network"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const cmd = requiredString2(input, "cmd");
+          const cmd = requiredString3(input, "cmd");
           if (cmd === "detail") {
             return await browser.network(tabId, {
               cmd: "detail",
-              requestId: requiredString2(input, "requestId")
+              requestId: requiredString3(input, "requestId")
             });
           }
           if (cmd !== "start" && cmd !== "stop" && cmd !== "list") {
@@ -6066,11 +9147,11 @@ ${lines.join("\n")}
           }
           return await browser.network(tabId, {
             cmd,
-            filter: optionalString2(input, "filter")
+            filter: optionalString3(input, "filter")
           });
         }
       ),
-      tool2(
+      tool3(
         "close_tab",
         "Close the working tab and clear the session binding.",
         objectSchema({}),
@@ -6082,14 +9163,14 @@ ${lines.join("\n")}
           return { closed: tabId };
         }
       ),
-      tool2(
+      tool3(
         "find_tab",
         "Find an inspectable tab by URL/domain and make it the working tab.",
         objectSchema({ url: { type: "string" } }, ["url"]),
         "write",
         ["browser:read"],
         async (input, invocation) => {
-          const needle = requiredString2(input, "url").toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+          const needle = requiredString3(input, "url").toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
           const tab = (await browser.listTabs()).find((candidate) => {
             const value = String(candidate.url ?? "").toLowerCase();
             const domain = value.replace(/^https?:\/\//, "").split("/")[0];
@@ -6100,7 +9181,7 @@ ${lines.join("\n")}
           return tab;
         }
       ),
-      tool2(
+      tool3(
         "close_session",
         "Close browser resources owned by this task session.",
         objectSchema({}),
@@ -6111,7 +9192,7 @@ ${lines.join("\n")}
           return report;
         }
       ),
-      tool2(
+      tool3(
         "await_user_action",
         "Pause for a manual login, captcha or confirmation, then continue after explicit user action.",
         objectSchema({ reason: { type: "string" } }, ["reason"]),
@@ -6125,7 +9206,7 @@ ${lines.join("\n")}
             );
           }
           const result = await dependencies.handoff.requestHandoff(
-            requiredString2(input, "reason"),
+            requiredString3(input, "reason"),
             {
               sessionId: invocation.sessionId,
               taskId: invocation.taskId,
@@ -6141,7 +9222,7 @@ ${lines.join("\n")}
       )
     ];
   }
-  function tool2(name, description, parameters, risk, capabilities, execute) {
+  function tool3(name, description, parameters, risk, capabilities, execute) {
     return {
       name,
       description,
@@ -6165,18 +9246,18 @@ ${lines.join("\n")}
     }
     return value;
   }
-  function requiredString2(input, key) {
+  function requiredString3(input, key) {
     const value = input[key];
     if (typeof value !== "string" || !value.trim()) {
       throw new AgentError("TOOL_ARGUMENTS_INVALID", `${key} must be a non-empty string`);
     }
     return value;
   }
-  function optionalString2(input, key) {
+  function optionalString3(input, key) {
     const value = input[key];
     return typeof value === "string" && value.trim() ? value : void 0;
   }
-  function optionalNumber(input, key) {
+  function optionalNumber2(input, key) {
     return typeof input[key] === "number" ? input[key] : void 0;
   }
   function optionalBoolean(input, key) {
@@ -6192,9 +9273,9 @@ ${lines.join("\n")}
     return typeof value === "string" && values.includes(value) ? value : void 0;
   }
   function targetFrom(input) {
-    const ref = optionalString2(input, "ref");
-    const selector = optionalString2(input, "selector");
-    const frameId = optionalString2(input, "frameId");
+    const ref = optionalString3(input, "ref");
+    const selector = optionalString3(input, "selector");
+    const frameId = optionalString3(input, "frameId");
     if (!ref && !selector) {
       throw new AgentError("BROWSER_TARGET_INVALID", "A ref or selector is required");
     }
@@ -6517,24 +9598,24 @@ ${lines.join("\n")}
           instructions: stringValue(item.instructions),
           source,
           ...stringValue(item.sourceId) ? { sourceId: stringValue(item.sourceId) } : {},
-          skills: stringArray(item.skills),
+          skills: stringArray2(item.skills),
           tools: {
-            ...Array.isArray(item.allowTools) ? { allow: stringArray(item.allowTools) } : {},
-            ...Array.isArray(item.denyTools) ? { deny: stringArray(item.denyTools) } : {}
+            ...Array.isArray(item.allowTools) ? { allow: stringArray2(item.allowTools) } : {},
+            ...Array.isArray(item.denyTools) ? { deny: stringArray2(item.denyTools) } : {}
           },
-          mcpServers: stringArray(item.mcpServers),
+          mcpServers: stringArray2(item.mcpServers),
           permissions: {
-            capabilities: stringArray(item.capabilities),
+            capabilities: stringArray2(item.capabilities),
             effects: ["read", "write", "execute", "network"].filter(
-              (effect) => stringArray(item.effects).includes(effect)
+              (effect) => stringArray2(item.effects).includes(effect)
             ),
-            deniedCapabilities: stringArray(item.deniedCapabilities),
-            deniedTools: stringArray(item.deniedTools)
+            deniedCapabilities: stringArray2(item.deniedCapabilities),
+            deniedTools: stringArray2(item.deniedTools)
           },
           contextMode: item.contextMode === "fork" || item.contextMode === "artifacts" ? item.contextMode : "fresh",
           execution: {
             defaultMode: item.executionMode === "background" || item.executionMode === "isolated-worktree" || item.executionMode === "sandbox" ? item.executionMode : "foreground",
-            allowedModes: stringArray(item.allowedModes).length > 0 ? stringArray(item.allowedModes).filter(
+            allowedModes: stringArray2(item.allowedModes).length > 0 ? stringArray2(item.allowedModes).filter(
               (mode) => ["foreground", "background", "isolated-worktree", "sandbox"].includes(mode)
             ) : ["foreground", "background"]
           },
@@ -6585,7 +9666,7 @@ ${lines.join("\n")}
   function stringValue(value) {
     return typeof value === "string" ? value.trim() : "";
   }
-  function stringArray(value) {
+  function stringArray2(value) {
     return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
   }
   function positiveInteger(value, fallback) {
@@ -6630,7 +9711,7 @@ ${lines.join("\n")}
       const child = this.child(taskId);
       const prompt = this.prompts.get(taskId);
       if (!prompt) throw new Error(`Child prompt missing: ${taskId}`);
-      if (signal.aborted) return cancelled();
+      if (signal.aborted) return cancelled2();
       const ack = await child.runtime.command(
         this.command(child, `child_command_${this.options.ids.next("sequence")}`, prompt)
       );
@@ -6771,7 +9852,7 @@ ${lines.join("\n")}
       ...ack.error ? { error: ack.error } : {}
     };
   }
-  function cancelled() {
+  function cancelled2() {
     return {
       status: "cancelled",
       summary: "Cancelled",
@@ -7154,9 +10235,9 @@ ${lines.join("\n")}
     tabs;
     browser;
     chromeApi;
-    onTabRemoved = (tabId, info) => {
+    onTabRemoved = (tabId, info2) => {
       void this.tabs.forget({
-        windowId: info.windowId,
+        windowId: info2.windowId,
         tabId: String(tabId)
       });
     };
@@ -7176,8 +10257,8 @@ ${lines.join("\n")}
       }
       if (request.type === "select_tab") {
         await this.browser.setWorkingTab(
-          requiredString3(request, "sessionId"),
-          requiredString3(request, "tabId")
+          requiredString4(request, "sessionId"),
+          requiredString4(request, "tabId")
         );
         return { handled: true, data: true };
       }
@@ -7190,7 +10271,7 @@ ${lines.join("\n")}
       if (request.type === "bind_tab_session") {
         const binding = await this.tabs.bind(
           activationContext(request),
-          requiredString3(request, "sessionId")
+          requiredString4(request, "sessionId")
         );
         return {
           handled: true,
@@ -7230,7 +10311,7 @@ ${lines.join("\n")}
   };
   function activationContext(request) {
     const windowId = Number(request.windowId);
-    const tabId = requiredString3(request, "tabId");
+    const tabId = requiredString4(request, "tabId");
     if (!Number.isFinite(windowId)) {
       throw new AgentError("TAB_CONTEXT_INVALID", "A valid windowId is required");
     }
@@ -7241,7 +10322,7 @@ ${lines.join("\n")}
       ...Number.isFinite(groupId) && groupId >= 0 ? { groupId } : {}
     };
   }
-  function requiredString3(request, key) {
+  function requiredString4(request, key) {
     const value = request[key];
     if (typeof value !== "string" || !value) {
       throw new AgentError(
@@ -7521,6 +10602,13 @@ ${lines.join("\n")}
     };
   }
   async function createChromeRuntimeBundle(options = {}) {
+    const virtualWorkspace = new VirtualWorkspace({
+      host: new ChromeHostBridge({
+        storage: options.storage,
+        id: "tinyai-chrome-virtual-workspace"
+      }),
+      storageKey: "tinyai:virtual-workspace:v1"
+    });
     const storage = options.storage ?? chromeLocalStorage();
     const sessionStore = new ChromeSessionStore({
       storage: chromeStorageForSessions(storage)
@@ -7696,6 +10784,11 @@ ${lines.join("\n")}
         });
       },
       additionalTools: [
+        ...createVirtualWorkspaceTools(virtualWorkspace).map((definition) => ({
+          definition,
+          source: "builtin",
+          sourceId: "virtual-workspace"
+        })),
         ...subagentTools.map((definition) => ({
           definition,
           source: "builtin",
@@ -7749,6 +10842,7 @@ ${lines.join("\n")}
         unsubscribeChildren();
         approval.dispose();
         await coordinator.dispose();
+        await virtualWorkspace.jobs.dispose();
         await mainWorkspace.dispose();
         await Promise.all(mcpClients.map((client) => client.close()));
       }

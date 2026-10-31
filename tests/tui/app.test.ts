@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { events, text } from '../harness/fakes';
 import { createTestWorkspace } from '../harness/workspace';
 import {
@@ -91,6 +91,17 @@ describe('TuiApp and renderer', () => {
     await app.dispose();
   });
 
+  it('removes terminal control sequences from model and tool output', async () => {
+    const { app, runtime } = await appWithAnswer('\u001b[2Junsafe\u001b]0;title\u0007');
+    await app.handleInput('render safely\r');
+    await runtime.waitForSessionIdle(app.sessionsController.active!);
+    const screen = app.render(80, 24).join('\n');
+    expect(screen).not.toContain('\u001b');
+    expect(screen).not.toContain('\u0007');
+    expect(screen).toContain('unsafe');
+    await app.dispose();
+  });
+
   it('opens workspace diff evidence in a temporary review view', async () => {
     const { app, runtime } = await appWithAnswer('done', {
       review: async () => ({
@@ -153,6 +164,52 @@ describe('TuiApp and renderer', () => {
     await app.handleInput('\x1b');
     expect(app.sessionsController.active).toBe(parentSession);
     expect(app.routes.current.kind).toBe('agents');
+    await app.dispose();
+  });
+
+  it('requires merge preview before applying a child workspace', async () => {
+    const previewMerge = vi.fn(async () => ({
+      from: 'child-fork',
+      to: 'workspace-child',
+      files: [
+        {
+          path: 'src/child.ts',
+          status: 'added' as const,
+          patch: '@@ -0,0 +1 @@\n+child\n',
+        },
+      ],
+      additions: 1,
+      deletions: 0,
+    }));
+    const applyMerge = vi.fn(async () => undefined);
+    const { app, runtime } = await appWithAnswer('parent done', {
+      agentWorkspace: { previewMerge, applyMerge },
+    });
+    await app.handleInput('coordinate merge\r');
+    await runtime.waitForSessionIdle(app.sessionsController.active!);
+    const parentSession = app.sessionsController.active!;
+    const parentTask = runtime
+      .getProjection(parentSession)
+      .rows.find((row) => row.kind === 'user')!.productTurnId;
+    await runtime.ensureSessionReady('child_merge_session');
+    runtime.updateChildTask(parentTask, {
+      taskId: 'child_merge_task',
+      sessionId: 'child_merge_session',
+      parentTaskId: parentTask,
+      parentSessionId: parentSession,
+      profileName: 'merge-worker',
+      status: 'completed',
+      executionMode: 'background',
+    });
+    await app.handleInput('\x07a');
+    expect(app.render(80, 24).join('\n')).toContain('Preview this merge with M');
+    expect(applyMerge).not.toHaveBeenCalled();
+    await app.handleInput('m');
+    expect(previewMerge).toHaveBeenCalledWith('child_merge_task');
+    expect(app.render(100, 24).join('\n')).toContain('src/child.ts');
+    await app.handleInput('\x1b');
+    await app.handleInput('a\r');
+    expect(applyMerge).toHaveBeenCalledWith('child_merge_task');
     await app.dispose();
   });
 });

@@ -93,6 +93,16 @@ describe.each(factories)('$name contract', ({ create }) => {
     expect(decoder.decode(await reopen().read('persisted.txt'))).toBe('saved');
   });
 
+  it('supports byte-range reads without changing the file', async () => {
+    const { vfs } = create();
+    await vfs.write('range.txt', encoder.encode('0123456789'));
+    expect(decoder.decode(await vfs.read('range.txt', { offset: 3, length: 4 }))).toBe(
+      '3456'
+    );
+    expect(decoder.decode(await vfs.read('range.txt', { offset: 8 }))).toBe('89');
+    expect(decoder.decode(await vfs.read('range.txt'))).toBe('0123456789');
+  });
+
   it('serializes concurrent writes in invocation order for persistent backends', async () => {
     const storage = new MemoryKeyValueStore();
     const first = new PersistentFileSystem(storage, 'ordered', () => 10);

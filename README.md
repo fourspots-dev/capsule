@@ -227,6 +227,10 @@ npm run test:soak
 npm run test:soak:8h
 ```
 
+The 8-hour profile defaults to one workload cycle per second. For a shorter
+smoke run, set `TINYAI_SOAK_DURATION_MS` and optionally
+`TINYAI_SOAK_INTERVAL_MS`.
+
 ## Compatibility migration
 
 On first startup, tinyai performs a one-time migration from the removed legacy runtime:

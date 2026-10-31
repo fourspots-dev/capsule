@@ -7,7 +7,11 @@ import type {
   TuiReviewSnapshot,
   TuiRoute,
 } from './types';
-import { displayWidth, sanitizeSingleLine, truncateDisplay } from './text';
+import {
+  displayWidth,
+  sanitizeSingleLine,
+  truncateDisplay,
+} from './text';
 
 export interface TuiRenderSnapshot {
   route: TuiRoute;
@@ -41,7 +45,9 @@ export function renderTui(
   const body = renderBody(view, safeWidth, safeHeight - 1);
   return [
     pad(status, safeWidth),
-    ...body.map((line) => pad(truncateDisplay(line, safeWidth), safeWidth)),
+    ...body.map((line) =>
+      pad(truncateDisplay(sanitizeSingleLine(line), safeWidth), safeWidth)
+    ),
   ].slice(0, safeHeight);
 }
 
@@ -155,6 +161,7 @@ function renderAgents(
       )
     );
   }
+  if (view.statusMessage) lines.push('', view.statusMessage);
   while (lines.length < height - 1) lines.push('');
   lines.push('Enter view · S stop · M merge preview · A apply merge · F filter · Esc back');
   return lines.slice(-height);
