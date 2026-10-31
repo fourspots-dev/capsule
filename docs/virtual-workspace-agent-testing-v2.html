@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tinyai 虚拟 Workspace 通用 Coding Agent 测试方案 V2</title>
+<style>
+:root{--bg:#f4f5f7;--paper:#fff;--text:#191a1e;--muted:#6f7179;--line:#e2e3e8;--accent:#5145d8;--ok:#137a4b;--warn:#986100;--danger:#b42318;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.72 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1230px;margin:auto;padding:36px 24px 100px}
+.hero{padding:38px;border-radius:26px;background:radial-gradient(circle at 90% 10%,#ada5ff 0,transparent 27%),linear-gradient(135deg,#151520,#30299a 61%,#6859ea);color:#fff}.hero small{letter-spacing:.11em;opacity:.72}.hero h1{font-size:37px;line-height:1.2;margin:12px 0}.hero p{max-width:930px;margin:0;color:#e8e5ff}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}
+nav{position:sticky;top:0;z-index:5;display:flex;gap:14px;overflow:auto;margin:18px 0;padding:10px 14px;border:1px solid var(--line);border-radius:13px;background:#f4f5f7ed;backdrop-filter:blur(12px)}nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}
+section{margin:18px 0;padding:25px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:22px;margin:0 0 14px}h3{font-size:16px;margin:21px 0 8px}p{color:#45464c}.muted{color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafafa}.card h3{margin:0 0 8px}.card p{margin:0}.card ul{margin:8px 0 0;padding-left:18px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafafa;color:var(--muted);font-weight:600}
+code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{padding:16px;overflow:auto;border-radius:11px;background:#181820;color:#edecff;font:12px/1.6 var(--mono)}
+.rule{padding:12px 14px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#f5f3ff}.warn{border-color:var(--warn);background:#fff8e8}.danger{border-color:var(--danger);background:#fff1f0}
+.tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;background:#eef8f2;color:var(--ok)}.tag.unit{background:#f0efff;color:var(--accent)}.tag.risk{background:#fff6e5;color:var(--warn)}.tag.gap{background:#fff0ef;color:var(--danger)}
+@media(max-width:850px){.grid3{grid-template-columns:1fr}}@media(max-width:720px){.grid{grid-template-columns:1fr}.hero h1{font-size:28px}.wrap{padding:20px 12px 70px}section{padding:20px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+<small>TINYAI / VIRTUAL WORKSPACE CODING AGENT / TEST PLAN V2</small>
+<h1>虚拟 Workspace<br>通用 Coding Agent 测试方案</h1>
+<p>验证 Agent 包自身提供一致的虚拟文件系统、Shell、VCS、Patch、Search 和 Coding Loop；验证宿主只通过最小 Bridge 即可运行；验证真实 Toolchain Provider 可选接入；验证 macOS TUI、Chrome、恢复、状态空间和生产质量。</p>
+<div class="chips"><span class="chip">VFS Conformance</span><span class="chip">Shell Compatibility</span><span class="chip">Snapshot VCS</span><span class="chip">Host Bridge</span><span class="chip">Coding Benchmark</span><span class="chip">Fault + Soak</span></div>
+</header>
+<nav><a href="#strategy">策略</a><a href="#trace">追踪</a><a href="#vfs">VFS</a><a href="#shell">Shell</a><a href="#vcs">VCS</a><a href="#host">Host Bridge</a><a href="#coding">Coding</a><a href="#provider">Provider</a><a href="#tui">TUI</a><a href="#chrome">Chrome</a><a href="#subagent">子Agent</a><a href="#state">状态空间</a><a href="#production">生产加固</a><a href="#ci">CI门禁</a></nav>
+<section id="strategy">
+<h2>1. 测试策略</h2>
+<div class="grid">
+<div class="card"><h3>核心问题</h3><ul><li>同一 Workspace 契约是否被所有 VFS 后端正确实现。</li><li>Virtual Shell 是否足够稳定且不依赖宿主 Bash。</li><li>Snapshot VCS 是否能支持恢复、Diff、隔离和合并。</li><li>宿主极简 Bridge 是否足以运行 Agent。</li><li>真实工具链 Provider 是否可插拔。</li></ul></div>
+<div class="card"><h3>测试原则</h3><ul><li>先验证虚拟环境，再验证 Agent 行为。</li><li>所有副作用可注入、可回放、可取消。</li><li>不把 E2E 当成唯一证据。</li><li>Host Bridge 测试使用真实最小实现，不 mock 掉核心语义。</li></ul></div>
+</div>
+<div class="rule">分层：Contract → Unit → Integration → State Space → TUI/Chrome E2E → Real Repository Benchmark → Fault/Soak → Release。</div>
+</section>
+<section id="trace">
+<h2>2. 需求追踪</h2>
+<table><thead><tr><th>设计域</th><th>测试 ID</th><th>必须层级</th></tr></thead><tbody>
+<tr><td>Virtual File System</td><td>VFS-01..22</td><td>Contract / Fault</td></tr>
+<tr><td>Virtual Shell</td><td>SH-01..20</td><td>Unit / Differential / E2E</td></tr>
+<tr><td>Version Control</td><td>VCS-01..18</td><td>Unit / Integration / Fault</td></tr>
+<tr><td>Host Bridge</td><td>HOST-01..14</td><td>Contract / Multi-env</td></tr>
+<tr><td>Coding Loop</td><td>CODE-01..20</td><td>Integration / Benchmark</td></tr>
+<tr><td>Toolchain Provider</td><td>PROV-01..12</td><td>Contract / E2E</td></tr>
+<tr><td>macOS TUI</td><td>TUI-01..14</td><td>E2E</td></tr>
+<tr><td>Chrome</td><td>CHR-01..12</td><td>E2E / State</td></tr>
+<tr><td>子 Agent</td><td>SA-01..14</td><td>Integration / Fault</td></tr>
+<tr><td>生产质量</td><td>OPS-01..18</td><td>Benchmark / Soak</td></tr>
+</tbody></table>
+</section>
+<section id="vfs">
+<h2>3. Virtual File System 测试</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>层级</th></tr></thead><tbody>
+<tr><td>VFS-01</td><td>Memory/Overlay/Persistent 同一套 Conformance Suite</td><td>读写和元数据行为一致</td><td><span class="tag unit">Contract</span></td></tr>
+<tr><td>VFS-02</td><td>绝对路径、相对路径、`.`、`..`</td><td>规范化后不越界</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>VFS-03</td><td>Path traversal 和特殊编码</td><td>拒绝非法路径</td><td><span class="tag risk">Security</span></td></tr>
+<tr><td>VFS-04</td><td>Symlink 指向 Workspace 外</td><td>realpath 校验拒绝</td><td><span class="tag risk">Security</span></td></tr>
+<tr><td>VFS-05</td><td>写文件中途失败</td><td>旧文件保持，或原子替换新文件</td><td><span class="tag risk">Fault</span></td></tr>
+<tr><td>VFS-06</td><td>创建、删除、重命名、复制</td><td>目录树和 Hash 一致</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>VFS-07</td><td>二进制文件</td><td>不被 UTF-8 破坏，按 Blob 读取</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>VFS-08</td><td>大文件范围读取和分页</td><td>不加载整文件，行/字节范围准确</td><td><span class="tag">Integration</span></td></tr>
+<tr><td>VFS-09</td><td>文件 Hash 变化检测</td><td>Patch 冲突时拒绝覆盖</td><td><span class="tag risk">Integration</span></td></tr>
+<tr><td>VFS-10</td><td>Overlay 只读 Base + 修改</td><td>Base 不变，Diff 只含修改</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>VFS-11</td><td>删除 Base 文件</td><td>Overlay tombstone 正确导出</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>VFS-12</td><td>两个 Reader 和一个 Writer</td><td>读取一致，无数据竞争</td><td><span class="tag risk">Concurrency</span></td></tr>
+<tr><td>VFS-13</td><td>同一文件两个写入者</td><td>Lock/version conflict 明确</td><td><span class="tag risk">Race</span></td></tr>
+<tr><td>VFS-14</td><td>Watch 添加/修改/删除</td><td>事件顺序和路径正确</td><td><span class="tag">Integration</span></td></tr>
+<tr><td>VFS-15</td><td>Glob 和忽略规则</td><td>与项目规则一致</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>VFS-16</td><td>编码和换行符</td><td>LF/CRLF 和 BOM 按策略保留</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>VFS-17</td><td>权限和可执行位</td><td>无权限时明确失败</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>VFS-18</td><td>Snapshot/Restore</td><td>内容、元数据和 Hash 完全恢复</td><td><span class="tag">Integration</span></td></tr>
+<tr><td>VFS-19</td><td>持久化存储写入中断</td><td>Manifest 和对象保持一致</td><td><span class="tag risk">Fault</span></td></tr>
+<tr><td>VFS-20</td><td>存储配额耗尽</td><td>已有文件不被破坏</td><td><span class="tag risk">Fault</span></td></tr>
+<tr><td>VFS-21</td><td>大仓库 10k 文件</td><td>目录遍历和搜索在预算内</td><td><span class="tag">Performance</span></td></tr>
+<tr><td>VFS-22</td><td>Workspace Export</td><td>导出 Diff 可重新应用到 Base</td><td><span class="tag">E2E</span></td></tr>
+</tbody></table>
+<div class="rule">所有后端运行同一 VFS Contract Suite；任何后端行为差异必须显式声明并测试。</div>
+</section>
+<section id="shell">
+<h2>4. Virtual Shell 测试</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>层级</th></tr></thead><tbody>
+<tr><td>SH-01</td><td>命令、参数、空格和引号</td><td>AST 与参数拆分正确</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>SH-02</td><td>单引号、双引号、转义</td><td>不误展开、不注入</td><td><span class="tag risk">Security</span></td></tr>
+<tr><td>SH-03</td><td>环境变量和局部变量</td><td>作用域正确，不泄漏 Secret</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>SH-04</td><td>管道</td><td>stdout/stderr 和退出码正确</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>SH-05</td><td>重定向</td><td>VFS 文件内容正确，失败可回滚</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>SH-06</td><td>`&&`、`||`、`;`</td><td>短路和执行顺序正确</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>SH-07</td><td>内建 ls/cat/cp/mv/rm/mkdir</td><td>只修改 VFS，不访问宿主</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>SH-08</td><td>内建 grep/glob/find</td><td>与 Search 语义一致</td><td><span class="tag">Integration</span></td></tr>
+<tr><td>SH-09</td><td>不支持语法</td><td>明确报错，不 eval 原字符串</td><td><span class="tag risk">Security</span></td></tr>
+<tr><td>SH-10</td><td>命令不存在</td><td>结构化错误，不崩溃 Session</td><td><span class="tag unit">Unit</span></td></tr>
+<tr><td>SH-11</td><td>支持子集与受控 `/bin/sh` Differential Test</td><td>退出码、stdout、stderr、文件结果一致</td><td><span class="tag">Differential</span></td></tr>
+<tr><td>SH-12</td><td>取消长命令</td><td>Provider 取消，VFS 保持一致</td><td><span class="tag risk">E2E</span></td></tr>
+<tr><td>SH-13</td><td>超时和输出上限</td><td>终止并 Artifact 化</td><td><span class="tag">Integration</span></td></tr>
+<tr><td>SH-14</td><td>后台命令</td><td>状态、日志、重连和清理正确</td><td><span class="tag">E2E</span></td></tr>
+<tr><td>SH-15</td><td>重定向与并发写同一文件</td><td>Lock/conflict 明确</td><td><span class="tag risk">Race</span></td></tr>
+<tr><td>SH-16</td><td>Secret 注入</td><td>不出现在历史和 Projection</td><td><span class="tag risk">Security</span></td></tr>
+<tr><td>SH-17</td><td>输出含终端控制字符</td><td>TUI 安全渲染</td><td><span class="tag">Security</span></td></tr>
+<tr><td>SH-18</td><td>随机 Shell Fixture 重放</td><td>相同 Host/Fixture 结果确定</td><td><span class="tag">Property</span></td></tr>
+<tr><td>SH-19</td><td>Shell 会话恢复</td><td>cwd/env/history 按策略恢复</td><td><span class="tag">E2E</span></td></tr>
+<tr><td>SH-20</td><td>跨 Provider 切换</td><td>Workspace 不变，执行能力切换明确</td><td><span class="tag">Integration</span></td></tr>
+</tbody></table>
+</section>
+<section id="vcs">
+<h2>5. Snapshot VCS 与 Git Provider</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>VCS-01</td><td>Clean → Modified → Diff</td><td>文件与行级 Diff 准确</td></tr>
+<tr><td>VCS-02</td><td>新增、删除、重命名</td><td>状态和 Patch 完整</td></tr>
+<tr><td>VCS-03</td><td>Snapshot/Restore</td><td>目录树和对象内容完全恢复</td></tr>
+<tr><td>VCS-04</td><td>Checkpoint 链接 Task</td><td>任务恢复到最后稳定点</td></tr>
+<tr><td>VCS-05</td><td>Workspace Fork</td><td>子 Agent 修改不污染父 Workspace</td></tr>
+<tr><td>VCS-06</td><td>Merge Preview</td><td>冲突文件、行和原因清楚</td></tr>
+<tr><td>VCS-07</td><td>Merge Apply</td><td>只应用审阅通过的变更</td></tr>
+<tr><td>VCS-08</td><td>Binary Diff</td><td>标记二进制变化，不渲染文本 Diff</td></tr>
+<tr><td>VCS-09</td><td>大文件 Hash 去重</td><td>存储可复用，Diff 正确</td></tr>
+<tr><td>VCS-10</td><td>并发 Snapshot</td><td>对象存储一致，无重复损坏</td></tr>
+<tr><td>VCS-11</td><td>Git status 读取</td><td>Provider 映射到通用 VCS 状态</td></tr>
+<tr><td>VCS-12</td><td>Git Patch 导出/应用</td><td>与标准 Unified Diff 兼容</td></tr>
+<tr><td>VCS-13</td><td>Git 缺失</td><td>Snapshot VCS 正常工作</td></tr>
+<tr><td>VCS-14</td><td>真实 Git Worktree 可选</td><td>无 Provider 时使用 Workspace Fork</td></tr>
+<tr><td>VCS-15</td><td>用户外部修改</td><td>同步时检测 Hash 冲突</td></tr>
+<tr><td>VCS-16</td><td>默认不 commit/push</td><td>无隐式远端副作用</td></tr>
+<tr><td>VCS-17</td><td>VCS 元数据损坏</td><td>Workspace 内容仍可恢复/导出</td></tr>
+<tr><td>VCS-18</td><td>跨客户端 Diff</td><td>相同 revision 得到相同结果</td></tr>
+</tbody></table>
+</section>
+<section id="host">
+<h2>6. Host Bridge 与多环境</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>HOST-01</td><td>仅有 Memory Storage/Clock</td><td>Agent Core 与 MemoryFS 可运行</td></tr>
+<tr><td>HOST-02</td><td>无 FileSystem Bridge</td><td>VFS 正常工作，无宿主 fs 调用</td></tr>
+<tr><td>HOST-03</td><td>Workspace Import/Export</td><td>Bundle 可载入和导出变更</td></tr>
+<tr><td>HOST-04</td><td>Terminal I/O</td><td>TUI 可交互，不要求宿主 Shell</td></tr>
+<tr><td>HOST-05</td><td>Process Bridge 可选</td><td>有则启用外部命令，无则只运行内置命令</td></tr>
+<tr><td>HOST-06</td><td>Network Bridge 可选</td><td>无网络时包管理命令明确不可用</td></tr>
+<tr><td>HOST-07</td><td>缺少 Crypto</td><td>Host 提供 DigestPort 或功能禁用</td></tr>
+<tr><td>HOST-08</td><td>缺少 structuredClone/AbortController</td><td>注入能力后 Core 正常运行</td></tr>
+<tr><td>HOST-09</td><td>Node 22</td><td>完整环境</td></tr>
+<tr><td>HOST-10</td><td>Chrome Page/Worker</td><td>无 Node 依赖，使用 Virtual Workspace</td></tr>
+<tr><td>HOST-11</td><td>Minimal VM</td><td>仅注入 Host，无平台全局副作用</td></tr>
+<tr><td>HOST-12</td><td>能力声明错误</td><td>启动时失败并指出具体 Bridge</td></tr>
+<tr><td>HOST-13</td><td>Provider 崩溃</td><td>VFS/Session 不损坏，可重新连接</td></tr>
+<tr><td>HOST-14</td><td>未来 Headless Client</td><td>通过协议读取同一 Session 和 Workspace</td></tr>
+</tbody></table>
+</section>
+<section id="coding">
+<h2>7. Coding Loop 与通用仓库</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>CODE-01</td><td>搜索并读取目标代码</td><td>结果准确、上下文预算受控</td></tr>
+<tr><td>CODE-02</td><td>Patch 多文件修改</td><td>Diff 精确，旧 Hash 冲突阻止覆盖</td></tr>
+<tr><td>CODE-03</td><td>运行最小测试</td><td>命令和文件修改关联</td></tr>
+<tr><td>CODE-04</td><td>测试失败 → Repair</td><td>失败证据进入下一轮</td></tr>
+<tr><td>CODE-05</td><td>修复后测试通过</td><td>进入最终验证和审阅</td></tr>
+<tr><td>CODE-06</td><td>验证失败仍声称完成</td><td>Gate 阻止完成</td></tr>
+<tr><td>CODE-07</td><td>无测试入口</td><td>要求替代验证或用户配置</td></tr>
+<tr><td>CODE-08</td><td>大输出</td><td>Artifact 化，只给摘要</td></tr>
+<tr><td>CODE-09</td><td>上下文压缩</td><td>目标、修改、失败证据保留</td></tr>
+<tr><td>CODE-10</td><td>用户并发修改</td><td>同步/导出冲突明确</td></tr>
+<tr><td>CODE-11</td><td>最终 Diff 审阅</td><td>Diff、测试、风险统一展示</td></tr>
+<tr><td>CODE-12</td><td>Node/Python/Go/Rust/Java/Swift 项目</td><td>通过可选 Toolchain Provider 执行</td></tr>
+<tr><td>CODE-13</td><td>项目约定发现</td><td>读取 README/AGENTS/CI/构建配置</td></tr>
+<tr><td>CODE-14</td><td>默认不 commit</td><td>任务停止在可审阅状态</td></tr>
+<tr><td>CODE-15</td><td>任务恢复</td><td>从最后 Workspace revision 继续</td></tr>
+<tr><td>CODE-16</td><td>Agent 工具声称执行但无调用</td><td>完成门禁拒绝</td></tr>
+<tr><td>CODE-17</td><td>基准仓库 Bug Fix</td><td>测试通过且 Diff 合理</td></tr>
+<tr><td>CODE-18</td><td>Feature 和 Refactor 基准</td><td>完成率、回归率和成本达标</td></tr>
+<tr><td>CODE-19</td><td>Repo Understanding</td><td>入口、依赖和测试位置正确</td></tr>
+<tr><td>CODE-20</td><td>复杂项目多轮任务</td><td>状态和上下文跨轮稳定</td></tr>
+</tbody></table>
+</section>
+<section id="provider">
+<h2>8. Toolchain Provider</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>PROV-01</td><td>Built-in JS commands</td><td>无外部进程可运行</td></tr>
+<tr><td>PROV-02</td><td>Host Process Provider</td><td>命令、流、退出码和取消正确</td></tr>
+<tr><td>PROV-03</td><td>Host PTY Provider</td><td>交互、resize、后台和重连</td></tr>
+<tr><td>PROV-04</td><td>Remote Runner</td><td>文件同步和命令结果一致</td></tr>
+<tr><td>PROV-05</td><td>WASM Toolchain</td><td>无宿主编译器可运行受支持语言</td></tr>
+<tr><td>PROV-06</td><td>Git Provider 可选</td><td>无 Git 也不影响 Snapshot VCS</td></tr>
+<tr><td>PROV-07</td><td>Provider capability 不足</td><td>工具不注册，UI 明确说明</td></tr>
+<tr><td>PROV-08</td><td>Provider 超时/崩溃</td><td>命令失败，Workspace 保持一致</td></tr>
+<tr><td>PROV-09</td><td>Provider 返回恶意大输出</td><td>截断/Artifact/脱敏</td></tr>
+<tr><td>PROV-10</td><td>Provider 试图越界路径</td><td>VFS 边界阻止</td></tr>
+<tr><td>PROV-11</td><td>Provider 版本不兼容</td><td>结构化错误和回退策略</td></tr>
+<tr><td>PROV-12</td><td>不同 Provider 同任务</td><td>Agent 语义一致</td></tr>
+</tbody></table>
+</section>
+<section id="tui">
+<h2>9. macOS TUI 测试</h2>
+<div class="grid">
+<div class="card"><h3>TUI-01..04 基础</h3><p>启动、Session、流式输出、工具状态、多行输入和快捷键。</p></div>
+<div class="card"><h3>TUI-05..08 恢复</h3><p>Ctrl+C、后台任务、关闭重开、窗口 resize。</p></div>
+<div class="card"><h3>TUI-09..11 审阅</h3><p>大 Diff、文件折叠、测试证据、风险和无颜色模式。</p></div>
+<div class="card"><h3>TUI-12..14 能力</h3><p>Host 能力缺失提示、Provider 切换、错误恢复和终端安全。</p></div>
+</div>
+</section>
+<section id="chrome">
+<h2>10. Chrome 测试</h2>
+<ul><li>网页/选中文本/日志进入 Context Artifact。</li><li>标签组共享 Session，组外独立，关闭和重开竞态。</li><li>Agent 显式 new_tab，不隐式打开页面。</li><li>Chrome 发起、TUI 继续同一 Session。</li><li>无本地工具链时通过 Remote Runner 验证。</li><li>前端页面的代码 Diff、测试和页面证据关联。</li></ul>
+</section>
+<section id="subagent">
+<h2>11. 子 Agent</h2>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>SA-01</td><td>自定义 Profile</td><td>无需改代码即可新增角色</td></tr>
+<tr><td>SA-02</td><td>Fork Workspace</td><td>父 Workspace 不被直接修改</td></tr>
+<tr><td>SA-03</td><td>并行写同一文件</td><td>冲突/所有权阻止覆盖</td></tr>
+<tr><td>SA-04</td><td>Merge Preview</td><td>Diff 和冲突可审阅</td></tr>
+<tr><td>SA-05</td><td>Merge Apply</td><td>只应用批准变更</td></tr>
+<tr><td>SA-06</td><td>父任务取消</td><td>子任务和 Provider 停止</td></tr>
+<tr><td>SA-07</td><td>子任务失败</td><td>结果可见、不污染父</td></tr>
+<tr><td>SA-08</td><td>预算耗尽</td><td>停止并保留证据</td></tr>
+<tr><td>SA-09</td><td>Provider 重启</td><td>Workspace Fork 可恢复</td></tr>
+<tr><td>SA-10</td><td>Children 并发上限</td><td>DAG 与排队正确</td></tr>
+<tr><td>SA-11</td><td>后台子 Agent</td><td>TUI 显示进度和通知</td></tr>
+<tr><td>SA-12</td><td>子 Agent 工具越权</td><td>拒绝</td></tr>
+<tr><td>SA-13</td><td>Worktree 清理</td><td>无残留目录、进程、锁</td></tr>
+<tr><td>SA-14</td><td>父上下文隔离</td><td>按 Profile 显式传递</td></tr>
+</tbody></table>
+</section>
+<section id="state">
+<h2>12. 状态空间与并发</h2>
+<pre>Workspace:
+  files ≤ 4
+  revisions ≤ 3
+  providers ≤ 2
+  task status
+  command status
+Tabs:
+  tabs ≤ 3
+  groups ≤ 2
+  sessions ≤ 2
+Events:
+  edit / command / checkpoint / restore
+  fork / merge / close / provider-fail
+不变量:
+  文件写入原子且 Hash 一致
+  一个 Tab 一个 Binding
+  一个 Group 一个 Session
+  Workspace revision 单调
+  Command 结果不被重复应用
+  子 Agent 不越界写</pre>
+<p>使用有界穷举、fast-check 参考模型、故障注入和真实 TUI/Chrome E2E。失败导出 seed、事件 trace、前后 Workspace Manifest、Session revision 和 Provider 结果。</p>
+</section>
+<section id="production">
+<h2>13. 生产评测、性能与 Soak</h2>
+<div class="grid">
+<div class="card"><h3>Benchmark</h3><p>Bug Fix、Feature、Test Addition、Refactor、Repo Understanding、多语言和大型仓库任务。</p></div>
+<div class="card"><h3>质量指标</h3><p>任务完成率、测试通过率、误完成率、回归率、平均修复轮次、人工干预和成本。</p></div>
+<div class="card"><h3>性能</h3><p>10k 文件搜索、1GB Workspace、10 万行日志、大 Diff、启动和流式渲染。</p></div>
+<div class="card"><h3>Soak</h3><p>8 小时多任务、反复恢复、Provider 重启、内存、句柄和进程泄漏。</p></div>
+</div>
+</section>
+<section id="ci">
+<h2>14. CI 与发布门禁</h2>
+<table><thead><tr><th>层级</th><th>内容</th><th>阻断</th></tr></thead><tbody>
+<tr><td>PR Fast</td><td>Core boundary、VFS Contract、Shell Unit、VCS Unit、state short</td><td>是</td></tr>
+<tr><td>PR TUI</td><td>TUI smoke、恢复、Diff、取消</td><td>是</td></tr>
+<tr><td>PR Chrome</td><td>Chrome E2E 核心与竞态</td><td>是</td></tr>
+<tr><td>Nightly</td><td>deep state、多环境 Host、Provider、Benchmark 子集</td><td>报告趋势</td></tr>
+<tr><td>Release</td><td>完整 Benchmark、8h soak、迁移、故障和资源泄漏</td><td>是</td></tr>
+</tbody></table>
+<h3>正式发布必须满足</h3>
+<ul><li>MemoryFS、OverlayFS 和 PersistentFS 通过同一 Contract。</li><li>Virtual Shell 支持子集稳定，不依赖宿主 Bash。</li><li>Snapshot VCS 支持 Diff、恢复、Fork 和 Merge Preview。</li><li>无 FileSystem/Git/Bash 的宿主也能运行 Agent Core 和虚拟编辑。</li><li>真实 Toolchain Provider 可选接入且失败不损坏 Workspace。</li><li>TUI 与 Chrome 主流程通过；Session/Workspace 可恢复。</li><li>所有完成声明都有 Verification Gate。</li><li>无密钥泄露、未审阅自动提交或未授权网络写入。</li><li>大仓库、长任务和 Provider 故障通过 Soak。</li></ul>
+<div class="rule">生产的定义：Agent 自己拥有稳定的开发环境语义，宿主可极简；复杂项目通过可选 Provider 获得真实工具链能力；用户始终可以审阅、恢复和导出变更。</div>
+</section>
+</div>
+</body>
+</html>

@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tinyai 虚拟 Workspace 通用 Coding Agent 详细设计 V2</title>
+<style>
+:root{--bg:#f4f5f7;--paper:#fff;--text:#191a1e;--muted:#6f7179;--line:#e2e3e8;--accent:#5145d8;--accent2:#7567f5;--ok:#137a4b;--warn:#986100;--danger:#b42318;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.72 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1230px;margin:auto;padding:36px 24px 100px}
+.hero{padding:39px;border-radius:27px;background:radial-gradient(circle at 90% 10%,#ada5ff 0,transparent 27%),linear-gradient(135deg,#151520,#30299a 61%,#6859ea);color:#fff}.hero small{letter-spacing:.11em;opacity:.72}.hero h1{font-size:38px;line-height:1.2;margin:12px 0}.hero p{max-width:940px;margin:0;color:#e8e5ff}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}
+nav{position:sticky;top:0;z-index:5;display:flex;gap:14px;overflow:auto;margin:18px 0;padding:10px 14px;border:1px solid var(--line);border-radius:13px;background:#f4f5f7ed;backdrop-filter:blur(12px)}nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}
+section{margin:18px 0;padding:26px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:23px;margin:0 0 14px}h3{font-size:16px;margin:21px 0 8px}p{color:#45464c}.muted{color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafafa}.card h3{margin:0 0 8px}.card p{margin:0}.card ul{margin:8px 0 0;padding-left:18px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafafa;color:var(--muted);font-weight:600}
+code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{padding:16px;overflow:auto;border-radius:11px;background:#181820;color:#edecff;font:12px/1.6 var(--mono)}
+.rule{padding:13px 15px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#f5f3ff}.warn{border-color:var(--warn);background:#fff8e8}.danger{border-color:var(--danger);background:#fff1f0}
+.phase{display:flex;align-items:center;gap:11px;margin-bottom:13px}.phase-no{display:grid;place-items:center;width:43px;height:43px;border-radius:12px;background:#efedff;color:var(--accent);font-weight:750}.phase h2{margin:0;font-size:22px}.phase p{margin:2px 0 0;color:var(--muted);font-size:12px}
+.req{display:inline-block;padding:1px 7px;border-radius:6px;background:#f0efff;color:var(--accent);font-size:11px;font-family:var(--mono)}
+@media(max-width:850px){.grid3{grid-template-columns:1fr}}@media(max-width:720px){.grid{grid-template-columns:1fr}.hero h1{font-size:28px}.wrap{padding:20px 12px 70px}section{padding:20px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+<small>TINYAI / VIRTUAL WORKSPACE CODING AGENT / V2</small>
+<h1>虚拟 Workspace<br>通用 Coding Agent 详细设计</h1>
+<p>Agent 包内置虚拟文件系统、Virtual Shell、Snapshot VCS、Patch/Search/Diff 和确定性工具语义。宿主只提供最小桥接能力；不要求预装 Bash、Git，也不把开发工具链二进制打包进 Agent。需要真实编译器时通过可选 Provider 执行。</p>
+<div class="chips"><span class="chip">Portable Core</span><span class="chip">Virtual File System</span><span class="chip">Virtual Shell</span><span class="chip">Snapshot VCS</span><span class="chip">Minimal Host Bridge</span><span class="chip">macOS TUI + Chrome</span></div>
+</header>
+<nav><a href="#decision">核心决策</a><a href="#scope">范围</a><a href="#arch">分层架构</a><a href="#vfs">VFS</a><a href="#shell">Virtual Shell</a><a href="#vcs">VCS</a><a href="#provider">Toolchain Provider</a><a href="#host">Host Bridge</a><a href="#core">Agent Core</a><a href="#tui">TUI</a><a href="#chrome">Chrome</a><a href="#subagent">子Agent</a><a href="#states">状态机</a><a href="#data">数据安全</a><a href="#phases">阶段</a><a href="#acceptance">验收</a></nav>
+<section id="decision">
+<h2>1. 核心决策</h2>
+<div class="grid">
+<div class="card"><h3>环境语义属于 Agent 包</h3><p>Agent 工具只操作虚拟 Workspace。文件、Shell、Patch、Diff、版本快照、搜索和工作目录由包内实现。</p></div>
+<div class="card"><h3>宿主只做低层桥接</h3><p>宿主提供存储、项目导入导出、终端和可选进程/网络桥接，不需要理解 Agent Session、Bash 或 Git。</p></div>
+<div class="card"><h3>默认零外部开发工具依赖</h3><p>MemoryFS、JS Shell 子集、Snapshot VCS 和常用文本工具随 Agent 逻辑提供，不打包 Node、Python、Git 或 Bash 二进制。</p></div>
+<div class="card"><h3>真实工具链可选</h3><p>复杂项目需要的编译器、测试器和原生工具由 Toolchain Provider 提供，可以是宿主进程、远程 Workspace 或 WASM。</p></div>
+<div class="card"><h3>单一 Workspace 契约</h3><p>无论 Memory、macOS、Chrome 还是 Remote，Agent 面对相同的文件、Shell、VCS、Patch 和 Artifact 语义。</p></div>
+<div class="card"><h3>确定性优先</h3><p>时间、ID、调度、Hash、Clone、存储和命令结果可注入；同一 Fixture 应生成一致的 Projection、Trace 和变更。</p></div>
+</div>
+<div class="rule">架构目标：Portable Agent + Virtual Workspace + Minimal Host Bridge。外部工具链不是 Agent 本体的一部分，也不是宿主启动 Agent 的前提。</div>
+</section>
+<section id="scope">
+<h2>2. 产品范围</h2>
+<table><thead><tr><th>交付</th><th>范围</th><th>非目标</th></tr></thead><tbody>
+<tr><td>macOS TUI</td><td>完整 Coding Agent、Virtual Workspace、可选本机 Toolchain Provider</td><td>不把 Node/Python/Git 等二进制打进 Agent</td></tr>
+<tr><td>Chrome</td><td>浏览器 Workspace、页面上下文、虚拟项目和受控 Provider</td><td>不要求本机安装 Git/Bash</td></tr>
+<tr><td>未来客户端</td><td>端无关 Session、Projection 和 Workspace Bridge</td><td>不实现 iOS App、通知、配对或移动 UI</td></tr>
+<tr><td>Toolchain</td><td>可选 Provider：本地进程、远程 Runner、WASM、内置 JS</td><td>不内置任意语言编译器</td></tr>
+</tbody></table>
+<h3>当前基础</h3>
+<p>已有 SessionRuntime、AgentLoop、Projection、ToolExecutor、SandboxProvider、基础文件/Exec/PTY、macOS Seatbelt、Chrome Adapter、子 Agent Coordinator 和有界状态测试。主要缺口是统一 Virtual Workspace、Virtual Shell、VCS、Host Bridge、Portable Host 和真正的 TUI。</p>
+</section>
+<section id="arch">
+<h2>3. 分层架构</h2>
+<pre>UI Layer
+├── macOS TUI
+└── Chrome Side Panel
+        ↓ Commands / Projection
+Agent Core
+├── AgentLoop / Session / Task / Queue
+├── Context / Compaction / Verification
+├── ToolPack / Policy / Subagent
+└── Artifact / Trace
+        ↓
+Virtual Development Environment
+├── Virtual Workspace
+├── Virtual File System
+├── Virtual Shell + Built-in Commands
+├── Snapshot VCS / Git Compatibility
+├── Patch / Search / Diff
+└── Provider Registry
+        ↓
+Minimal Host Bridge
+├── Persistent Storage
+├── Workspace Import / Export
+├── Terminal I/O
+├── Clock / Crypto / Scheduler
+├── Optional Process Bridge
+└── Optional Network Bridge</pre>
+<h3>依赖规则</h3>
+<ul><li>Core 不直接访问宿主文件系统、Shell、Git 或 Chrome。</li><li>Agent Tools 只访问 Virtual Workspace，不直接调用 OS。</li><li>Virtual Workspace 不依赖 UI；TUI 和 Chrome 只是 Workspace 客户端。</li><li>Host Bridge 不理解 Agent 工具，只执行受控低层操作。</li><li>Provider 失败不得破坏虚拟 Workspace 的持久状态。</li></ul>
+</section>
+<section id="vfs">
+<h2>4. Virtual File System</h2>
+<div class="grid3">
+<div class="card"><h3>MemoryFS</h3><p>完全内存，任何 JS 环境可运行。用于确定性测试、临时任务和模拟。</p></div>
+<div class="card"><h3>OverlayFS</h3><p>只读 Base + 可写 Overlay。适合真实项目：用户文件不被直接修改，变更可审阅后导出。</p></div>
+<div class="card"><h3>PersistentFS</h3><p>通过宿主 Blob/Key-Value 持久化对象、目录和 Manifest。</p></div>
+<div class="card"><h3>ArchiveFS</h3><p>以 ZIP/TAR 或项目 Bundle 作为只读输入。</p></div>
+<div class="card"><h3>HostFSBridge</h3><p>可选把虚拟路径映射到真实目录，仅作为 Provider，不是 Agent 依赖。</p></div>
+<div class="card"><h3>RemoteWorkspaceFS</h3><p>通过 RPC 读取和提交变更，未来客户端共用同一语义。</p></div>
+</div>
+<h3>VFS 能力</h3>
+<pre>read / readRange / writeAtomic / append
+list / glob / stat / lstat / realpath
+mkdir / remove / rename / copy
+open / close / watch
+readBinary / writeBinary
+hash / diff / patch
+snapshot / restore</pre>
+<h3>数据组织</h3>
+<ul><li>目录树保存路径与元数据；文件内容按 Content Hash 存储，可去重。</li><li>Overlay 只记录修改、删除和新增，导出时生成变更集。</li><li>写入必须原子；失败不得留下半文件。</li><li>路径统一使用虚拟绝对路径，禁止 `..` 越界和未授权 Symlink。</li><li>大文件延迟读取和分页，不默认载入内存。</li><li>文件工具返回路径、Hash、大小、编码和修改版本。</li></ul>
+</section>
+<section id="shell">
+<h2>5. Virtual Shell</h2>
+<p>目标不是完整复制 Bash，而是提供开发任务所需的稳定 Shell 语义，并避免把宿主 Bash 当作运行前提。</p>
+<h3>首版兼容子集</h3>
+<ul><li>命令、参数、引号和转义。</li><li>环境变量、局部变量和命令替换的可控子集。</li><li>管道、重定向、`&&`、`||`、`;`。</li><li>工作目录、退出码、stdout/stderr。</li><li>后台任务、取消和输出上限。</li><li>内建 `pwd`、`cd`、`ls`、`cat`、`mkdir`、`cp`、`mv`、`rm`、`echo`、`test`。</li><li>内建 `grep`/`rg` 兼容子集、`find`/glob、`diff`、`patch`。</li></ul>
+<h3>执行分层</h3>
+<pre>Shell Parser → AST → Executor
+Executor
+├── VFS Builtins
+├── JavaScript Command Implementations
+├── Toolchain Provider
+└── Optional Host Process Provider</pre>
+<div class="rule">不支持或无法安全解释的 Shell 语法必须明确报错，不能把原始字符串交给不可信 eval。外部命令只能通过 Provider 注册表执行。</div>
+<h3>命令上下文</h3>
+<ul><li>每次调用包含 Workspace、Session、cwd、env、stdin 和取消信号。</li><li>Secret 只在执行时注入，不进入 Shell 历史、Projection 或日志。</li><li>命令输出实时流式，超过阈值自动 Artifact 化。</li><li>命令和文件修改关联到任务和检查点。</li></ul>
+</section>
+<section id="vcs">
+<h2>6. Version Control</h2>
+<p>默认使用 Agent 包内的 Snapshot VCS，不依赖宿主 Git CLI。真实 Git 仓库通过可选 Git Provider 兼容。</p>
+<div class="grid">
+<div class="card"><h3>Snapshot VCS</h3><ul><li>文件 Hash、目录树、提交图。</li><li>任务检查点、Diff、恢复、分支。</li><li>工作区 Fork 和 Merge Preview。</li><li>导出 Unified Diff/Patch。</li></ul></div>
+<div class="card"><h3>Git Provider</h3><ul><li>读取真实 Git 状态、索引和忽略规则。</li><li>应用 Patch、创建临时分支。</li><li>模拟或桥接 Worktree。</li><li>默认禁止自动 commit/push。</li></ul></div>
+</div>
+<pre>VCS Operations
+status / diff / snapshot / checkpoint
+restore / compare / branch / fork
+previewMerge / applyPatch / exportPatch</pre>
+<h3>子 Agent 隔离</h3>
+<p>每个子 Agent 获得 Workspace Fork 或 Overlay。父任务审阅子 Agent Diff 后合并，不依赖宿主 Git Worktree。存在 Git Provider 时可映射到真实 Worktree。</p>
+</section>
+<section id="provider">
+<h2>7. Toolchain Provider</h2>
+<p>复杂项目仍需要真实编译器。Agent 不打包这些工具，而是通过稳定 Provider 调用。</p>
+<table><thead><tr><th>Provider</th><th>能力</th><th>适用场景</th></tr></thead><tbody>
+<tr><td>Built-in JS</td><td>搜索、Patch、Diff、JSON/YAML、简单命令</td><td>所有 JS 环境</td></tr>
+<tr><td>Host Process</td><td>spawn、stdout/stderr、exit、signal</td><td>macOS 本机工具链</td></tr>
+<tr><td>Host PTY</td><td>交互进程、终端尺寸、后台会话</td><td>TUI / 长任务</td></tr>
+<tr><td>Remote Runner</td><td>远程文件、命令、测试</td><td>Chrome、无本地工具环境</td></tr>
+<tr><td>WASM Provider</td><td>特定语言工具</td><td>可移植工具链</td></tr>
+<tr><td>Git Provider</td><td>真实 Git 操作</td><td>已有 Git 仓库</td></tr>
+</tbody></table>
+<div class="rule">Provider 只提供“执行能力”，工作目录、命令语义、输出处理、取消、验证和审阅仍由 Agent 包控制。</div>
+</section>
+<section id="host">
+<h2>8. Minimal Host Bridge</h2>
+<pre>HostBridge
+├── storage: get / put / list / remove
+├── workspace?: import / export / filePicker
+├── terminal?: write / input events
+├── clock / scheduler / crypto / clone
+├── process?: spawn / signal / stream
+└── network?: request / proxy / allowlist</pre>
+<h3>宿主不负责</h3>
+<ul><li>不实现 Session、Task、Agent Loop 或 Tool 语义。</li><li>不需要安装 Bash、Git 或固定开发工具链。</li><li>不需要理解 Projection 和 UI 状态。</li><li>不需要提供完整文件系统；VFS 可完全内存或持久化。</li></ul>
+<h3>能力发现</h3>
+<p>Host 启动时上报 Storage、Terminal、Process、Network、Workspace Import/Export 等能力。缺失能力时对应 Provider 和 ToolPack 不注册，UI 明确提示。</p>
+</section>
+<section id="core">
+<h2>9. Agent Core 与 Coding Loop</h2>
+<h3>任务闭环</h3>
+<pre>理解项目 → 搜索 → Patch → 运行验证
+             ↑                 ↓
+          修复证据 ← 测试失败
+             ↓
+        最终 Diff / 验证报告 / 风险</pre>
+<ul><li>测试失败不能标记完成。</li><li>外部命令结果和文件修改进入同一 Trace。</li><li>上下文压缩保留任务目标、文件 Hash、失败证据和未解决项。</li><li>大输出 Artifact 化，模型只读取必要摘要。</li><li>完成后生成可审阅的 Diff、测试结果和未覆盖风险。</li></ul>
+<h3>Prompt Profile</h3>
+<p>Chrome、TUI、未来 Headless Client 各自提供 PromptProfile。Prompt 不进入 Core 硬编码，也不把 Chrome 工具暴露给 TUI。</p>
+</section>
+<section id="tui">
+<h2>10. macOS TUI</h2>
+<div class="grid">
+<div class="card"><h3>主工作台</h3><p>Session、项目、任务状态、流式回答、工具、命令、测试和子 Agent。</p></div>
+<div class="card"><h3>虚拟项目导入</h3><p>选择目录或 Archive 导入 VFS Overlay；默认不直接修改用户文件。</p></div>
+<div class="card"><h3>变更审阅</h3><p>文件 Diff、测试证据、Patch 导出和用户确认后同步回宿主。</p></div>
+<div class="card"><h3>命令与后台任务</h3><p>Virtual Shell 输出、PTY Provider、取消、重连和日志。</p></div>
+<div class="card"><h3>恢复</h3><p>Session、虚拟 Workspace、检查点、后台任务和光标位置恢复。</p></div>
+<div class="card"><h3>基础权限</h3><p>安全默认；同步文件、网络、外部进程和删除等高风险动作按项目确认。</p></div>
+</div>
+</section>
+<section id="chrome">
+<h2>11. Chrome 工作流</h2>
+<ul><li>页面、选中文本和错误日志作为 Context Artifact 进入虚拟 Workspace。</li><li>Browser ToolPack 只操作当前浏览器 Workspace。</li><li>标签组共享 Session，组外独立；不隐式打开页面。</li><li>前端修复生成代码 Diff、测试和页面验证证据。</li><li>可在 TUI 和 Chrome 查看同一 Session；任务执行权只属于一个权威 Runtime。</li><li>无本地编译工具时通过 Remote Runner 或 WASM Provider 验证。</li></ul>
+</section>
+<section id="subagent">
+<h2>12. 子 Agent</h2>
+<ul><li>通用 Profile，不固定 Researcher/Reviewer。</li><li>每个子 Agent 获得 Workspace Fork/Overlay 和独立上下文。</li><li>支持前台、后台、预算和并发限制。</li><li>结果包含摘要、Diff、测试、证据、Artifact 和未解决项。</li><li>父 Agent 显式审阅并应用 Patch。</li><li>取消向子任务和 Provider 传播。</li></ul>
+</section>
+<section id="states">
+<h2>13. 核心状态机</h2>
+<pre>Task:
+queued → running → verifying → completed
+                 ├→ waiting_approval → running
+                 ├→ repairing → verifying
+                 ├→ failed
+                 └→ cancelled
+Workspace:
+creating → ready → executing → checkpointing → ready
+                    ├→ interrupted → restoring → ready
+                    ├→ failed
+                    └→ releasing → released
+Command:
+queued → running → streaming → exited
+                    ├→ cancelled
+                    ├→ timed_out
+                    └→ failed
+VCS:
+clean → modified → staged_snapshot → reviewed
+                ├→ restored
+                └→ merge_conflict</pre>
+</section>
+<section id="data">
+<h2>14. 数据、安全与恢复</h2>
+<div class="grid">
+<div class="card"><h3>Session Data</h3><p>对话、任务、队列、验证、子 Agent、Trace；跨客户端可读。</p></div>
+<div class="card"><h3>Workspace Data</h3><p>VFS Manifest、内容对象、Overlay、VCS、检查点和 Artifact。</p></div>
+<div class="card"><h3>Host Data</h3><p>持久化存储、项目 Bundle、终端能力；不保存 Agent 私有布局。</p></div>
+<div class="card"><h3>安全边界</h3><p>虚拟路径规范化、Provider 权限、网络 allowlist、Secret 脱敏、命令输出限制。</p></div>
+</div>
+<h3>恢复原则</h3>
+<ul><li>先恢复 Session，再恢复 Workspace Manifest，最后恢复 UI。</li><li>运行中的命令记录可重放性和最后输出；不可重放命令不自动重试。</li><li>文件写入与 VCS 检查点必须对应同一 Workspace revision。</li><li>Provider 崩溃不能损坏 VFS。</li></ul>
+</section>
+<section id="phases">
+<h2>15. 阶段设计</h2>
+<div class="phase"><div class="phase-no">P1</div><div><h2>Virtual Environment Foundation</h2></div></div>
+<ul><li>MemoryFS、OverlayFS、持久化存储。</li><li>Virtual Shell 子集与内建命令。</li><li>Snapshot VCS、Patch、Diff、Search。</li><li>Minimal Host Bridge 与能力发现。</li></ul>
+<div class="phase"><div class="phase-no">P2</div><div><h2>macOS TUI 与 Coding Loop</h2></div></div>
+<ul><li>TUI、Session 恢复、流式任务视图。</li><li>项目导入、虚拟修改、验证、Diff 审阅。</li><li>可选 Host Process/PTY Provider。</li></ul>
+<div class="phase"><div class="phase-no">P3</div><div><h2>可靠性与持久化</h2></div></div>
+<ul><li>后台命令、检查点、崩溃恢复。</li><li>大文件、大输出、文件监听和锁。</li><li>Workspace 同步与用户修改冲突。</li></ul>
+<div class="phase"><div class="phase-no">P4</div><div><h2>Chrome 与远程 Provider</h2></div></div>
+<ul><li>网页上下文、标签组 Workspace。</li><li>Remote Runner、页面验证和跨端审阅。</li></ul>
+<div class="phase"><div class="phase-no">P5</div><div><h2>扩展基线</h2></div></div>
+<ul><li>Headless Client、端无关 Projection 和 Workspace Bridge。</li><li>不实现 iOS App。</li></ul>
+<div class="phase"><div class="phase-no">P6</div><div><h2>子 Agent 与 Workspace Fork</h2></div></div>
+<ul><li>通用 Profile、虚拟 Worktree、Merge Preview、并行调度。</li></ul>
+<div class="phase"><div class="phase-no">P7</div><div><h2>生产加固</h2></div></div>
+<ul><li>Trace、评测、性能、发布、迁移和 Soak。</li></ul>
+</section>
+<section id="acceptance">
+<h2>16. 产品验收</h2>
+<table><thead><tr><th>维度</th><th>验收标准</th></tr></thead><tbody>
+<tr><td>虚拟环境</td><td>Memory/Overlay/Persistent VFS 提供一致文件语义；无宿主文件系统仍可运行</td></tr>
+<tr><td>Shell</td><td>内建命令和声明支持的 Shell 子集稳定；不支持语法明确报错</td></tr>
+<tr><td>VCS</td><td>状态、Diff、快照、恢复、Fork 和 Merge Preview 可用；无需宿主 Git</td></tr>
+<tr><td>Coding</td><td>能完成搜索、Patch、测试、失败修复和最终审阅</td></tr>
+<tr><td>Provider</td><td>真实工具链通过可选 Provider 接入，不打包进 Agent</td></tr>
+<tr><td>宿主</td><td>只实现存储、导入导出和终端等基础桥接即可启动 TUI</td></tr>
+<tr><td>恢复</td><td>TUI/Provider 崩溃后 Session 和 Workspace 可恢复，不重复副作用</td></tr>
+<tr><td>扩展</td><td>Chrome、TUI 和 Headless Client 使用同一 Core；iOS 当前不实现</td></tr>
+</tbody></table>
+<p><a href="virtual-workspace-agent-testing-v2.html">查看配套 V2 测试方案 →</a></p>
+</section>
+</div>
+</body>
+</html>
