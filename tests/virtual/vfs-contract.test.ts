@@ -92,6 +92,18 @@ describe.each(factories)('$name contract', ({ create }) => {
     if (!reopen) return;
     expect(decoder.decode(await reopen().read('persisted.txt'))).toBe('saved');
   });
+
+  it('serializes concurrent writes in invocation order for persistent backends', async () => {
+    const storage = new MemoryKeyValueStore();
+    const first = new PersistentFileSystem(storage, 'ordered', () => 10);
+    await Promise.all([
+      first.write('value.txt', encoder.encode('first')),
+      first.write('value.txt', encoder.encode('second')),
+      first.write('value.txt', encoder.encode('third')),
+    ]);
+    const reopened = new PersistentFileSystem(storage, 'ordered', () => 10);
+    expect(decoder.decode(await reopened.read('value.txt'))).toBe('third');
+  });
 });
 
 describe('OverlayFS change export', () => {

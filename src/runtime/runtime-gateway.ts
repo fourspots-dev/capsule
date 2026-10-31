@@ -104,6 +104,7 @@ export class RuntimeGateway {
       const core = coreRequest;
       if (core.type === 'hello') {
         port.postMessage({ type: 'ready', revision: this.clock.now() });
+        this.reply(port, requestId, true);
         return;
       }
       if (core.type === 'approval_response') {

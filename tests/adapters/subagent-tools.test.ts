@@ -64,6 +64,7 @@ describe('subagent tools', () => {
     expect(fake.spawn).toHaveBeenCalledWith(
       expect.objectContaining({
         parentTaskId: 'task_1',
+        parentSessionId: 'session_1',
         profile: 'page-auditor',
         contextMode: 'fresh',
       }),

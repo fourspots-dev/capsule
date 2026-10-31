@@ -1,5 +1,6 @@
 import { AgentError } from '../core/errors';
 import { OverlayFileSystem } from './overlay-fs';
+import type { VirtualKeyValueStore } from './persistent-fs';
 import type {
   VirtualChangeSet,
   VirtualFileSystem,
@@ -41,19 +42,30 @@ export interface SnapshotDiff {
 export class SnapshotVcs {
   private readonly snapshots = new Map<string, SnapshotRecord>();
   private readonly objects = new Map<string, Uint8Array>();
+  private readonly storage?: VirtualKeyValueStore;
+  private readonly storageKey: string;
   private sequence = 0;
   private head?: string;
+  private initialized?: Promise<void>;
 
   constructor(
     private readonly vfs: VirtualFileSystem,
-    private readonly now: () => number = () => Date.now()
-  ) {}
+    private readonly now: () => number = () => Date.now(),
+    options: {
+      storage?: VirtualKeyValueStore;
+      storageKey?: string;
+    } = {}
+  ) {
+    this.storage = options.storage;
+    this.storageKey = options.storageKey ?? 'tinyai:vcs:v1';
+  }
 
   get headId(): string | undefined {
     return this.head;
   }
 
   async commit(label?: string): Promise<SnapshotSummary> {
+    await this.initialize();
     const files: SnapshotRecord['files'] = {};
     for (const item of await this.vfs.list('', { recursive: true })) {
       if (item.kind !== 'file') continue;
@@ -81,10 +93,12 @@ export class SnapshotVcs {
     };
     this.snapshots.set(id, snapshot);
     this.head = id;
+    await this.persist();
     return summarize(snapshot);
   }
 
   async diff(fromId?: string, toId = this.head): Promise<SnapshotDiff> {
+    await this.initialize();
     if (!toId) throw new AgentError('VCS_NO_HEAD', 'No snapshot is available');
     const to = this.required(toId);
     const from = fromId
@@ -130,6 +144,7 @@ export class SnapshotVcs {
   }
 
   async restore(snapshotId: string): Promise<void> {
+    await this.initialize();
     const snapshot = this.required(snapshotId);
     const existing = await this.vfs.list('', { recursive: true });
     for (const item of existing.sort((a, b) => b.path.length - a.path.length)) {
@@ -140,6 +155,7 @@ export class SnapshotVcs {
       await this.vfs.write(path, this.object(file.objectId), { mode: file.mode });
     }
     this.head = snapshot.id;
+    await this.persist();
   }
 
   fork(): OverlayFileSystem {
@@ -147,16 +163,24 @@ export class SnapshotVcs {
   }
 
   async applyChanges(changes: VirtualChangeSet): Promise<void> {
+    await this.initialize();
     for (const file of changes.written) {
       await this.vfs.write(file.path, file.data, { mode: file.mode });
     }
     for (const path of changes.deleted) {
       await this.vfs.remove(path, { recursive: true });
     }
+    await this.persist();
   }
 
-  list(): SnapshotSummary[] {
+  async list(): Promise<SnapshotSummary[]> {
+    await this.initialize();
     return [...this.snapshots.values()].map(summarize);
+  }
+
+  async initialize(): Promise<void> {
+    this.initialized ??= this.load();
+    await this.initialized;
   }
 
   private object(id: string): Uint8Array {
@@ -170,6 +194,56 @@ export class SnapshotVcs {
     if (!snapshot) throw new AgentError('VCS_SNAPSHOT_NOT_FOUND', `Snapshot not found: ${id}`);
     return snapshot;
   }
+
+  private async load(): Promise<void> {
+    const raw = await this.storage?.get(this.storageKey);
+    if (!raw) return;
+    if (
+      !raw ||
+      typeof raw !== 'object' ||
+      Array.isArray(raw) ||
+      (raw as PersistedVcs).schemaVersion !== 1 ||
+      !Array.isArray((raw as PersistedVcs).snapshots) ||
+      !(raw as PersistedVcs).objects ||
+      typeof (raw as PersistedVcs).objects !== 'object'
+    ) {
+      throw new AgentError('VCS_STATE_INVALID', 'Persisted VCS state is invalid');
+    }
+    const state = raw as PersistedVcs;
+    this.sequence = Math.max(0, Number(state.sequence) || 0);
+    this.head = state.head;
+    for (const snapshot of state.snapshots) this.snapshots.set(snapshot.id, snapshot);
+    for (const [id, encoded] of Object.entries(state.objects)) {
+      this.objects.set(id, base64ToBytes(encoded));
+    }
+  }
+
+  private async persist(): Promise<void> {
+    if (!this.storage) return;
+    const state: PersistedVcs = {
+      schemaVersion: 1,
+      sequence: this.sequence,
+      ...(this.head ? { head: this.head } : {}),
+      snapshots: [...this.snapshots.values()].map((snapshot) => ({
+        ...snapshot,
+        files: Object.fromEntries(
+          Object.entries(snapshot.files).map(([path, file]) => [path, { ...file }])
+        ),
+      })),
+      objects: Object.fromEntries(
+        [...this.objects].map(([id, data]) => [id, bytesToBase64(data)])
+      ),
+    };
+    await this.storage.set(this.storageKey, state);
+  }
+}
+
+interface PersistedVcs {
+  schemaVersion: 1;
+  sequence: number;
+  head?: string;
+  snapshots: SnapshotRecord[];
+  objects: Record<string, string>;
 }
 
 export function unifiedDiff(
@@ -291,4 +365,19 @@ function hashBytes(value: Uint8Array): string {
 function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
   if (left.byteLength !== right.byteLength) return false;
   return left.every((byte, index) => byte === right[index]);
+}
+
+function bytesToBase64(value: Uint8Array): string {
+  let binary = '';
+  for (const byte of value) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value);
+  const result = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    result[index] = binary.charCodeAt(index);
+  }
+  return result;
 }

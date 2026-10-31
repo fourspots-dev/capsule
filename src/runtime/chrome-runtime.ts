@@ -309,6 +309,7 @@ export async function createChromeRuntimeBundle(
       taskId: child.taskId,
       sessionId: child.sessionId,
       parentTaskId: child.parentTaskId,
+      ...(child.parentSessionId ? { parentSessionId: child.parentSessionId } : {}),
       profileName: child.profileName,
       status: child.status,
       executionMode: child.executionMode,

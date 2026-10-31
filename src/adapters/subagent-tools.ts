@@ -41,6 +41,7 @@ export function createSubagentTools(options: SubagentToolOptions): ToolDefinitio
         const parent = options.parent(invocation);
         const spec: ChildTaskSpec = {
           parentTaskId: parent.taskId,
+          parentSessionId: invocation.sessionId,
           profile: requiredString(input, 'profile'),
           brief: requiredString(input, 'brief'),
           ...(Array.isArray(input.acceptance)
@@ -107,6 +108,24 @@ export function createSubagentTools(options: SubagentToolOptions): ToolDefinitio
       schema({ parentTaskId: { type: 'string' } }),
       async (input) =>
         options.coordinator.list(optionalString(input, 'parentTaskId')) as unknown as JsonValue
+    ),
+    tool(
+      'preview_merge',
+      'Preview a child workspace patch and any conflicts without changing the parent.',
+      schema({ childTaskId: { type: 'string' } }, ['childTaskId']),
+      async (input) =>
+        options.coordinator.previewMerge(
+          requiredString(input, 'childTaskId')
+        ) as unknown as JsonValue
+    ),
+    tool(
+      'apply_merge',
+      'Apply a reviewed, conflict-free child workspace patch to the parent.',
+      schema({ childTaskId: { type: 'string' } }, ['childTaskId']),
+      async (input) =>
+        options.coordinator.applyMerge(
+          requiredString(input, 'childTaskId')
+        ) as unknown as JsonValue
     ),
   ];
 }

@@ -47,6 +47,7 @@ interface PersistentManifest {
 export class PersistentFileSystem implements VirtualFileSystem {
   private readonly memory: MemoryFileSystem;
   private loaded?: Promise<void>;
+  private mutationTail: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly storage: VirtualKeyValueStore,
@@ -58,6 +59,7 @@ export class PersistentFileSystem implements VirtualFileSystem {
 
   async read(path: string, options: VirtualReadOptions = {}): Promise<Uint8Array> {
     await this.ensureLoaded();
+    await this.mutationTail;
     return this.memory.read(path, options);
   }
 
@@ -67,9 +69,11 @@ export class PersistentFileSystem implements VirtualFileSystem {
     options: VirtualWriteOptions = {}
   ): Promise<VirtualFileInfo> {
     await this.ensureLoaded();
-    const info = await this.memory.write(path, data, options);
-    await this.persist();
-    return info;
+    return this.mutate(async () => {
+      const info = await this.memory.write(path, data, options);
+      await this.persist();
+      return info;
+    });
   }
 
   async list(
@@ -77,18 +81,22 @@ export class PersistentFileSystem implements VirtualFileSystem {
     options: VirtualListOptions = {}
   ): Promise<VirtualFileInfo[]> {
     await this.ensureLoaded();
+    await this.mutationTail;
     return this.memory.list(path, options);
   }
 
   async stat(path: string, signal?: AbortSignal): Promise<VirtualFileInfo | undefined> {
     await this.ensureLoaded();
+    await this.mutationTail;
     return this.memory.stat(path, signal);
   }
 
   async mkdir(path: string, options: { recursive?: boolean } = {}): Promise<void> {
     await this.ensureLoaded();
-    await this.memory.mkdir(path, options);
-    await this.persist();
+    await this.mutate(async () => {
+      await this.memory.mkdir(path, options);
+      await this.persist();
+    });
   }
 
   async remove(
@@ -96,21 +104,27 @@ export class PersistentFileSystem implements VirtualFileSystem {
     options: { recursive?: boolean } = {}
   ): Promise<boolean> {
     await this.ensureLoaded();
-    const removed = await this.memory.remove(path, options);
-    if (removed) await this.persist();
-    return removed;
+    return this.mutate(async () => {
+      const removed = await this.memory.remove(path, options);
+      if (removed) await this.persist();
+      return removed;
+    });
   }
 
   async rename(from: string, to: string): Promise<void> {
     await this.ensureLoaded();
-    await this.memory.rename(from, to);
-    await this.persist();
+    await this.mutate(async () => {
+      await this.memory.rename(from, to);
+      await this.persist();
+    });
   }
 
   async copy(from: string, to: string): Promise<void> {
     await this.ensureLoaded();
-    await this.memory.copy(from, to);
-    await this.persist();
+    await this.mutate(async () => {
+      await this.memory.copy(from, to);
+      await this.persist();
+    });
   }
 
   watch(listener: (event: VirtualFsEvent) => void): () => void {
@@ -120,6 +134,15 @@ export class PersistentFileSystem implements VirtualFileSystem {
   private async ensureLoaded(): Promise<void> {
     this.loaded ??= this.load();
     await this.loaded;
+  }
+
+  private mutate<T>(operation: () => Promise<T>): Promise<T> {
+    const current = this.mutationTail.then(operation);
+    this.mutationTail = current.then(
+      () => undefined,
+      () => undefined
+    );
+    return current;
   }
 
   private async load(): Promise<void> {

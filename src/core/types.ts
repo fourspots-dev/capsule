@@ -252,11 +252,14 @@ export interface ChildTaskProjection {
   taskId: string;
   sessionId: string;
   parentTaskId: string;
+  parentSessionId?: string;
   profileName: string;
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   executionMode: 'foreground' | 'background' | 'isolated-worktree' | 'sandbox';
   summary?: string;
   updatedAt?: number;
+  workspaceId?: string;
+  changedFiles?: number;
 }
 
 export interface ProductProjection {

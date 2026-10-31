@@ -61,6 +61,7 @@ export interface TaskBudget {
 
 export interface ChildTaskSpec {
   parentTaskId: string;
+  parentSessionId?: string;
   profile: string;
   brief: string;
   acceptance?: string[];

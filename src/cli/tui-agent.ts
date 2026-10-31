@@ -1,14 +1,23 @@
 import { resolve } from 'node:path';
 import { OpenAIModelTransport } from '../adapters/openai-model';
 import { HostSessionStore } from '../adapters/host-session-store';
+import { RemoteToolchainProvider } from '../adapters/remote-toolchain-provider';
+import { createSubagentTools } from '../adapters/subagent-tools';
 import { createVirtualWorkspaceTools } from '../adapters/virtual-workspace-tools';
+import {
+  AgentProfileRegistry,
+  type PermissionPolicy,
+} from '../core/agent-profile';
 import type { ApprovalPort } from '../core/ports';
 import { SequentialIdGenerator, systemClock } from '../core/ports';
 import { PermissionModeRegistry, PolicyEngine } from '../core/policy';
+import { SubagentCoordinator } from '../core/subagent-coordinator';
 import { ToolExecutor } from '../core/tool-executor';
+import type { JsonValue, ToolDefinition } from '../core/types';
 import { WorkspaceRuntime } from '../core/workspace-runtime';
 import { NodeHostBridge } from '../node/node-host';
 import { runNodeTui } from '../node/run-tui';
+import { WorkspaceSubagentDriver } from '../runtime/workspace-subagent-driver';
 import {
   HostViewStateStorage,
   LocalTuiRuntimePort,
@@ -59,22 +68,143 @@ async function main(): Promise<void> {
     const bundle = await host.workspace.importWorkspace?.();
     if (bundle) await workspace.initialize(bundle, { replace: false });
   }
+  await workspace.sync.captureBaseline(await workspace.exportBundle());
   const baseline = await workspace.checkpoint('tui-baseline');
+  const remoteRunner = process.env.TINYAI_REMOTE_RUNNER_URL;
+  if (remoteRunner) {
+    workspace.shell.addProvider(
+      new RemoteToolchainProvider({
+        endpoint: remoteRunner,
+        ...(process.env.TINYAI_REMOTE_RUNNER_TOKEN
+          ? { token: process.env.TINYAI_REMOTE_RUNNER_TOKEN }
+          : {}),
+        workspace: workspace.fs,
+        ...(process.env.TINYAI_REMOTE_RUNNER_COMMANDS
+          ? {
+              commandAllowlist: process.env.TINYAI_REMOTE_RUNNER_COMMANDS
+                .split(',')
+                .map((item) => item.trim())
+                .filter(Boolean),
+            }
+          : {}),
+      })
+    );
+  }
 
   const modes = new PermissionModeRegistry('sandbox-auto', () => systemClock.now());
-  const tools = new ToolExecutor(createVirtualWorkspaceTools(workspace), denyPrompt, {
-    policy: new PolicyEngine((sessionId) => modes.mode(sessionId)),
+  const ids = new SequentialIdGenerator();
+  const sessionStore = new HostSessionStore(host.storage);
+  const model = new OpenAIModelTransport({
+    baseUrl: options.baseUrl,
+    apiKey,
+    model: options.model,
   });
-  const runtime = new WorkspaceRuntime({
-    model: new OpenAIModelTransport({
-      baseUrl: options.baseUrl,
-      apiKey,
-      model: options.model,
+  const rootPermissions: PermissionPolicy = {
+    capabilities: [
+      'workspace:read',
+      'workspace:write',
+      'workspace:execute',
+      'workspace:jobs',
+      'agent:spawn',
+      'agent:manage',
+    ],
+    effects: ['read', 'write', 'execute'],
+  };
+  const profiles = new AgentProfileRegistry();
+  profiles.register({
+    name: 'worker',
+    displayName: 'Virtual workspace worker',
+    description: 'A generic delegated coding task operating on an isolated workspace fork.',
+    instructions:
+      'Work only from the delegated brief. Inspect the fork, make focused changes, run relevant verification, and report evidence plus unresolved items.',
+    source: 'builtin',
+    skills: [],
+    tools: {},
+    mcpServers: [],
+    permissions: {
+      capabilities: [...rootPermissions.capabilities],
+      effects: [...rootPermissions.effects],
+    },
+    contextMode: 'fresh',
+    execution: {
+      defaultMode: 'background',
+      allowedModes: ['foreground', 'background', 'isolated-worktree'],
+    },
+    maxDepth: 2,
+    maxConcurrency: 4,
+  });
+  const sessionWorkspaces = new Map<string, VirtualWorkspace>();
+  const sessionPermissions = new Map<string, PermissionPolicy>();
+  const sessionDepths = new Map<string, number>();
+  const toolCache = new Map<VirtualWorkspace, ToolDefinition[]>();
+  const toolsFor = (target: VirtualWorkspace): ToolDefinition[] => {
+    let definitions = toolCache.get(target);
+    if (!definitions) {
+      definitions = createVirtualWorkspaceTools(target);
+      toolCache.set(target, definitions);
+    }
+    return definitions;
+  };
+  const routedTools = toolsFor(workspace).map((definition) => ({
+    ...definition,
+    execute: async (input: JsonValue, invocation: Parameters<ToolDefinition['execute']>[1]) => {
+      const target = sessionWorkspaces.get(invocation.sessionId) ?? workspace;
+      const selected = toolsFor(target).find((item) => item.name === definition.name);
+      if (!selected) throw new Error(`Virtual tool unavailable: ${definition.name}`);
+      return selected.execute(input, invocation);
+    },
+  }));
+  let runtime!: WorkspaceRuntime;
+  const driver = new WorkspaceSubagentDriver({
+    ids,
+    disposeRuntime: false,
+    async forkWorkspace({ parentSessionId, spec }) {
+      const parent =
+        sessionWorkspaces.get(parentSessionId ?? '') ?? workspace;
+      const child = await parent.fork();
+      return child;
+    },
+    createRuntime: ({ sessionId, workspace: childWorkspace, profile, spec }) => {
+      if (childWorkspace) {
+        sessionWorkspaces.set(sessionId, childWorkspace);
+        sessionDepths.set(sessionId, 1);
+      }
+      sessionPermissions.set(sessionId, profile.effectivePermissions);
+      return runtime;
+    },
+  });
+  const coordinator = new SubagentCoordinator({
+    registry: profiles,
+    driver,
+    ids,
+    now: () => systemClock.now(),
+    contextProvider: async (parentTaskId) =>
+      runtime.contextForTask(parentTaskId),
+  });
+  const subagentTools = createSubagentTools({
+    coordinator,
+    parent: (invocation) => ({
+      taskId: invocation.taskId,
+      depth: sessionDepths.get(invocation.sessionId) ?? 0,
+      maxDepth: 2,
+      permissions:
+        sessionPermissions.get(invocation.sessionId) ??
+        rootPermissions,
     }),
+  });
+  const tools = new ToolExecutor(
+    [...routedTools, ...subagentTools],
+    denyPrompt,
+    {
+      policy: new PolicyEngine((sessionId) => modes.mode(sessionId)),
+    }
+  );
+  runtime = new WorkspaceRuntime({
+    model,
     tools,
     clock: systemClock,
-    ids: new SequentialIdGenerator(),
-    sessionStore: new HostSessionStore(host.storage),
+    ids,
+    sessionStore,
     permissionModes: modes,
     systemPrompt: [
       'You are tinyai, a coding agent operating in a portable virtual workspace.',
@@ -86,6 +216,22 @@ async function main(): Promise<void> {
       'Final answers must summarize changes, verification evidence and unresolved risks.',
     ].join('\n'),
     maxSteps: Number(process.env.TINYAI_MAX_STEPS ?? 60),
+  });
+  const unsubscribeChildren = coordinator.subscribe((child) => {
+    runtime.updateChildTask(child.parentTaskId, {
+      taskId: child.taskId,
+      sessionId: child.sessionId,
+      parentTaskId: child.parentTaskId,
+      ...(child.parentSessionId
+        ? { parentSessionId: child.parentSessionId }
+        : {}),
+      profileName: child.profileName,
+      status: child.status,
+      executionMode: child.executionMode,
+      ...(child.result?.summary ? { summary: child.result.summary } : {}),
+      ...(child.completedAt ? { updatedAt: child.completedAt } : {}),
+      changedFiles: child.result?.changedFiles?.length,
+    });
   });
 
   const views = new ViewStateStore(new HostViewStateStorage(host.storage));
@@ -121,11 +267,41 @@ async function main(): Promise<void> {
         risks: [],
       };
     },
+    agentWorkspace: {
+      async previewMerge(taskId) {
+        const preview = await coordinator.previewMerge(taskId);
+        return {
+          from: 'child-fork',
+          to: preview.workspaceId ?? taskId,
+          files: preview.changes,
+          additions: preview.changes.reduce(
+            (total, file) =>
+              total +
+              (file.patch?.split('\n').filter((line) => line.startsWith('+')).length ?? 0),
+            0
+          ),
+          deletions: preview.changes.reduce(
+            (total, file) =>
+              total +
+              (file.patch?.split('\n').filter((line) => line.startsWith('-')).length ?? 0),
+            0
+          ),
+          risks: preview.conflicts.map(
+            (conflict) => `${conflict.path}: ${conflict.reason}`
+          ),
+        };
+      },
+      async applyMerge(taskId) {
+        await coordinator.applyMerge(taskId);
+      },
+    },
   });
   await app.initialize();
   try {
     await runNodeTui(app, host.terminal!);
   } finally {
+    unsubscribeChildren();
+    await coordinator.dispose();
     await runtime.dispose();
     await workspace.jobs.dispose();
   }

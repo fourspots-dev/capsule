@@ -26,7 +26,14 @@ import {
   type VirtualShellOptions,
 } from './shell';
 import type { VirtualFileSystem } from './types';
-import { SnapshotVcs, type SnapshotDiff, type SnapshotSummary } from './vcs';
+import {
+  SnapshotVcs,
+  unifiedDiff,
+  type SnapshotDiff,
+  type SnapshotSummary,
+} from './vcs';
+import { WorkspaceSyncService } from './sync';
+import { hashVirtualBytes } from './search';
 
 export interface VirtualWorkspaceOptions {
   host?: HostBridge;
@@ -37,6 +44,12 @@ export interface VirtualWorkspaceOptions {
   now?: () => number;
   providers?: VirtualCommandProvider[];
   shell?: Omit<VirtualShellOptions, 'providers'>;
+  persistVcs?: boolean;
+  persistJobs?: boolean;
+  vcsStorageKey?: string;
+  jobsStorageKey?: string;
+  parent?: VirtualWorkspace;
+  forkBaseHashes?: Readonly<Record<string, string>>;
 }
 
 export interface VirtualWorkspaceStatus {
@@ -45,6 +58,23 @@ export interface VirtualWorkspaceStatus {
   fileCount: number;
   directoryCount: number;
   persistent: boolean;
+}
+
+export interface VirtualMergePreview {
+  parentWorkspaceId?: string;
+  childWorkspaceId?: string;
+  changes: Array<{
+    path: string;
+    status: 'added' | 'modified' | 'deleted';
+    patch?: string;
+  }>;
+  conflicts: Array<{
+    path: string;
+    reason: 'parent_changed' | 'parent_deleted';
+    parentHash?: string;
+    forkBaseHash?: string;
+    childHash?: string;
+  }>;
 }
 
 /**
@@ -57,6 +87,11 @@ export class VirtualWorkspace {
   readonly shell: VirtualShell;
   readonly vcs: SnapshotVcs;
   readonly jobs: VirtualJobManager;
+  readonly sync: WorkspaceSyncService;
+  readonly workspaceId: string;
+  readonly parent?: VirtualWorkspace;
+  private readonly forkBaseHashes?: Record<string, string>;
+  private readonly id: string;
   readonly persistent: boolean;
   private readonly providers: VirtualCommandProvider[];
   private readonly now: () => number;
@@ -68,6 +103,12 @@ export class VirtualWorkspace {
     this.now = options.now ?? (() => this.host.clock?.now() ?? Date.now());
     this.providers = [...(options.providers ?? [])];
     this.storageKey = options.storageKey ?? 'tinyai:workspace:v1';
+    this.id = options.storageKey ?? `workspace_${Math.random().toString(36).slice(2)}`;
+    this.workspaceId = this.id;
+    this.parent = options.parent;
+    this.forkBaseHashes = options.forkBaseHashes
+      ? { ...options.forkBaseHashes }
+      : undefined;
     if (options.vfs) {
       this.fs = options.vfs;
       this.persistent = false;
@@ -89,13 +130,34 @@ export class VirtualWorkspace {
       ...(options.shell ?? {}),
       providers: this.providers,
     });
-    this.vcs = new SnapshotVcs(this.fs, this.now);
-    this.jobs = new VirtualJobManager(this.shell, {
-      ...(hasHostCapability(this.host, 'storage') && this.host.storage
-        ? { storage: this.host.storage }
+    this.vcs = new SnapshotVcs(this.fs, this.now, {
+      ...(options.persistVcs !== false &&
+      hasHostCapability(this.host, 'storage') &&
+      this.host.storage
+        ? {
+            storage: this.host.storage,
+            storageKey: options.vcsStorageKey ?? `${this.storageKey}:vcs`,
+          }
         : {}),
-      storageKey: `${this.storageKey}:jobs`,
+    });
+    this.jobs = new VirtualJobManager(this.shell, {
+      ...(options.persistJobs !== false &&
+      hasHostCapability(this.host, 'storage') &&
+      this.host.storage
+        ? {
+            storage: this.host.storage,
+            storageKey: options.jobsStorageKey ?? `${this.storageKey}:jobs`,
+          }
+        : {}),
       now: this.now,
+    });
+    this.sync = new WorkspaceSyncService(this.fs, {
+      ...(hasHostCapability(this.host, 'storage') && this.host.storage
+        ? {
+            storage: this.host.storage,
+            storageKey: `${this.storageKey}:sync`,
+          }
+        : {}),
     });
   }
 
@@ -119,6 +181,7 @@ export class VirtualWorkspace {
   }
 
   async status(): Promise<VirtualWorkspaceStatus> {
+    await this.vcs.initialize();
     const entries = await this.fs.list('', { recursive: true });
     return {
       ...(this.vcs.headId ? { head: this.vcs.headId } : {}),
@@ -133,6 +196,7 @@ export class VirtualWorkspace {
     metadata?: Record<string, string>;
     syncToHost?: boolean;
   } = {}): Promise<WorkspaceBundle> {
+    await this.vcs.initialize();
     const bundle = await exportWorkspaceBundle(this.fs, {
       now: this.now,
       metadata: options.metadata,
@@ -154,13 +218,18 @@ export class VirtualWorkspace {
     );
   }
 
-  fork(): VirtualWorkspace {
+  async fork(): Promise<VirtualWorkspace> {
+    const baseHashes = await currentHashes(this.fs);
     const overlay = this.vcs.fork();
     return new VirtualWorkspace({
       host: this.host,
       vfs: overlay,
       now: this.now,
       providers: this.providers,
+      persistVcs: false,
+      persistJobs: false,
+      parent: this,
+      forkBaseHashes: baseHashes,
       shell: {
         cwd: this.shell.currentDirectory,
         env: { ...this.shell.environment },
@@ -168,9 +237,113 @@ export class VirtualWorkspace {
     });
   }
 
+  async previewMerge(child: VirtualWorkspace): Promise<VirtualMergePreview> {
+    if (child.parent !== this || !(child.fs instanceof OverlayFileSystem)) {
+      throw new AgentError(
+        'WORKSPACE_MERGE_INVALID',
+        'Child workspace is not a fork of this workspace'
+      );
+    }
+    const changes = await child.fs.changes();
+    const base = child.forkBaseHashes ?? {};
+    const preview: VirtualMergePreview = {
+      parentWorkspaceId: this.workspaceId,
+      childWorkspaceId: child.workspaceId,
+      changes: [],
+      conflicts: [],
+    };
+    for (const write of changes.written.sort((left, right) => left.path.localeCompare(right.path))) {
+      const parentData = await this.fs.read(write.path).catch(() => undefined);
+      const parentHash = parentData ? hashVirtualBytes(parentData) : undefined;
+      const childHash = hashVirtualBytes(write.data);
+      if (parentHash !== base[write.path] && parentHash !== childHash) {
+        preview.conflicts.push({
+          path: write.path,
+          reason: parentHash === undefined ? 'parent_deleted' : 'parent_changed',
+          ...(parentHash ? { parentHash } : {}),
+          ...(base[write.path] ? { forkBaseHash: base[write.path] } : {}),
+          childHash,
+        });
+      }
+      const patch = unifiedDiff(
+        parentData ?? new Uint8Array(),
+        write.data,
+        write.path
+      ).patch;
+      preview.changes.push({
+        path: write.path,
+        status: parentData ? 'modified' : 'added',
+        ...(patch ? { patch } : {}),
+      });
+    }
+    for (const path of changes.deleted.sort()) {
+      const parentData = await this.fs.read(path).catch(() => undefined);
+      const parentHash = parentData ? hashVirtualBytes(parentData) : undefined;
+      if (parentData && parentHash !== base[path]) {
+        preview.conflicts.push({
+          path,
+          reason: 'parent_changed',
+          parentHash,
+          ...(base[path] ? { forkBaseHash: base[path] } : {}),
+        });
+      }
+      const patch = unifiedDiff(
+        parentData ?? new Uint8Array(),
+        new Uint8Array(),
+        path
+      ).patch;
+      preview.changes.push({
+        path,
+        status: 'deleted',
+        ...(patch ? { patch } : {}),
+      });
+    }
+    return preview;
+  }
+
+  async applyMerge(child: VirtualWorkspace): Promise<VirtualMergePreview> {
+    const preview = await this.previewMerge(child);
+    if (preview.conflicts.length) {
+      throw new AgentError(
+        'WORKSPACE_MERGE_CONFLICT',
+        `Workspace merge conflicts: ${preview.conflicts.map((item) => item.path).join(', ')}`,
+        {
+          details: {
+            conflicts: preview.conflicts,
+          } as unknown as import('../core/types').JsonValue,
+        }
+      );
+    }
+    if (!(child.fs instanceof OverlayFileSystem)) {
+      throw new AgentError('WORKSPACE_MERGE_INVALID', 'Child workspace is not an overlay');
+    }
+    await this.vcs.applyChanges(await child.fs.changes());
+    await this.checkpoint(`merge:${child.workspaceId}`);
+    return preview;
+  }
+
+  async discardFork(child: VirtualWorkspace): Promise<void> {
+    if (child.parent !== this || !(child.fs instanceof OverlayFileSystem)) {
+      throw new AgentError('WORKSPACE_MERGE_INVALID', 'Child workspace is not a fork');
+    }
+    await child.fs.discard();
+  }
+
   async archive(): Promise<ArchiveFileSystem> {
     return new ArchiveFileSystem(await this.exportBundle(), this.now);
   }
+}
+
+async function currentHashes(
+  vfs: VirtualFileSystem
+): Promise<Record<string, string>> {
+  const hashes: Record<string, string> = {};
+  for (const file of await vfs.list('', { recursive: true })) {
+    if (file.kind === 'file') {
+      hashes[file.path] = hashVirtualBytes(await vfs.read(file.path));
+    }
+  }
+  return hashes;
 }
 
 export async function createVirtualWorkspace(

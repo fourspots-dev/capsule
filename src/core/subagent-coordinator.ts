@@ -29,6 +29,7 @@ export interface ChildTaskRecord {
   taskId: string;
   sessionId: string;
   parentTaskId: string;
+  parentSessionId?: string;
   profileName: string;
   brief: string;
   contextMode: ChildTaskSpec['contextMode'];
@@ -52,8 +53,28 @@ export interface ChildDriver {
   send(taskId: string, message: string, delivery: 'guide' | 'queue'): Promise<void>;
   stop(taskId: string): Promise<void>;
   projection(taskId: string): ProductProjection | undefined;
+  previewMerge?(taskId: string): Promise<ChildMergePreview>;
+  applyMerge?(taskId: string): Promise<ChildMergePreview>;
+  discardWorkspace?(taskId: string): Promise<void>;
   resume?(taskId: string, message: string): Promise<ChildResult>;
   dispose?(): Promise<void>;
+}
+
+export interface ChildMergePreview {
+  taskId: string;
+  workspaceId?: string;
+  changes: Array<{
+    path: string;
+    status: 'added' | 'modified' | 'deleted';
+    patch?: string;
+  }>;
+  conflicts: Array<{
+    path: string;
+    reason: string;
+    parentHash?: string;
+    forkBaseHash?: string;
+    childHash?: string;
+  }>;
 }
 
 export interface ParentTaskContext {
@@ -105,13 +126,17 @@ export class SubagentCoordinator {
         normalized,
         normalized.contextMode === 'fork'
           ? await this.forkContext(normalized.parentTaskId)
-          : undefined
+          : undefined,
+        profile.instructions
       ),
     });
     const record: ChildTaskRecord = {
       taskId,
       sessionId: created.sessionId,
       parentTaskId: normalized.parentTaskId,
+      ...(normalized.parentSessionId
+        ? { parentSessionId: normalized.parentSessionId }
+        : {}),
       profileName: profile.name,
       brief: normalized.brief,
       contextMode: normalized.contextMode,
@@ -191,6 +216,28 @@ export class SubagentCoordinator {
 
   get(taskId: string): ChildTaskRecord | undefined {
     return this.read(taskId);
+  }
+
+  async previewMerge(taskId: string): Promise<ChildMergePreview> {
+    this.required(taskId);
+    if (!this.options.driver.previewMerge) {
+      throw new AgentError(
+        'CHILD_MERGE_UNSUPPORTED',
+        'The child driver does not support workspace merge preview'
+      );
+    }
+    return this.options.driver.previewMerge(taskId);
+  }
+
+  async applyMerge(taskId: string): Promise<ChildMergePreview> {
+    this.required(taskId);
+    if (!this.options.driver.applyMerge) {
+      throw new AgentError(
+        'CHILD_MERGE_UNSUPPORTED',
+        'The child driver does not support workspace merge'
+      );
+    }
+    return this.options.driver.applyMerge(taskId);
   }
 
   subscribe(listener: ChildListener): () => void {
@@ -276,6 +323,14 @@ export class SubagentCoordinator {
     return task ? structuredClone(task) : undefined;
   }
 
+  private required(taskId: string): ChildTaskRecord {
+    const task = this.tasks.get(taskId);
+    if (!task) {
+      throw new AgentError('CHILD_NOT_FOUND', `Child task not found: ${taskId}`);
+    }
+    return task;
+  }
+
   private runningChildren(parentTaskId: string): number {
     return [...this.tasks.values()].filter(
       (task) =>
@@ -299,14 +354,23 @@ export class SubagentCoordinator {
   }
 }
 
-function childPrompt(spec: ChildTaskSpec, inherited: ModelMessage[] = []): string {
+function childPrompt(
+  spec: ChildTaskSpec,
+  inherited: ModelMessage[] = [],
+  profileInstructions = ''
+): string {
   const lines = [
     'Complete this delegated task independently.',
     '',
     spec.brief,
-    '',
-    'Return a structured result with a concise summary, evidence, artifacts, unresolved items, and changed files when applicable.',
   ];
+  if (profileInstructions.trim()) {
+    lines.push('', 'Profile instructions:', profileInstructions.trim());
+  }
+  lines.push(
+    '',
+    'Return a structured result with a concise summary, evidence, artifacts, unresolved items, and changed files when applicable.'
+  );
   if (spec.acceptance?.length) {
     lines.push('', 'Acceptance criteria:', ...spec.acceptance.map((item) => `- ${item}`));
   }

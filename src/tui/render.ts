@@ -156,7 +156,7 @@ function renderAgents(
     );
   }
   while (lines.length < height - 1) lines.push('');
-  lines.push('Enter view · S stop · F filter · Esc back');
+  lines.push('Enter view · S stop · M merge preview · A apply merge · F filter · Esc back');
   return lines.slice(-height);
 }
 

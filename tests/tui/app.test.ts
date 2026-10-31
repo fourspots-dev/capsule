@@ -120,4 +120,39 @@ describe('TuiApp and renderer', () => {
     expect(app.routes.current.kind).toBe('conversation');
     await app.dispose();
   });
+
+  it('shows a generic child agent and navigates into its live session', async () => {
+    const { app, runtime } = await appWithAnswer('parent done');
+    await app.handleInput('coordinate work\r');
+    await runtime.waitForSessionIdle(app.sessionsController.active!);
+    const parentSession = app.sessionsController.active!;
+    const parentTask = runtime
+      .getProjection(parentSession)
+      .rows.find((row) => row.kind === 'user')!.productTurnId;
+    await runtime.ensureSessionReady('child_session_live');
+    expect(
+      runtime.updateChildTask(parentTask, {
+        taskId: 'child_task_live',
+        sessionId: 'child_session_live',
+        parentTaskId: parentTask,
+        parentSessionId: parentSession,
+        profileName: 'schema-migrator',
+        status: 'running',
+        executionMode: 'background',
+        summary: 'mapping call sites',
+        updatedAt: 10,
+      })
+    ).toBe(true);
+
+    await app.handleInput('\x07');
+    const board = app.render(100, 24).join('\n');
+    expect(board).toContain('schema-migrator');
+    await app.handleInput('\r');
+    expect(app.sessionsController.active).toBe('child_session_live');
+    expect(app.routes.current.kind).toBe('conversation');
+    await app.handleInput('\x1b');
+    expect(app.sessionsController.active).toBe(parentSession);
+    expect(app.routes.current.kind).toBe('agents');
+    await app.dispose();
+  });
 });

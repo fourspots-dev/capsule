@@ -66,6 +66,14 @@ export class VirtualShell {
     return { ...this.env };
   }
 
+  addProvider(provider: VirtualCommandProvider): () => void {
+    this.providers.push(provider);
+    return () => {
+      const index = this.providers.indexOf(provider);
+      if (index >= 0) this.providers.splice(index, 1);
+    };
+  }
+
   async execute(
     script: string,
     options: { signal?: AbortSignal; stdin?: string } = {}

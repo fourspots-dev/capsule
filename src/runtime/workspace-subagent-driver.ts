@@ -1,7 +1,9 @@
 import type { ChildTaskSpec, ResolvedAgentProfile } from '../core/agent-profile';
 import type { CommandAck, CommandEnvelope, ProductProjection } from '../core/types';
 import type { ChildDriver, ChildResult } from '../core/subagent-coordinator';
+import type { ChildMergePreview } from '../core/subagent-coordinator';
 import type { WorkspaceRuntime } from '../core/workspace-runtime';
+import type { VirtualWorkspace } from '../virtual';
 
 interface ChildRuntime {
   taskId: string;
@@ -9,6 +11,7 @@ interface ChildRuntime {
   spec: ChildTaskSpec;
   profile: ResolvedAgentProfile;
   runtime: WorkspaceRuntime;
+  workspace?: VirtualWorkspace;
 }
 
 export interface WorkspaceSubagentDriverOptions {
@@ -17,7 +20,16 @@ export interface WorkspaceSubagentDriverOptions {
     sessionId: string;
     spec: ChildTaskSpec;
     profile: ResolvedAgentProfile;
+    workspace?: VirtualWorkspace;
   }): Promise<WorkspaceRuntime> | WorkspaceRuntime;
+  forkWorkspace?(request: {
+    taskId: string;
+    parentTaskId: string;
+    parentSessionId?: string;
+    spec: ChildTaskSpec;
+    profile: ResolvedAgentProfile;
+  }): Promise<VirtualWorkspace | undefined> | VirtualWorkspace | undefined;
+  disposeRuntime?: boolean;
   ids: { next(prefix: string): string };
   now?: () => number;
 }
@@ -34,11 +46,21 @@ export class WorkspaceSubagentDriver implements ChildDriver {
     prompt: string;
   }): Promise<{ sessionId: string }> {
     const sessionId = this.options.ids.next('child_session');
+    const workspace = await this.options.forkWorkspace?.({
+      taskId: request.taskId,
+      parentTaskId: request.spec.parentTaskId,
+      ...(request.spec.parentSessionId
+        ? { parentSessionId: request.spec.parentSessionId }
+        : {}),
+      spec: request.spec,
+      profile: request.profile,
+    });
     const runtime = await this.options.createRuntime({
       taskId: request.taskId,
       sessionId,
       spec: request.spec,
       profile: request.profile,
+      ...(workspace ? { workspace } : {}),
     });
     this.children.set(request.taskId, {
       taskId: request.taskId,
@@ -46,6 +68,7 @@ export class WorkspaceSubagentDriver implements ChildDriver {
       spec: request.spec,
       profile: request.profile,
       runtime,
+      ...(workspace ? { workspace } : {}),
     });
     this.prompts.set(request.taskId, request.prompt);
     return { sessionId };
@@ -98,6 +121,41 @@ export class WorkspaceSubagentDriver implements ChildDriver {
     }
   }
 
+  async previewMerge(taskId: string): Promise<ChildMergePreview> {
+    const child = this.child(taskId);
+    if (!child.workspace?.parent) {
+      throw new Error(`Child workspace fork not found: ${taskId}`);
+    }
+    const preview = await child.workspace.parent.previewMerge(child.workspace);
+    return {
+      taskId,
+      workspaceId: child.workspace.workspaceId,
+      changes: preview.changes,
+      conflicts: preview.conflicts,
+    };
+  }
+
+  async applyMerge(taskId: string): Promise<ChildMergePreview> {
+    const child = this.child(taskId);
+    if (!child.workspace?.parent) {
+      throw new Error(`Child workspace fork not found: ${taskId}`);
+    }
+    const preview = await child.workspace.parent.applyMerge(child.workspace);
+    return {
+      taskId,
+      workspaceId: child.workspace.workspaceId,
+      changes: preview.changes,
+      conflicts: preview.conflicts,
+    };
+  }
+
+  async discardWorkspace(taskId: string): Promise<void> {
+    const child = this.child(taskId);
+    if (child.workspace?.parent) {
+      await child.workspace.parent.discardFork(child.workspace);
+    }
+  }
+
   async resume(taskId: string, message: string): Promise<ChildResult> {
     const child = this.child(taskId);
     const ack = await child.runtime.command(
@@ -109,7 +167,9 @@ export class WorkspaceSubagentDriver implements ChildDriver {
   }
 
   async dispose(): Promise<void> {
-    await Promise.all([...this.children.values()].map((child) => child.runtime.dispose()));
+    if (this.options.disposeRuntime !== false) {
+      await Promise.all([...this.children.values()].map((child) => child.runtime.dispose()));
+    }
     this.children.clear();
     this.prompts.clear();
   }

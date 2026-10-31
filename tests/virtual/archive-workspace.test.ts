@@ -107,12 +107,24 @@ describe('VirtualWorkspace and HostBridge integration', () => {
     const first = new VirtualWorkspace({ host, storageKey: 'workspace:test' });
     await first.fs.write('hello.txt', encoder.encode('persisted'));
     await first.checkpoint('saved');
+    const firstHead = first.vcs.headId;
 
     const second = new VirtualWorkspace({ host, storageKey: 'workspace:test' });
     expect(decoder.decode(await second.fs.read('hello.txt'))).toBe('persisted');
     expect(await second.status()).toMatchObject({
       fileCount: 1,
       persistent: true,
+      head: firstHead,
+    });
+    await second.fs.write('hello.txt', encoder.encode('updated'));
+    const secondHead = await second.checkpoint('updated');
+    expect(await second.diff(firstHead, secondHead.id)).toMatchObject({
+      files: [
+        expect.objectContaining({
+          path: 'hello.txt',
+          status: 'modified',
+        }),
+      ],
     });
   });
 
@@ -179,5 +191,21 @@ describe('VirtualWorkspace and HostBridge integration', () => {
       id: job.id,
       status: 'completed',
     });
+  });
+
+  it('does not share persistent VCS or job state with child forks', async () => {
+    const host = new MemoryHostBridge();
+    const parent = new VirtualWorkspace({ host, storageKey: 'workspace:fork' });
+    await parent.fs.write('base.txt', encoder.encode('base'));
+    await parent.checkpoint('base');
+    const parentJob = await parent.jobs.start('echo parent');
+    await parent.jobs.wait(parentJob.id);
+
+    const fork = await parent.fork();
+    await fork.fs.write('base.txt', encoder.encode('child'));
+    await fork.checkpoint('child');
+    expect(await fork.jobs.list()).toEqual([]);
+    expect(await parent.jobs.list()).toHaveLength(1);
+    expect(decoder.decode(await parent.fs.read('base.txt'))).toBe('base');
   });
 });

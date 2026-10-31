@@ -3,11 +3,12 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "build": "npm run typecheck && npm run clean && npm run build:sidepanel && npm run build:background && npm run build:cli && npm run build:tui && npm run build:proxy && npm run build:package",
+    "build": "npm run typecheck && npm run clean && npm run build:sidepanel && npm run build:background && npm run build:cli && npm run build:tui && npm run build:runner && npm run build:proxy && npm run build:package",
     "build:sidepanel": "esbuild src/sidepanel.ts --bundle --format=iife --target=chrome120 --outfile=extension/js/sidepanel/main.js",
     "build:background": "esbuild src/background.ts --bundle --format=iife --target=chrome120 --outfile=extension/js/background/main.js",
     "build:cli": "esbuild src/cli/coding-agent.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tinyai-coding-agent.cjs",
     "build:tui": "esbuild src/cli/tui-agent.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tinyai-tui.cjs",
+    "build:runner": "esbuild src/cli/remote-runner.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tinyai-remote-runner.cjs",
     "build:proxy": "mkdir -p dist/allowlist-proxy && cp docker/allowlist-proxy/Dockerfile dist/allowlist-proxy/Dockerfile && esbuild src/node/allowlist-proxy-server.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/allowlist-proxy/allowlist-proxy.cjs",
     "build:package": "node scripts/package-extension.mjs",
     "clean": "rm -rf extension/js/sidepanel extension/js/background && mkdir -p extension/js/sidepanel extension/js/background",

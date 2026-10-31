@@ -26,13 +26,20 @@ export interface TuiAppOptions {
   provider?: string;
   processAvailable?: boolean;
   review?: TuiReviewProvider;
+  agentWorkspace?: TuiAgentWorkspacePort;
   now?: () => number;
 }
 
+export interface TuiAgentWorkspacePort {
+  previewMerge(taskId: string): Promise<TuiReviewSnapshot>;
+  applyMerge(taskId: string): Promise<void>;
+}
+
 interface Confirmation {
-  kind: 'rename' | 'delete';
+  kind: 'rename' | 'delete' | 'merge';
   sessionId: string;
   value: string;
+  taskId?: string;
 }
 
 export class TuiApp {
@@ -332,6 +339,42 @@ export class TuiApp {
       }
       return;
     }
+    if (intent.type === 'text' && intent.text.toLowerCase() === 'm') {
+      const selected = controls.rows.find(
+        (row) => row.agent.taskId === controls.route.selectedId
+      );
+      if (selected && this.options.agentWorkspace) {
+        try {
+          this.review = await this.options.agentWorkspace.previewMerge(
+            selected.agent.taskId
+          );
+          this.routes.push({
+            kind: 'review',
+            targetSessionId: this.sessionsController.active ?? '',
+          });
+        } catch (error) {
+          this.statusMessage =
+            error instanceof Error ? error.message : String(error);
+        }
+      } else if (selected) {
+        this.statusMessage = 'Workspace merge is unavailable for this driver';
+      }
+      return;
+    }
+    if (intent.type === 'text' && intent.text.toLowerCase() === 'a') {
+      const selected = controls.rows.find(
+        (row) => row.agent.taskId === controls.route.selectedId
+      );
+      if (selected && this.options.agentWorkspace) {
+        this.confirmation = {
+          kind: 'merge',
+          sessionId: this.sessionsController.active ?? '',
+          value: '',
+          taskId: selected.agent.taskId,
+        };
+      }
+      return;
+    }
     if (intent.type === 'activate') {
       const selected = controls.rows.find(
         (row) => row.agent.taskId === controls.route.selectedId
@@ -363,6 +406,21 @@ export class TuiApp {
           await this.refreshSessions();
         }
         this.confirmation = undefined;
+      }
+      return;
+    }
+    if (confirmation.kind === 'merge') {
+      if (intent.type === 'activate' || intent.type === 'send') {
+        try {
+          await this.options.agentWorkspace!.applyMerge(confirmation.taskId!);
+          this.statusMessage = 'Child workspace merged';
+          this.confirmation = undefined;
+          this.routes.back();
+        } catch (error) {
+          this.statusMessage =
+            error instanceof Error ? error.message : String(error);
+          this.confirmation = undefined;
+        }
       }
       return;
     }
@@ -570,7 +628,9 @@ export class TuiApp {
               label:
                 this.confirmation.kind === 'rename'
                   ? 'Rename: '
-                  : `Delete ${this.confirmation.sessionId}? Enter confirm, Esc cancel · `,
+                  : this.confirmation.kind === 'merge'
+                    ? 'Apply reviewed child workspace merge? Enter confirm, Esc cancel · '
+                    : `Delete ${this.confirmation.sessionId}? Enter confirm, Esc cancel · `,
               value: this.confirmation.value,
             },
           }
