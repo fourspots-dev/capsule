@@ -44,7 +44,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <tr><td>Host Bridge</td><td>HOST-01..14</td><td>Contract / Multi-env</td></tr>
 <tr><td>Coding Loop</td><td>CODE-01..20</td><td>Integration / Benchmark</td></tr>
 <tr><td>Toolchain Provider</td><td>PROV-01..12</td><td>Contract / E2E</td></tr>
-<tr><td>macOS TUI</td><td>TUI-01..14</td><td>E2E</td></tr>
+<tr><td>macOS TUI</td><td>TUI-01..36</td><td>E2E / PTY / Accessibility</td></tr>
 <tr><td>Chrome</td><td>CHR-01..12</td><td>E2E / State</td></tr>
 <tr><td>子 Agent</td><td>SA-01..14</td><td>Integration / Fault</td></tr>
 <tr><td>生产质量</td><td>OPS-01..18</td><td>Benchmark / Soak</td></tr>
@@ -188,13 +188,71 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 </tbody></table>
 </section>
 <section id="tui">
-<h2>9. macOS TUI 测试</h2>
-<div class="grid">
-<div class="card"><h3>TUI-01..04 基础</h3><p>启动、Session、流式输出、工具状态、多行输入和快捷键。</p></div>
-<div class="card"><h3>TUI-05..08 恢复</h3><p>Ctrl+C、后台任务、关闭重开、窗口 resize。</p></div>
-<div class="card"><h3>TUI-09..11 审阅</h3><p>大 Diff、文件折叠、测试证据、风险和无颜色模式。</p></div>
-<div class="card"><h3>TUI-12..14 能力</h3><p>Host 能力缺失提示、Provider 切换、错误恢复和终端安全。</p></div>
-</div>
+<h2>9. macOS TUI 详细测试</h2>
+<h3>9.1 基础交互</h3>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th><th>层级</th></tr></thead><tbody>
+<tr><td>TUI-01</td><td>首次启动</td><td>只显示状态栏、主历史、Composer 和简短提示</td><td><span class="tag">E2E</span></td></tr>
+<tr><td>TUI-02</td><td>输入任务并 Enter</td><td>发送一次，不重复、不误触发补全</td><td><span class="tag">E2E</span></td></tr>
+<tr><td>TUI-03</td><td>Shift+Enter/多行输入</td><td>行、光标、IME 和粘贴内容正确</td><td><span class="tag">E2E</span></td></tr>
+<tr><td>TUI-04</td><td>运行中 Ctrl+C</td><td>停止任务，空闲 Ctrl+C 才进入退出确认</td><td><span class="tag risk">E2E</span></td></tr>
+<tr><td>TUI-05</td><td>空输入与附件发送</td><td>Send 状态准确，不丢附件</td><td><span class="tag unit">Unit</span></td></tr>
+</tbody></table>
+<h3>9.2 多 Session 管理</h3>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>TUI-06</td><td>Ctrl+K 打开 Session 切换器</td><td>显示当前、搜索、项目和状态，主区域被临时替换</td></tr>
+<tr><td>TUI-07</td><td>切换 3 个 Session</td><td>对话、草稿、附件、Skill、展开和滚动正确恢复</td></tr>
+<tr><td>TUI-08</td><td>运行中切到另一 Session</td><td>旧任务继续，状态栏和新 Session 不串</td></tr>
+<tr><td>TUI-09</td><td>快速 A→B→C 切换</td><td>旧 Projection 不覆盖 C</td></tr>
+<tr><td>TUI-10</td><td>新建、重命名、删除 Session</td><td>History 与当前视图一致；运行中的删除需确认</td></tr>
+<tr><td>TUI-11</td><td>搜索项目、分支、Task 状态</td><td>结果准确，键盘选择稳定</td></tr>
+<tr><td>TUI-12</td><td>关闭并重开 TUI</td><td>恢复上次 Session、草稿和滚动位置</td></tr>
+</tbody></table>
+<h3>9.3 子 Agent 看板</h3>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>TUI-13</td><td>Ctrl+G 打开无 Agent 看板</td><td>空状态说明，不显示空永久面板</td></tr>
+<tr><td>TUI-14</td><td>父子 Agent 树</td><td>层级、Profile、状态、耗时和 Workspace 正确</td></tr>
+<tr><td>TUI-15</td><td>运行/失败/完成过滤</td><td>过滤实时更新，不改变 Runtime</td></tr>
+<tr><td>TUI-16</td><td>进入子 Session 并返回</td><td>父 Session 状态和滚动位置保留</td></tr>
+<tr><td>TUI-17</td><td>停止、重试和查看日志</td><td>操作以 Runtime ACK 为准，失败明确</td></tr>
+<tr><td>TUI-18</td><td>Merge Preview</td><td>Diff、冲突、测试证据完整，不自动合并</td></tr>
+<tr><td>TUI-19</td><td>后台 Agent 完成/失败</td><td>状态栏汇总和单行通知，不抢输入焦点</td></tr>
+</tbody></table>
+<h3>9.4 完备状态栏</h3>
+<table><thead><tr><th>ID</th><th>状态组合</th><th>预期</th></tr></thead><tbody>
+<tr><td>TUI-20</td><td>running + queue + agents + approval</td><td>P0/P1 状态优先，单行不溢出</td></tr>
+<tr><td>TUI-21</td><td>Session、项目、分支 dirty、rev</td><td>信息与 Projection/Workspace 一致</td></tr>
+<tr><td>TUI-22</td><td>Provider 离线、网络缺失、模型错误</td><td>状态栏明确显示，详情层给修复建议</td></tr>
+<tr><td>TUI-23</td><td>Ctrl+I 完整详情</td><td>模型、Token、Workspace、后台任务和错误完整</td></tr>
+<tr><td>TUI-24</td><td>宽/中/窄终端状态降级</td><td>只隐藏低优先级 cell，P0/P1 永不隐藏</td></tr>
+<tr><td>TUI-25</td><td>颜色关闭与无动画</td><td>状态词仍可辨识</td></tr>
+</tbody></table>
+<h3>9.5 屏幕预算与扩展约束</h3>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>TUI-26</td><td>默认 80×24</td><td>状态栏 1 行、Composer 1–6 行、无永久侧栏</td></tr>
+<tr><td>TUI-27</td><td>60×20 与 120×40</td><td>布局自适应，不遮挡输入和 P0/P1 状态</td></tr>
+<tr><td>TUI-28</td><td>插件添加 10 个状态 cell</td><td>合并为 extensions 计数，不挤压主历史</td></tr>
+<tr><td>TUI-29</td><td>插件尝试常驻侧栏/顶部区域</td><td>拒绝，只能使用受控 overlay/单行贡献</td></tr>
+<tr><td>TUI-30</td><td>Overlay 打开/关闭</td><td>Composer 焦点和草稿恢复，原滚动位置保留</td></tr>
+</tbody></table>
+<h3>9.6 工作历史、审阅与扩展</h3>
+<table><thead><tr><th>ID</th><th>场景</th><th>预期</th></tr></thead><tbody>
+<tr><td>TUI-31</td><td>工具/Reasoning/命令摘要</td><td>默认单行，展开后显示原始证据</td></tr>
+<tr><td>TUI-32</td><td>运行中 Work 与最终回答</td><td>底部单一运行状态；最终回答不被折叠</td></tr>
+<tr><td>TUI-33</td><td>完成和失败 Work</td><td>成功折叠，失败展开</td></tr>
+<tr><td>TUI-34</td><td>Ctrl+O Review</td><td>文件 Diff、测试、风险、Patch 导出完整</td></tr>
+<tr><td>TUI-35</td><td>大 Diff/10 万行日志</td><td>虚拟滚动、按需加载、不阻塞输入</td></tr>
+<tr><td>TUI-36</td><td>扩展详情和命令面板</td><td>能力按 Host 注册，不显示不可用工具</td></tr>
+</tbody></table>
+<h3>9.7 TUI 状态与性能</h3>
+<pre>TuiView × Focus × Session × Overlay × TaskStatus
+主不变量：
+  Runtime Facts 不被 UI 复制
+  Overlay 不停止后台任务
+  切换 Session 不泄漏草稿/审批/滚动
+  扩展不占用永久主屏幕
+  P0/P1 状态不可被响应式布局隐藏
+  输入始终可响应</pre>
+<div class="rule">TUI E2E 使用真实 PTY，覆盖 80×24、60×20、120×40、IME/粘贴、无颜色、流式高频更新、Session/Agent 三层切换和崩溃恢复。</div>
 </section>
 <section id="chrome">
 <h2>10. Chrome 测试</h2>
