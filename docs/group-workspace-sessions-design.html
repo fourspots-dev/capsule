@@ -25,6 +25,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <small>TINYAI / WORKSPACE SCOPE / V2</small>
 <h1>双作用域 Workspace 会话设计</h1>
 <p>Chrome 中，标签组共享 Workspace Session，组外标签保持独立 Session。浏览器适配器负责标签与分组；Agent Core 只处理抽象 Session 与 Workspace 生命周期。</p>
+<p><b>实现状态：</b>双作用域 Registry、Chrome 多标签 ToolPack、Agent 建组、组外隔离、Side Panel 作用域提示与 Core 边界检查已实现；TUI Adapter 只完成了接口边界与独立 CLI 构建验证。</p>
 </header>
 <nav><a href="#boundary">架构边界</a><a href="#model">作用域模型</a><a href="#classes">核心对象</a><a href="#flows">交互流程</a><a href="#tools">工具与并发</a><a href="#ports">跨端接口</a><a href="#storage">持久化</a><a href="#plan">实施计划</a></nav>
 <section id="boundary">

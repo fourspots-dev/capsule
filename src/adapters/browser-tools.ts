@@ -3,7 +3,7 @@ import type {
   BrowserProvider,
   BrowserTabId,
   UploadFile,
-} from '../core/browser-provider';
+} from './browser-provider';
 import { AgentError } from '../core/errors';
 import type { HandoffPort } from '../core/ports';
 import type { JsonValue, ToolDefinition, ToolInvocation } from '../core/types';
@@ -14,7 +14,23 @@ export interface BrowserToolDependencies {
   download?: (name: string, mime: string, base64: string) => Promise<void>;
   handoff?: HandoffPort;
   tabScoped?: boolean;
+  workspaceTabs?: WorkspaceTabControl;
 }
+
+export interface WorkspaceTabControl {
+  createTab(sessionId: string, url?: string): Promise<BrowserTabDescriptor>;
+  switchTab(sessionId: string, tabId: string): Promise<void>;
+  listTabs(sessionId: string): Promise<BrowserTabDescriptor[]>;
+}
+
+type BrowserTabDescriptor = {
+  id: string;
+  title?: string;
+  url?: string;
+  active: boolean;
+  windowId?: number;
+  groupId?: number;
+};
 
 export function createBrowserTools(
   browser: BrowserProvider,
@@ -28,6 +44,11 @@ export function createBrowserTools(
       'read',
       ['browser:read'],
       async (_input, invocation) => {
+        if (dependencies.workspaceTabs) {
+          return (await dependencies.workspaceTabs.listTabs(
+            invocation.sessionId
+          )) as JsonValue;
+        }
         const [tabs, current] = await Promise.all([
           browser.listTabs(),
           browser.getWorkingTab(invocation.sessionId),
@@ -56,13 +77,17 @@ export function createBrowserTools(
       'write',
       ['browser:read'],
       async (input, invocation) => {
+        const tabId = requiredString(input, 'tabId');
+        if (dependencies.workspaceTabs) {
+          await dependencies.workspaceTabs.switchTab(invocation.sessionId, tabId);
+          return { tabId };
+        }
         if (dependencies.tabScoped) {
           throw new AgentError(
             'TAB_SCOPED_SESSION',
             'Tabs are isolated conversations and cannot share a working tab.'
           );
         }
-        const tabId = requiredString(input, 'tabId');
         await browser.setWorkingTab(invocation.sessionId, tabId);
         return { tabId };
       }
@@ -74,6 +99,13 @@ export function createBrowserTools(
       'write',
       ['browser:navigate'],
       async (input, invocation) => {
+        if (dependencies.workspaceTabs) {
+          const tab = await dependencies.workspaceTabs.createTab(
+            invocation.sessionId,
+            optionalString(input, 'url') ?? 'about:blank'
+          );
+          return tab as JsonValue;
+        }
         if (dependencies.tabScoped) {
           throw new AgentError(
             'TAB_SCOPED_SESSION',

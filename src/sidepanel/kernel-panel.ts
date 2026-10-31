@@ -66,6 +66,9 @@ export async function initKernelUi(): Promise<void> {
   const drafts = new Map<string, ComposerDraft>();
   let windowId: number | undefined;
   let activeTabId: string | undefined;
+  let activeGroupId: number | undefined;
+  let activeScope: 'group' | 'tab' = 'tab';
+  let workspaceMemberTabIds: string[] = [];
   let activationGeneration = 0;
   let sessionActivated = false;
   let skills: SkillDefinition[] = [];
@@ -88,6 +91,9 @@ export async function initKernelUi(): Promise<void> {
   let reconnectAttempts = 0;
   const detailState = new Map<string, boolean>();
 
+  const activationTargetCount = (): number =>
+    Math.max(1, workspaceMemberTabIds.length);
+
   const render = (): void => {
     const zh = pageConfig.language.startsWith('zh');
     const rows = document.querySelector<HTMLElement>('#kernel-rows');
@@ -98,10 +104,11 @@ export async function initKernelUi(): Promise<void> {
     const approvePlan = document.querySelector<HTMLButtonElement>('#kernel-approve-plan');
     const compact = document.querySelector<HTMLButtonElement>('#kernel-compact');
     const attachmentList = document.querySelector<HTMLElement>('#kernel-attachments');
+    const workspace = document.querySelector<HTMLElement>('#kernel-workspace');
     const queue = document.querySelector<HTMLElement>('#kernel-queue');
     const modelLabelNode = document.querySelector<HTMLElement>('#kernel-model-label');
     const input = document.querySelector<HTMLTextAreaElement>('#kernel-input');
-    if (!rows || !status || !send || !stop || !input || !modeButton || !approvePlan || !compact || !attachmentList || !queue || !modelLabelNode) return;
+    if (!rows || !status || !send || !stop || !input || !modeButton || !approvePlan || !compact || !attachmentList || !workspace || !queue || !modelLabelNode) return;
     document.documentElement.dataset.tinyaiActivated = String(sessionActivated);
     document.documentElement.dataset.tinyaiCanSend = String(
       projection?.availability.canSend ?? false
@@ -137,6 +144,18 @@ export async function initKernelUi(): Promise<void> {
           zh
             ? `${projection.queueLength} 条消息排队`
             : `${projection.queueLength} ${projection.queueLength === 1 ? 'message' : 'messages'} queued`
+        )}</span>`
+      : '';
+    workspace.hidden = !projection;
+    workspace.innerHTML = projection
+      ? `<span class="kernel-workspace-mark" aria-hidden="true">⌘</span><span>${escapeHtml(
+          activeScope === 'group'
+            ? zh
+              ? `工作区 · ${activationTargetCount()} 个标签`
+              : `Workspace · ${activationTargetCount()} ${activationTargetCount() === 1 ? 'tab' : 'tabs'}`
+            : zh
+              ? '独立标签'
+              : 'Independent tab'
         )}</span>`
       : '';
     attachmentList.innerHTML = [
@@ -228,7 +247,10 @@ export async function initKernelUi(): Promise<void> {
   async function activateSession(
     load: () => Promise<{
       sessionId: string;
-      tabId: string;
+      activeTabId: string;
+      groupId?: number;
+      scope: 'group' | 'tab';
+      memberTabIds: string[];
       projection: ProductProjection;
     }>
   ): Promise<boolean> {
@@ -249,7 +271,10 @@ export async function initKernelUi(): Promise<void> {
       await client.unsubscribe(previousSession).catch(() => undefined);
     }
     sessionId = activation.sessionId;
-    activeTabId = activation.tabId;
+    activeTabId = activation.activeTabId;
+    activeGroupId = activation.groupId;
+    activeScope = activation.scope;
+    workspaceMemberTabIds = [...activation.memberTabIds];
     document.documentElement.dataset.tinyaiTabId = activeTabId;
     document.documentElement.dataset.tinyaiSessionId = sessionId;
     projection = activation.projection;
@@ -271,7 +296,10 @@ export async function initKernelUi(): Promise<void> {
 
   async function switchToTab(tabId: string): Promise<void> {
     if (windowId === undefined || tabId === activeTabId) return;
-    await activateSession(() => client.resolveTabSession(windowId!, tabId));
+    const tab = await chrome.tabs.get(Number(tabId));
+    await activateSession(() =>
+      client.resolveTabSession(windowId!, tabId, tab.groupId)
+    );
   }
 
   async function startNewSession(): Promise<void> {
@@ -279,7 +307,7 @@ export async function initKernelUi(): Promise<void> {
       throw new Error('No active browser tab is available');
     }
     await activateSession(() =>
-      client.createTabSession(windowId!, activeTabId!)
+      client.createTabSession(windowId!, activeTabId!, activeGroupId)
     );
   }
 
@@ -289,7 +317,7 @@ export async function initKernelUi(): Promise<void> {
       throw new Error('No active browser tab is available');
     }
     await activateSession(() =>
-      client.resolveTabSession(windowId!, activeTabId!)
+      client.resolveTabSession(windowId!, activeTabId!, activeGroupId)
     );
   }
 
@@ -1236,16 +1264,39 @@ export async function initKernelUi(): Promise<void> {
     if (commandMenu) commandMenu.hidden = true;
     if (modelMenu) modelMenu.hidden = true;
     if (!menu) return;
+    const currentTabs =
+      activeScope === 'tab'
+        ? tabs.filter((tab) => tab.id === activeTabId)
+        : [];
+    const tabsWithGroups = await chrome.tabs.query({ windowId });
+    const groupMembers =
+      activeScope === 'group' && activeGroupId !== undefined
+        ? tabsWithGroups
+            .filter((tab) => tab.groupId === activeGroupId)
+            .map((tab) => ({
+              id: String(tab.id),
+              title: tab.title,
+              url: tab.url,
+              active: Boolean(tab.active),
+            }))
+        : [];
+    const workspaceTabs = currentTabs.length ? currentTabs : groupMembers;
+    const workspaceIds = new Set(workspaceTabs.map((tab) => tab.id));
+    const otherTabs = tabs.filter((tab) => !workspaceIds.has(tab.id));
+    const tabButton = (tab: (typeof tabs)[number]): string =>
+      `<button type="button" class="wb-pop-item${tab.id === activeTabId ? ' selected' : ''}" data-kernel-tab="${escapeHtml(tab.id)}"><span class="wb-pop-copy"><span class="wb-pop-title">${escapeHtml(tab.title || tab.url || tab.id)}</span><span class="wb-pop-desc">${escapeHtml(tab.url ?? '')}</span></span></button>`;
     menu.innerHTML =
-      `<div class="wb-menu-heading">${zh ? '标签页' : 'Tabs'}</div>` +
-      (tabs.length
-        ? tabs
-            .map(
-              (tab) =>
-                `<button type="button" class="wb-pop-item${tab.active ? ' selected' : ''}" data-kernel-tab="${escapeHtml(tab.id)}"><span class="wb-pop-copy"><span class="wb-pop-title">${escapeHtml(tab.title || tab.url || tab.id)}</span><span class="wb-pop-desc">${escapeHtml(tab.url ?? '')}</span></span></button>`
-            )
-            .join('')
-        : `<div class="wb-menu-empty">${zh ? '没有可用的网页标签页' : 'No browser tabs'}</div>`);
+      (workspaceTabs.length
+        ? `<div class="wb-menu-heading">${zh ? '当前工作区' : 'Current workspace'}</div>${workspaceTabs
+            .map(tabButton)
+            .join('')}`
+        : '') +
+      (otherTabs.length
+        ? `<div class="wb-menu-heading">${zh ? '其他独立标签' : 'Other independent tabs'}</div>${otherTabs
+            .map(tabButton)
+            .join('')}`
+        : '') ||
+      `<div class="wb-menu-empty">${zh ? '没有可用的网页标签页' : 'No browser tabs'}</div>`;
     menu.hidden = false;
   }
 
@@ -1356,7 +1407,12 @@ export async function initKernelUi(): Promise<void> {
       throw new Error('No active browser tab is available');
     }
     await activateSession(() =>
-      client.bindTabSession(windowId!, activeTabId!, nextSessionId)
+      client.bindTabSession(
+        windowId!,
+        activeTabId!,
+        nextSessionId,
+        activeGroupId
+      )
     );
   }
 
@@ -1378,8 +1434,12 @@ export async function initKernelUi(): Promise<void> {
     });
     if (activeTab?.id === undefined) throw new Error('No active browser tab is available');
     activeTabId = String(activeTab.id);
+    activeGroupId =
+      activeTab.groupId !== undefined && activeTab.groupId >= 0
+        ? activeTab.groupId
+        : undefined;
     await activateSession(() =>
-      client.resolveTabSession(windowId!, activeTabId!)
+      client.resolveTabSession(windowId!, activeTabId!, activeGroupId)
     );
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
@@ -1832,6 +1892,7 @@ function shell(config: KernelStoredConfig): string {
     </div>
     <div class="wb-dock">
       <div id="kernel-queue" class="kernel-queue" hidden></div>
+      <div id="kernel-workspace" class="kernel-workspace-context" hidden></div>
       <div id="kernel-status" class="wb-bridge-note kernel-status" hidden></div>
       <div id="kernel-attachments" class="wb-attachment-bar kernel-context-list"></div>
       <form id="kernel-form" class="wb-composer">

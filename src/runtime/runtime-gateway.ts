@@ -3,19 +3,20 @@ import type { ProductProjection } from '../core/types';
 import type { WorkspaceRuntime } from '../core/workspace-runtime';
 import type { SkillDefinition } from '../core/extension-registry';
 import type { ArtifactStore } from '../core/artifact-store';
-import type { BrowserProvider } from '../core/browser-provider';
 import { AgentError, toStructuredError } from '../core/errors';
 import type { PortApprovalBroker } from './approval-broker';
 import type { RuntimePort, RuntimeRequest, RuntimeResponse } from './protocol';
-import type { TabSessionRegistry } from './tab-session-registry';
+import type {
+  RuntimeExtension,
+  RuntimeExtensionRequest,
+} from '../platform/runtime-extension';
 
 export interface RuntimeBundle {
   runtime: WorkspaceRuntime;
-  tabSessions?: TabSessionRegistry;
+  extension?: RuntimeExtension;
   approval?: PortApprovalBroker;
   skills?: () => Promise<SkillDefinition[]>;
   artifacts?: ArtifactStore;
-  browser?: BrowserProvider;
   dispose(): Promise<void>;
 }
 
@@ -39,7 +40,9 @@ export class RuntimeGateway {
       { unsubscribe: () => void; previous?: ProductProjection }
     >();
     this.subscriptions.set(port, listeners);
-    const onMessage = (message: RuntimeRequest | RuntimeResponse): void =>
+    const onMessage = (
+      message: RuntimeRequest | RuntimeExtensionRequest | RuntimeResponse
+    ): void =>
       void this.handle(port, message as RuntimeRequest);
     const onDisconnect = (): void => {
       port.onMessage.removeListener(onMessage);
@@ -73,104 +76,117 @@ export class RuntimeGateway {
     this.runtime = undefined;
   }
 
-  async forgetTab(windowId: number, tabId: string): Promise<void> {
-    const bundle = await this.runtime?.catch(() => undefined);
-    await bundle?.tabSessions?.forget({ windowId, tabId });
-  }
-
-  private async handle(port: RuntimePort, request: RuntimeRequest): Promise<void> {
+  private async handle(
+    port: RuntimePort,
+    request: RuntimeRequest | RuntimeExtensionRequest
+  ): Promise<void> {
+    const coreRequest = isCoreRuntimeRequest(request) ? request : undefined;
     const requestId =
       request.requestId ??
-      (request.type === 'command'
-        ? request.command.commandId
+      (coreRequest?.type === 'command'
+        ? coreRequest.command.commandId
         : `${request.type}_${this.clock.now()}_${Math.random().toString(36).slice(2, 8)}`);
     try {
       const bundle = await this.ensureRuntime();
-      if (request.type === 'hello') {
+      if (!coreRequest) {
+        if (bundle.extension) {
+          const result = await bundle.extension.tryHandle(request);
+          if (result.handled) {
+            this.reply(port, requestId, result.data);
+            return;
+          }
+        }
+        throw new AgentError(
+          'RUNTIME_REQUEST_UNSUPPORTED',
+          `Unsupported runtime request: ${request.type}`
+        );
+      }
+      const core = coreRequest;
+      if (core.type === 'hello') {
         port.postMessage({ type: 'ready', revision: this.clock.now() });
         return;
       }
-      if (request.type === 'approval_response') {
-        const accepted = bundle.approval?.respond(request.approvalId, request.approved) ?? false;
+      if (core.type === 'approval_response') {
+        const accepted = bundle.approval?.respond(core.approvalId, core.approved) ?? false;
         this.reply(port, requestId, accepted);
         return;
       }
-      if (request.type === 'handoff_response') {
+      if (core.type === 'handoff_response') {
         const accepted =
-          bundle.approval?.respondHandoff(request.handoffId, request.decision) ?? false;
+          bundle.approval?.respondHandoff(core.handoffId, core.decision) ?? false;
         this.reply(port, requestId, accepted);
         return;
       }
-      if (request.type === 'subscribe') {
-        await this.subscribe(port, bundle.runtime, request.sessionId, requestId);
+      if (core.type === 'subscribe') {
+        await this.subscribe(port, bundle.runtime, core.sessionId, requestId);
         return;
       }
-      if (request.type === 'unsubscribe') {
-        const subscription = this.subscriptions.get(port)?.get(request.sessionId);
+      if (core.type === 'unsubscribe') {
+        const subscription = this.subscriptions.get(port)?.get(core.sessionId);
         subscription?.unsubscribe();
-        this.subscriptions.get(port)?.delete(request.sessionId);
+        this.subscriptions.get(port)?.delete(core.sessionId);
         this.reply(port, requestId, true);
         return;
       }
-      if (request.type === 'command') {
-        const ack = await bundle.runtime.command(request.command);
+      if (core.type === 'command') {
+        const ack = await bundle.runtime.command(core.command);
         this.reply(port, requestId, ack);
         return;
       }
-      if (request.type === 'get_projection') {
-        this.reply(port, requestId, await bundle.runtime.loadProjection(request.sessionId));
+      if (core.type === 'get_projection') {
+        this.reply(port, requestId, await bundle.runtime.loadProjection(core.sessionId));
         return;
       }
-      if (request.type === 'query_command') {
+      if (core.type === 'query_command') {
         this.reply(
           port,
           requestId,
-          bundle.runtime.queryCommand(request.sessionId, request.commandId) ?? null
+          bundle.runtime.queryCommand(core.sessionId, core.commandId) ?? null
         );
         return;
       }
-      if (request.type === 'stop_session') {
-        await bundle.runtime.stop(request.sessionId);
+      if (core.type === 'stop_session') {
+        await bundle.runtime.stop(core.sessionId);
         this.reply(port, requestId, true);
         return;
       }
-      if (request.type === 'list_sessions') {
+      if (core.type === 'list_sessions') {
         this.reply(port, requestId, await bundle.runtime.listSessions());
         return;
       }
-      if (request.type === 'clear_history') {
-        await bundle.tabSessions?.clear();
+      if (core.type === 'clear_history') {
+        await bundle.extension?.beforeClearHistory?.();
         const deleted = await bundle.runtime.deleteAllSessions();
         this.reply(port, requestId, { deleted });
         return;
       }
-      if (request.type === 'delete_session') {
-        await bundle.tabSessions?.releaseSession(request.sessionId);
-        await bundle.runtime.deleteSession(request.sessionId);
+      if (core.type === 'delete_session') {
+        await bundle.extension?.beforeDeleteSession?.(core.sessionId);
+        await bundle.runtime.deleteSession(core.sessionId);
         this.reply(port, requestId, true);
         return;
       }
-      if (request.type === 'restart_session') {
-        await bundle.runtime.restart(request.sessionId);
+      if (core.type === 'restart_session') {
+        await bundle.runtime.restart(core.sessionId);
         this.reply(port, requestId, true);
         return;
       }
-      if (request.type === 'list_skills') {
+      if (core.type === 'list_skills') {
         this.reply(port, requestId, (await bundle.skills?.()) ?? []);
         return;
       }
-      if (request.type === 'reload_runtime') {
+      if (core.type === 'reload_runtime') {
         const current = await this.runtime;
         await current?.dispose();
         this.runtime = undefined;
         this.reply(port, requestId, true);
         return;
       }
-      if (request.type === 'read_artifact') {
-        const metadata = await bundle.artifacts?.metadata(request.artifactId);
-        const data = await bundle.artifacts?.read(request.artifactId);
+      if (core.type === 'read_artifact') {
+        const metadata = await bundle.artifacts?.metadata(core.artifactId);
+        const data = await bundle.artifacts?.read(core.artifactId);
         if (!metadata || !data) {
-          throw new AgentError('ARTIFACT_NOT_FOUND', `Artifact not found: ${request.artifactId}`);
+          throw new AgentError('ARTIFACT_NOT_FOUND', `Artifact not found: ${core.artifactId}`);
         }
         this.reply(port, requestId, {
           metadata,
@@ -178,59 +194,10 @@ export class RuntimeGateway {
         });
         return;
       }
-      if (request.type === 'list_tabs') {
-        this.reply(port, requestId, (await bundle.browser?.listTabs()) ?? []);
-        return;
-      }
-      if (request.type === 'select_tab') {
-        if (!bundle.browser) {
-          throw new AgentError('BROWSER_UNAVAILABLE', 'Browser provider is unavailable');
-        }
-        await bundle.browser.setWorkingTab(request.sessionId, request.tabId);
-        this.reply(port, requestId, true);
-        return;
-      }
-      if (request.type === 'resolve_tab_session') {
-        const tabs = bundle.tabSessions;
-        if (!tabs) throw new AgentError('TAB_SESSIONS_UNAVAILABLE', 'Tab sessions are unavailable');
-        const binding = await tabs.resolve({
-          windowId: request.windowId,
-          tabId: request.tabId,
-        });
-        const projection = await bundle.runtime.loadProjection(binding.sessionId);
-        this.reply(port, requestId, { ...binding, projection });
-        return;
-      }
-      if (request.type === 'create_tab_session') {
-        const tabs = bundle.tabSessions;
-        if (!tabs) throw new AgentError('TAB_SESSIONS_UNAVAILABLE', 'Tab sessions are unavailable');
-        const binding = await tabs.create({
-          windowId: request.windowId,
-          tabId: request.tabId,
-        });
-        const projection = await bundle.runtime.loadProjection(binding.sessionId);
-        this.reply(port, requestId, { ...binding, projection });
-        return;
-      }
-      if (request.type === 'bind_tab_session') {
-        const tabs = bundle.tabSessions;
-        if (!tabs) throw new AgentError('TAB_SESSIONS_UNAVAILABLE', 'Tab sessions are unavailable');
-        const binding = await tabs.bind(
-          { windowId: request.windowId, tabId: request.tabId },
-          request.sessionId
-        );
-        const projection = await bundle.runtime.loadProjection(binding.sessionId);
-        this.reply(port, requestId, { ...binding, projection });
-        return;
-      }
-      if (request.type === 'forget_tab_session') {
-        await bundle.tabSessions?.forget({
-          windowId: request.windowId,
-          tabId: request.tabId,
-        });
-        this.reply(port, requestId, true);
-        return;
-      }
+      throw new AgentError(
+        'RUNTIME_REQUEST_UNSUPPORTED',
+        `Unsupported runtime request: ${request.type}`
+      );
     } catch (error) {
       port.postMessage({
         type: 'response',
@@ -297,3 +264,28 @@ function bytesToBase64(value: Uint8Array): string {
   for (const byte of value) binary += String.fromCharCode(byte);
   return btoa(binary);
 }
+
+function isCoreRuntimeRequest(
+  request: RuntimeRequest | RuntimeExtensionRequest
+): request is RuntimeRequest {
+  return CORE_REQUEST_TYPES.has(request.type);
+}
+
+const CORE_REQUEST_TYPES = new Set<string>([
+  'hello',
+  'subscribe',
+  'unsubscribe',
+  'command',
+  'get_projection',
+  'query_command',
+  'stop_session',
+  'list_sessions',
+  'clear_history',
+  'delete_session',
+  'restart_session',
+  'list_skills',
+  'reload_runtime',
+  'read_artifact',
+  'approval_response',
+  'handoff_response',
+]);

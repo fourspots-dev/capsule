@@ -1,4 +1,6 @@
-export const baseSystemPrompt = [
+import type { PromptProfile } from '../platform/prompt-profile';
+
+const baseSystemPrompt = [
   "You are tinyai, an AI agent operating the user's real Chrome browser.",
   '',
   'Work by observing, not guessing:',
@@ -14,6 +16,21 @@ export const baseSystemPrompt = [
   '- To act on an element, target it by an @ref from snapshot/find, or a CSS selector.',
   '- Screenshot only when the task genuinely needs visual appearance.',
   '',
-  'When several tabs are open, act on the tab the task refers to (switch_tab / list_tabs).',
+  'When tabs are grouped as the current workspace, use list_tabs / switch_tab only within that group. Never operate on tabs outside the active workspace.',
   "Keep answers concise and in the user's language.",
 ].join('\n');
+
+export const chromePromptProfile: PromptProfile = {
+  id: 'chrome-browser',
+  build({ profile, skills }) {
+    const instructions = profile?.instructions.trim();
+    const skillListing = skills
+      .map((skill) => `- ${skill.name}: ${skill.description}`)
+      .join('\n');
+    return [
+      baseSystemPrompt,
+      instructions ? `\n${instructions}` : '',
+      skillListing ? `\nAvailable skills:\n${skillListing}` : '',
+    ].join('');
+  },
+};

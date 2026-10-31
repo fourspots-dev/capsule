@@ -15,7 +15,7 @@ import type {
   TabDescriptor,
   TabGroupRef,
   UploadFile,
-} from '../core/browser-provider';
+} from './browser-provider';
 import type { JsonValue } from '../core/types';
 
 export interface ChromeTabsApi {
@@ -231,7 +231,9 @@ export class ChromeBrowserProvider implements BrowserProvider {
       ownedTabs: new Set(ownedTab ? [ownedTab] : []),
       attached: new Set(),
     };
-    if (this.tabs.group) {
+    if (selected.groupId !== undefined && selected.groupId >= 0) {
+      binding.groupId = selected.groupId;
+    } else if (this.tabs.group) {
       try {
         binding.groupId = await this.tabs.group({ tabIds: [Number(selected.id)] });
         await this.tabGroups?.update(binding.groupId, {
@@ -259,6 +261,9 @@ export class ChromeBrowserProvider implements BrowserProvider {
       attached: new Set<string>(),
     };
     binding.tabId = tabId;
+    if (tab.groupId !== undefined && tab.groupId >= 0) {
+      binding.groupId = tab.groupId;
+    }
     this.sessions.set(sessionId, binding);
     if (binding.groupId !== undefined) {
       await this.tabGroups
@@ -272,6 +277,63 @@ export class ChromeBrowserProvider implements BrowserProvider {
     const binding = this.sessions.get(sessionId);
     if (!binding?.tabId) return null;
     return (await this.getTab(binding.tabId)) ? binding.tabId : null;
+  }
+
+  async addTabToSession(
+    sessionId: string,
+    tabId: BrowserTabId,
+    options: { owned?: boolean } = {}
+  ): Promise<TabGroupRef> {
+    const tab = await this.waitForTab(tabId);
+    if (!tab) throw new AgentError('BROWSER_TAB_NOT_FOUND', `Tab not found: ${tabId}`);
+    const binding = this.sessions.get(sessionId);
+    if (!binding) {
+      throw new AgentError('BROWSER_SESSION_NOT_FOUND', `Browser session not found: ${sessionId}`);
+    }
+    if (!this.tabs.group) {
+      throw new AgentError('BROWSER_GROUP_UNAVAILABLE', 'Chrome tabGroups are unavailable');
+    }
+    const existingGroup =
+      binding.groupId ??
+      (await this.getTab(binding.tabId))?.groupId;
+    binding.groupId =
+      existingGroup !== undefined && existingGroup >= 0
+        ? await this.tabs.group({
+            groupId: existingGroup,
+            tabIds: [Number(tabId)],
+          })
+        : await this.tabs.group({
+            tabIds: [Number(binding.tabId), Number(tabId)],
+          });
+    binding.tabId = tabId;
+    if (options.owned) binding.ownedTabs.add(tabId);
+    this.sessions.set(sessionId, binding);
+    await this.tabGroups
+      ?.update(binding.groupId, { title: tabGroupTitle(tab.title) })
+      .catch(() => undefined);
+    return this.groupRef(sessionId, binding);
+  }
+
+  async listSessionTabs(sessionId: string): Promise<TabDescriptor[]> {
+    const binding = this.sessions.get(sessionId);
+    if (!binding) return [];
+    if (binding.groupId !== undefined) {
+      return (await this.listTabs()).filter(
+        (tab) => tab.groupId === binding.groupId
+      );
+    }
+    const tab = await this.getTab(binding.tabId);
+    return tab ? [tab] : [];
+  }
+
+  async assertSessionTab(sessionId: string, tabId: BrowserTabId): Promise<void> {
+    const tabs = await this.listSessionTabs(sessionId);
+    if (!tabs.some((tab) => tab.id === tabId)) {
+      throw new AgentError(
+        'TARGET_OUTSIDE_WORKSPACE',
+        `Tab ${tabId} does not belong to session ${sessionId}`
+      );
+    }
   }
 
   async closeSessionTabs(sessionId: string): Promise<CloseSessionReport> {
@@ -312,7 +374,13 @@ export class ChromeBrowserProvider implements BrowserProvider {
       await this.detach(tabId).catch(() => undefined);
     }
     const groupedTabs = new Set([binding.tabId, ...binding.ownedTabs].filter(Boolean));
-    if (this.tabs.ungroup && groupedTabs.size) {
+    const sharedGroup =
+      binding.groupId !== undefined &&
+      [...this.sessions.entries()].some(
+        ([otherSession, other]) =>
+          otherSession !== sessionId && other.groupId === binding.groupId
+      );
+    if (this.tabs.ungroup && groupedTabs.size && !sharedGroup) {
       await this.tabs
         .ungroup([...groupedTabs].map(Number))
         .catch(() => undefined);
@@ -742,6 +810,20 @@ export class ChromeBrowserProvider implements BrowserProvider {
     for (const binding of this.sessions.values()) {
       if (binding.tabId === tabId) binding.attached.add(tabId);
     }
+  }
+
+  private async waitForTab(
+    tabId: BrowserTabId,
+    attempts = 20
+  ): Promise<TabDescriptor | null> {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const tab = await this.getTab(tabId);
+      if (tab) return tab;
+      await new Promise<void>((resolve) =>
+        this.clock.setTimeout(resolve, 25)
+      );
+    }
+    return null;
   }
 
   private async detach(tabId: BrowserTabId): Promise<void> {

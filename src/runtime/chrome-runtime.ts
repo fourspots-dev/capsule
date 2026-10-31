@@ -16,15 +16,16 @@ import { AgentError } from '../core/errors';
 import { SequentialIdGenerator, systemClock } from '../core/ports';
 import { PermissionModeRegistry } from '../core/policy';
 import { ModelGateway } from '../core/model-gateway';
-import { baseSystemPrompt } from './prompts';
+import { chromePromptProfile } from '../adapters/chrome-prompts';
 import { PortApprovalBroker } from './approval-broker';
 import type { RuntimeBundle } from './runtime-gateway';
 import { RuntimeGateway } from './runtime-gateway';
 import type { RuntimePort, RuntimeRequest } from './protocol';
-import { createBrowserWorkspace } from './workspace-factory';
+import { createBrowserWorkspace } from '../adapters/browser-workspace-factory';
 import { createDefaultProfileRegistry, loadAgentProfiles } from './profile-loader';
 import { WorkspaceSubagentDriver } from './workspace-subagent-driver';
-import { TabSessionRegistry } from './tab-session-registry';
+import { TabSessionRegistry } from '../adapters/chrome-workspace-session-registry';
+import { ChromeRuntimeExtension } from '../adapters/chrome-runtime-extension';
 import { CONFIG_KEY, migrateLegacyStorage } from './storage-migration';
 
 export const KERNEL_PORT_NAME = 'tinyai-runtime-v1';
@@ -96,6 +97,7 @@ export async function createChromeRuntimeBundle(
   options: {
     storage?: ChromeKeyValueStorage;
     tabSessionStorage?: ChromeKeyValueStorage;
+    chromeApi?: typeof chrome;
     browser?: ChromeBrowserProvider;
     createBrowser?: () => ChromeBrowserProvider;
   } = {}
@@ -152,9 +154,6 @@ export async function createChromeRuntimeBundle(
     skills: initialSkills,
   });
   const skillTools = createSkillTools(extensions, skillStore);
-  const skillListing = initialSkills
-    .map((skill) => `- ${skill.name}: ${skill.description}`)
-    .join('\n');
   const mcpClients: HttpMcpClient[] = [];
   const mcpTools: ToolDefinition[] = [];
   for (const server of parseMcpServers(mcpConfig['tinyai-mcp-servers'])) {
@@ -206,7 +205,10 @@ export async function createChromeRuntimeBundle(
         artifactStore,
         trace,
         hooks,
-        systemPrompt: `${baseSystemPrompt}\n\n${profile.instructions}${skillListing ? `\n\nAvailable skills:\n${skillListing}` : ''}`,
+        systemPrompt: chromePromptProfile.build({
+          profile,
+          skills: initialSkills,
+        }),
         maxSteps: spec.budget.maxTurns,
         toolSelection: {
           allow: profile.tools.allow,
@@ -229,6 +231,20 @@ export async function createChromeRuntimeBundle(
       }).runtime,
   });
   let mainWorkspace: ReturnType<typeof createBrowserWorkspace>;
+  let tabSessions: TabSessionRegistry | undefined;
+  const workspaceTabs = {
+    createTab: (sessionId: string, url?: string) =>
+      requireTabSessions().createTab(sessionId, url),
+    switchTab: (sessionId: string, tabId: string) =>
+      requireTabSessions().switchTab(sessionId, tabId),
+    listTabs: (sessionId: string) => requireTabSessions().listTabs(sessionId),
+  };
+  const requireTabSessions = (): TabSessionRegistry => {
+    if (!tabSessions) {
+      throw new AgentError('WORKSPACE_NOT_READY', 'Browser workspace is not initialized');
+    }
+    return tabSessions;
+  };
   const coordinator = new SubagentCoordinator({
     registry,
     driver: subagentDriver,
@@ -261,7 +277,7 @@ export async function createChromeRuntimeBundle(
     artifactStore,
     trace,
     hooks,
-    systemPrompt: `${baseSystemPrompt}${skillListing ? `\n\nAvailable skills:\n${skillListing}` : ''}`,
+    systemPrompt: chromePromptProfile.build({ skills: initialSkills }),
     download: async (name, mime, base64) => {
       await chrome.downloads.download({
         url: `data:${mime};base64,${base64}`,
@@ -286,7 +302,7 @@ export async function createChromeRuntimeBundle(
         sourceId: 'mcp',
       })),
     ],
-    tabScoped: true,
+    workspaceTabs,
   });
   const unsubscribeChildren = coordinator.subscribe((child) => {
     mainWorkspace.runtime.updateChildTask(child.parentTaskId, {
@@ -300,19 +316,25 @@ export async function createChromeRuntimeBundle(
       ...(child.completedAt ? { updatedAt: child.completedAt } : {}),
     });
   });
-  const tabSessions = new TabSessionRegistry({
+  tabSessions = new TabSessionRegistry({
     runtime: mainWorkspace.runtime,
     browser,
     storage: options.tabSessionStorage,
   });
+  const extension = new ChromeRuntimeExtension(
+    mainWorkspace.runtime,
+    tabSessions,
+    browser,
+    options.chromeApi ?? chrome
+  );
   return {
     runtime: mainWorkspace.runtime,
-    tabSessions,
+    extension,
     approval,
     skills: () => skillStore.list(),
     artifacts: artifactStore,
-    browser,
     async dispose() {
+      await extension.dispose();
       unsubscribeChildren();
       approval.dispose();
       await coordinator.dispose();
@@ -329,15 +351,13 @@ export function installKernelRuntimeGateway(
     createChromeRuntimeBundle({
       storage: chromeApi.storage.local,
       tabSessionStorage: chromeApi.storage.session as unknown as ChromeKeyValueStorage,
+      chromeApi,
     })
   );
   chromeApi.runtime.onConnect.addListener((port) => {
     if (port.name !== KERNEL_PORT_NAME) return;
     gateway.connect(asRuntimePort(port));
     void ensureRuntimeOffscreen(chromeApi);
-  });
-  chromeApi.tabs.onRemoved.addListener((tabId, info) => {
-    void gateway.forgetTab(info.windowId, String(tabId));
   });
   return gateway;
 }

@@ -12,10 +12,12 @@
     "clean": "rm -rf extension/js/sidepanel extension/js/background && mkdir -p extension/js/sidepanel extension/js/background",
     "typecheck": "tsc --noEmit",
     "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
+    "typecheck:core": "tsc --noEmit -p tsconfig.core.json",
+    "check:boundaries": "node scripts/check-core-boundaries.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "npm run build && vitest run --config vitest.e2e.config.mts",
-    "check": "npm run typecheck && npm run typecheck:tests && npm test && npm run build"
+    "check": "npm run typecheck && npm run typecheck:tests && npm run typecheck:core && npm run check:boundaries && npm test && npm run build"
   },
   "devDependencies": {
     "@types/chrome": "^0.3.6",

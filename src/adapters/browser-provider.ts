@@ -1,4 +1,4 @@
-import type { JsonValue, StructuredError } from './types';
+import type { JsonValue, StructuredError } from '../core/types';
 
 export type BrowserTabId = string;
 
@@ -119,6 +119,13 @@ export interface BrowserProvider {
   getWorkingTab(sessionId: string): Promise<BrowserTabId | null>;
   closeSessionTabs(sessionId: string): Promise<CloseSessionReport>;
   releaseSession?(sessionId: string): Promise<void>;
+  addTabToSession?(
+    sessionId: string,
+    tabId: BrowserTabId,
+    options?: { owned?: boolean }
+  ): Promise<TabGroupRef>;
+  listSessionTabs?(sessionId: string): Promise<TabDescriptor[]>;
+  assertSessionTab?(sessionId: string, tabId: BrowserTabId): Promise<void>;
   listFrames?(tabId: BrowserTabId): Promise<FrameDescriptor[]>;
 
   navigate(tabId: BrowserTabId, url: string, signal?: AbortSignal): Promise<PageInfo>;

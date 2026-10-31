@@ -102,7 +102,7 @@
     return '<div class="wb-rt-tablewrap"><table class="wb-rt-table"><thead><tr>' + head.map((cell) => `<th class="wb-rt-th">${inline(cell)}</th>`).join("") + "</tr></thead><tbody>" + body.map((row) => `<tr>${row.map((cell) => `<td class="wb-rt-td">${inline(cell)}</td>`).join("")}</tr>`).join("") + "</tbody></table></div>";
   }
 
-  // src/runtime/prompts.ts
+  // src/adapters/chrome-prompts.ts
   var baseSystemPrompt = [
     "You are tinyai, an AI agent operating the user's real Chrome browser.",
     "",
@@ -119,7 +119,7 @@
     "- To act on an element, target it by an @ref from snapshot/find, or a CSS selector.",
     "- Screenshot only when the task genuinely needs visual appearance.",
     "",
-    "When several tabs are open, act on the tab the task refers to (switch_tab / list_tabs).",
+    "When tabs are grouped as the current workspace, use list_tabs / switch_tab only within that group. Never operate on tabs outside the active workspace.",
     "Keep answers concise and in the user's language."
   ].join("\n");
 
@@ -314,30 +314,38 @@
     async selectTab(sessionId, tabId) {
       await this.request({ type: "select_tab", sessionId, tabId });
     }
-    async resolveTabSession(windowId, tabId) {
+    async resolveTabSession(windowId, tabId, groupId) {
       return await this.request({
         type: "resolve_tab_session",
         windowId,
-        tabId
+        tabId,
+        ...groupId !== void 0 ? { groupId } : {}
       });
     }
-    async createTabSession(windowId, tabId) {
+    async createTabSession(windowId, tabId, groupId) {
       return await this.request({
         type: "create_tab_session",
         windowId,
-        tabId
+        tabId,
+        ...groupId !== void 0 ? { groupId } : {}
       });
     }
-    async bindTabSession(windowId, tabId, sessionId) {
+    async bindTabSession(windowId, tabId, sessionId, groupId) {
       return await this.request({
         type: "bind_tab_session",
         windowId,
         tabId,
-        sessionId
+        sessionId,
+        ...groupId !== void 0 ? { groupId } : {}
       });
     }
-    async forgetTabSession(windowId, tabId) {
-      await this.request({ type: "forget_tab_session", windowId, tabId });
+    async forgetTabSession(windowId, tabId, groupId) {
+      await this.request({
+        type: "forget_tab_session",
+        windowId,
+        tabId,
+        ...groupId !== void 0 ? { groupId } : {}
+      });
     }
     async respondApproval(approvalId, approved) {
       await this.request({ type: "approval_response", approvalId, approved });
@@ -738,6 +746,9 @@
     const drafts = /* @__PURE__ */ new Map();
     let windowId;
     let activeTabId;
+    let activeGroupId;
+    let activeScope = "tab";
+    let workspaceMemberTabIds = [];
     let activationGeneration = 0;
     let sessionActivated = false;
     let skills = [];
@@ -754,6 +765,7 @@
     let busyStartedAt = 0;
     let reconnectAttempts = 0;
     const detailState = /* @__PURE__ */ new Map();
+    const activationTargetCount = () => Math.max(1, workspaceMemberTabIds.length);
     const render = () => {
       const zh = pageConfig.language.startsWith("zh");
       const rows = document.querySelector("#kernel-rows");
@@ -764,10 +776,11 @@
       const approvePlan = document.querySelector("#kernel-approve-plan");
       const compact = document.querySelector("#kernel-compact");
       const attachmentList = document.querySelector("#kernel-attachments");
+      const workspace = document.querySelector("#kernel-workspace");
       const queue = document.querySelector("#kernel-queue");
       const modelLabelNode = document.querySelector("#kernel-model-label");
       const input = document.querySelector("#kernel-input");
-      if (!rows || !status || !send || !stop || !input || !modeButton || !approvePlan || !compact || !attachmentList || !queue || !modelLabelNode) return;
+      if (!rows || !status || !send || !stop || !input || !modeButton || !approvePlan || !compact || !attachmentList || !workspace || !queue || !modelLabelNode) return;
       document.documentElement.dataset.tinyaiActivated = String(sessionActivated);
       document.documentElement.dataset.tinyaiCanSend = String(
         projection?.availability.canSend ?? false
@@ -791,6 +804,10 @@
       queue.hidden = !projection?.queueLength;
       queue.innerHTML = projection?.queueLength ? `<span class="kernel-queue-dot" aria-hidden="true"></span><span>${escapeHtml(
         zh ? `${projection.queueLength} \u6761\u6D88\u606F\u6392\u961F` : `${projection.queueLength} ${projection.queueLength === 1 ? "message" : "messages"} queued`
+      )}</span>` : "";
+      workspace.hidden = !projection;
+      workspace.innerHTML = projection ? `<span class="kernel-workspace-mark" aria-hidden="true">\u2318</span><span>${escapeHtml(
+        activeScope === "group" ? zh ? `\u5DE5\u4F5C\u533A \xB7 ${activationTargetCount()} \u4E2A\u6807\u7B7E` : `Workspace \xB7 ${activationTargetCount()} ${activationTargetCount() === 1 ? "tab" : "tabs"}` : zh ? "\u72EC\u7ACB\u6807\u7B7E" : "Independent tab"
       )}</span>` : "";
       attachmentList.innerHTML = [
         ...selectedSkill ? [`<span class="wb-chip"><span class="wb-chip-name">Skill: ${escapeHtml(selectedSkill.name)}</span></span>`] : [],
@@ -872,7 +889,10 @@
         await client.unsubscribe(previousSession).catch(() => void 0);
       }
       sessionId = activation.sessionId;
-      activeTabId = activation.tabId;
+      activeTabId = activation.activeTabId;
+      activeGroupId = activation.groupId;
+      activeScope = activation.scope;
+      workspaceMemberTabIds = [...activation.memberTabIds];
       document.documentElement.dataset.tinyaiTabId = activeTabId;
       document.documentElement.dataset.tinyaiSessionId = sessionId;
       projection = activation.projection;
@@ -890,14 +910,17 @@
     }
     async function switchToTab(tabId) {
       if (windowId === void 0 || tabId === activeTabId) return;
-      await activateSession(() => client.resolveTabSession(windowId, tabId));
+      const tab = await chrome.tabs.get(Number(tabId));
+      await activateSession(
+        () => client.resolveTabSession(windowId, tabId, tab.groupId)
+      );
     }
     async function startNewSession() {
       if (windowId === void 0 || !activeTabId) {
         throw new Error("No active browser tab is available");
       }
       await activateSession(
-        () => client.createTabSession(windowId, activeTabId)
+        () => client.createTabSession(windowId, activeTabId, activeGroupId)
       );
     }
     async function reloadRuntimeForCurrentTab() {
@@ -906,7 +929,7 @@
         throw new Error("No active browser tab is available");
       }
       await activateSession(
-        () => client.resolveTabSession(windowId, activeTabId)
+        () => client.resolveTabSession(windowId, activeTabId, activeGroupId)
       );
     }
     client.onProjection((eventSessionId, next) => {
@@ -1742,9 +1765,19 @@
       if (commandMenu) commandMenu.hidden = true;
       if (modelMenu) modelMenu.hidden = true;
       if (!menu) return;
-      menu.innerHTML = `<div class="wb-menu-heading">${zh ? "\u6807\u7B7E\u9875" : "Tabs"}</div>` + (tabs.length ? tabs.map(
-        (tab) => `<button type="button" class="wb-pop-item${tab.active ? " selected" : ""}" data-kernel-tab="${escapeHtml(tab.id)}"><span class="wb-pop-copy"><span class="wb-pop-title">${escapeHtml(tab.title || tab.url || tab.id)}</span><span class="wb-pop-desc">${escapeHtml(tab.url ?? "")}</span></span></button>`
-      ).join("") : `<div class="wb-menu-empty">${zh ? "\u6CA1\u6709\u53EF\u7528\u7684\u7F51\u9875\u6807\u7B7E\u9875" : "No browser tabs"}</div>`);
+      const currentTabs = activeScope === "tab" ? tabs.filter((tab) => tab.id === activeTabId) : [];
+      const tabsWithGroups = await chrome.tabs.query({ windowId });
+      const groupMembers = activeScope === "group" && activeGroupId !== void 0 ? tabsWithGroups.filter((tab) => tab.groupId === activeGroupId).map((tab) => ({
+        id: String(tab.id),
+        title: tab.title,
+        url: tab.url,
+        active: Boolean(tab.active)
+      })) : [];
+      const workspaceTabs = currentTabs.length ? currentTabs : groupMembers;
+      const workspaceIds = new Set(workspaceTabs.map((tab) => tab.id));
+      const otherTabs = tabs.filter((tab) => !workspaceIds.has(tab.id));
+      const tabButton = (tab) => `<button type="button" class="wb-pop-item${tab.id === activeTabId ? " selected" : ""}" data-kernel-tab="${escapeHtml(tab.id)}"><span class="wb-pop-copy"><span class="wb-pop-title">${escapeHtml(tab.title || tab.url || tab.id)}</span><span class="wb-pop-desc">${escapeHtml(tab.url ?? "")}</span></span></button>`;
+      menu.innerHTML = (workspaceTabs.length ? `<div class="wb-menu-heading">${zh ? "\u5F53\u524D\u5DE5\u4F5C\u533A" : "Current workspace"}</div>${workspaceTabs.map(tabButton).join("")}` : "") + (otherTabs.length ? `<div class="wb-menu-heading">${zh ? "\u5176\u4ED6\u72EC\u7ACB\u6807\u7B7E" : "Other independent tabs"}</div>${otherTabs.map(tabButton).join("")}` : "") || `<div class="wb-menu-empty">${zh ? "\u6CA1\u6709\u53EF\u7528\u7684\u7F51\u9875\u6807\u7B7E\u9875" : "No browser tabs"}</div>`;
       menu.hidden = false;
     }
     async function openModelMenu() {
@@ -1827,7 +1860,12 @@
         throw new Error("No active browser tab is available");
       }
       await activateSession(
-        () => client.bindTabSession(windowId, activeTabId, nextSessionId)
+        () => client.bindTabSession(
+          windowId,
+          activeTabId,
+          nextSessionId,
+          activeGroupId
+        )
       );
     }
     function showError(cause) {
@@ -1847,8 +1885,9 @@
       });
       if (activeTab?.id === void 0) throw new Error("No active browser tab is available");
       activeTabId = String(activeTab.id);
+      activeGroupId = activeTab.groupId !== void 0 && activeTab.groupId >= 0 ? activeTab.groupId : void 0;
       await activateSession(
-        () => client.resolveTabSession(windowId, activeTabId)
+        () => client.resolveTabSession(windowId, activeTabId, activeGroupId)
       );
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
@@ -2177,6 +2216,7 @@
     </div>
     <div class="wb-dock">
       <div id="kernel-queue" class="kernel-queue" hidden></div>
+      <div id="kernel-workspace" class="kernel-workspace-context" hidden></div>
       <div id="kernel-status" class="wb-bridge-note kernel-status" hidden></div>
       <div id="kernel-attachments" class="wb-attachment-bar kernel-context-list"></div>
       <form id="kernel-form" class="wb-composer">

@@ -262,6 +262,32 @@ body {
   font-size: 11px;
 }
 
+.kernel-workspace-context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 2px 7px;
+  padding: 3px 2px;
+  color: var(--faint);
+  font-size: 10.5px;
+}
+
+.kernel-workspace-context[hidden] {
+  display: none;
+}
+
+.kernel-workspace-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 9px;
+}
+
 .kernel-queue[hidden] {
   display: none;
 }

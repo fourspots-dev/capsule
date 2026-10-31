@@ -17,6 +17,7 @@ const backgroundLogs: string[] = [];
 const browserPromptCalls = new Map<string, number>();
 const subagentPromptCalls = new Map<string, number>();
 const handoffPromptCalls = new Map<string, number>();
+const groupWorkspacePromptCalls = new Map<string, number>();
 
 beforeAll(async () => {
   server = createServer((request, response) => {
@@ -107,6 +108,42 @@ beforeAll(async () => {
                             brief: 'child-only instruction',
                             contextMode: 'fresh',
                             executionMode: 'foreground',
+                          }),
+                        },
+                      },
+                    ],
+                  },
+                  finish_reason: 'tool_calls',
+                },
+              ],
+            })}\n\n`
+          );
+          response.write('data: [DONE]\n\n');
+          response.end();
+          return;
+        }
+      }
+      if (userText.includes('group workspace smoke')) {
+        const count = (groupWorkspacePromptCalls.get(userText) ?? 0) + 1;
+        groupWorkspacePromptCalls.set(userText, count);
+        if (count === 1) {
+          response.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+          });
+          response.write(
+            `data: ${JSON.stringify({
+              choices: [
+                {
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: 'call_group_tab',
+                        function: {
+                          name: 'new_tab',
+                          arguments: JSON.stringify({
+                            url: `${baseUrl.replace(/\/v1$/, '')}/page`,
                           }),
                         },
                       },
@@ -599,10 +636,14 @@ describe('kernel extension E2E', () => {
         }),
       ])
     );
+    const tabSessionState = await reopened.evaluate(async () => ({
+      activeTab: document.documentElement.dataset.tinyaiTabId,
+      mapping: await chrome.storage.session.get('tinyai:tab-sessions:v1'),
+    }));
     const reopenedText = await reopened.textContent('body');
     if (!reopenedText?.includes('Detached task completed')) {
       throw new Error(
-        `Detached projection missing after reopen: workers=${liveWorkersAfterClose} sessions=${JSON.stringify(gatewaySessions)} logs=${JSON.stringify(backgroundLogs)} ${reopenedText}`
+        `Detached projection missing after reopen: workers=${liveWorkersAfterClose} sessions=${JSON.stringify(gatewaySessions)} tabState=${JSON.stringify(tabSessionState)} logs=${JSON.stringify(backgroundLogs)} ${reopenedText}`
       );
     }
     expect(reopenErrors).toEqual([]);
@@ -678,6 +719,83 @@ describe('kernel extension E2E', () => {
     expect(reopenErrors).toEqual([]);
     await reopened.screenshot({
       path: resolve('docs/restored-cold-reload.png'),
+      fullPage: false,
+    });
+    const callsBeforeGroupWorkspace = modelCalls;
+    await reopened.fill('#kernel-input', 'group workspace smoke');
+    await reopened.click('#kernel-send');
+    await reopened.waitForFunction(
+      () =>
+        document.querySelector('#kernel-rows')?.textContent?.includes(
+          'E2E received: group workspace smoke'
+        ),
+      undefined,
+      { timeout: 30_000 }
+    );
+    expect(modelCalls).toBe(callsBeforeGroupWorkspace + 2);
+    await reopened.waitForFunction(
+      async (tabId) => (await chrome.tabs.get(Number(tabId))).groupId >= 0,
+      initialTab,
+      { timeout: 10_000 }
+    );
+    const groupWorkspace = await reopened.evaluate(async (tabId) => {
+      const initial = await chrome.tabs.get(Number(tabId));
+      const openTabs = await chrome.tabs.query({ windowId: initial.windowId });
+      const members = openTabs.filter((tab) => tab.groupId === initial.groupId);
+      return {
+        groupId: initial.groupId,
+        members: members.map((tab) => ({
+          id: String(tab.id),
+          title: tab.title,
+          url: tab.url,
+          active: tab.active,
+        })),
+        uiTabId: document.documentElement.dataset.tinyaiTabId,
+        toolText: [...document.querySelectorAll('.kernel-tool-step')]
+          .map((node) => node.textContent?.trim())
+          .filter(Boolean),
+        allTabs: openTabs.map((tab) => ({
+          id: tab.id,
+          title: tab.title,
+          groupId: tab.groupId,
+        })),
+      };
+    }, initialTab);
+    if (groupWorkspace.groupId < 0) {
+      throw new Error(`Group workspace failed: ${JSON.stringify(groupWorkspace)}`);
+    }
+    expect(groupWorkspace.members.length).toBeGreaterThanOrEqual(2);
+    expect(groupWorkspace.members).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'E2E Fixture' }),
+      ])
+    );
+    expect(groupWorkspace.uiTabId).toBe(
+      groupWorkspace.members.find((tab) => tab.active)?.id
+    );
+    await reopened.click('#kernel-tabs');
+    await reopened.waitForSelector('#kernel-tab-menu:not([hidden])');
+    await reopened.click(`[data-kernel-tab="${initialTab}"]`);
+    await reopened.waitForFunction(
+      () =>
+        document.querySelector('#kernel-rows')?.textContent?.includes(
+          'group workspace smoke'
+        ),
+      undefined,
+      { timeout: 10_000 }
+    );
+    expect(await reopened.textContent('#kernel-workspace')).toContain(
+      'Workspace · 2 tabs'
+    );
+    await reopened.click('#kernel-tabs');
+    await reopened.waitForSelector('#kernel-tab-menu:not([hidden])');
+    expect(await reopened.textContent('#kernel-tab-menu')).toContain('Current workspace');
+    expect(await reopened.textContent('#kernel-tab-menu')).toContain(
+      'Other independent tabs'
+    );
+    await reopened.locator('body').click({ position: { x: 8, y: 500 } });
+    await reopened.screenshot({
+      path: resolve('docs/group-workspace-tabs.png'),
       fullPage: false,
     });
   });

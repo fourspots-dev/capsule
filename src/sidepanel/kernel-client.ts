@@ -9,6 +9,7 @@ import type {
   RuntimeRequest,
   RuntimeResponse,
 } from '../runtime/protocol';
+import type { ChromeRuntimeRequest } from '../adapters/chrome-protocol';
 
 interface Pending {
   resolve(value: unknown): void;
@@ -35,8 +36,11 @@ export interface KernelHandoffEvent {
 }
 
 export interface TabSessionActivation {
+  scope: 'group' | 'tab';
   windowId: number;
-  tabId: string;
+  groupId?: number;
+  activeTabId: string;
+  memberTabIds: string[];
   sessionId: string;
   projection: ProductProjection;
 }
@@ -134,41 +138,56 @@ export class KernelClient {
 
   async resolveTabSession(
     windowId: number,
-    tabId: string
+    tabId: string,
+    groupId?: number
   ): Promise<TabSessionActivation> {
     return (await this.request({
       type: 'resolve_tab_session',
       windowId,
       tabId,
+      ...(groupId !== undefined ? { groupId } : {}),
     })) as TabSessionActivation;
   }
 
   async createTabSession(
     windowId: number,
-    tabId: string
+    tabId: string,
+    groupId?: number
   ): Promise<TabSessionActivation> {
     return (await this.request({
       type: 'create_tab_session',
       windowId,
       tabId,
+      ...(groupId !== undefined ? { groupId } : {}),
     })) as TabSessionActivation;
   }
 
   async bindTabSession(
     windowId: number,
     tabId: string,
-    sessionId: string
+    sessionId: string,
+    groupId?: number
   ): Promise<TabSessionActivation> {
     return (await this.request({
       type: 'bind_tab_session',
       windowId,
       tabId,
       sessionId,
+      ...(groupId !== undefined ? { groupId } : {}),
     })) as TabSessionActivation;
   }
 
-  async forgetTabSession(windowId: number, tabId: string): Promise<void> {
-    await this.request({ type: 'forget_tab_session', windowId, tabId });
+  async forgetTabSession(
+    windowId: number,
+    tabId: string,
+    groupId?: number
+  ): Promise<void> {
+    await this.request({
+      type: 'forget_tab_session',
+      windowId,
+      tabId,
+      ...(groupId !== undefined ? { groupId } : {}),
+    });
   }
 
   async respondApproval(approvalId: string, approved: boolean): Promise<void> {
@@ -205,10 +224,12 @@ export class KernelClient {
     this.clearConnection(new Error('Kernel client disconnected'));
   }
 
-  private async request(request: RuntimeRequest): Promise<unknown> {
+  private async request(
+    request: ChromeRuntimeRequest
+  ): Promise<unknown> {
     const port = this.ensurePort();
     const requestId = request.requestId ?? `client_${++this.sequence}`;
-    const message = { ...request, requestId } as RuntimeRequest;
+    const message = { ...request, requestId } as ChromeRuntimeRequest;
     return new Promise((resolve, reject) => {
       const timeoutMs = this.options.requestTimeoutMs ?? 30_000;
       const timer = setTimeout(() => {

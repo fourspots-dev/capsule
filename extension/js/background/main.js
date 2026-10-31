@@ -147,7 +147,9 @@
         ownedTabs: new Set(ownedTab ? [ownedTab] : []),
         attached: /* @__PURE__ */ new Set()
       };
-      if (this.tabs.group) {
+      if (selected.groupId !== void 0 && selected.groupId >= 0) {
+        binding.groupId = selected.groupId;
+      } else if (this.tabs.group) {
         try {
           binding.groupId = await this.tabs.group({ tabIds: [Number(selected.id)] });
           await this.tabGroups?.update(binding.groupId, {
@@ -169,6 +171,9 @@
         attached: /* @__PURE__ */ new Set()
       };
       binding.tabId = tabId;
+      if (tab.groupId !== void 0 && tab.groupId >= 0) {
+        binding.groupId = tab.groupId;
+      }
       this.sessions.set(sessionId, binding);
       if (binding.groupId !== void 0) {
         await this.tabGroups?.update(binding.groupId, { title: tabGroupTitle(tab.title) }).catch(() => void 0);
@@ -179,6 +184,49 @@
       const binding = this.sessions.get(sessionId);
       if (!binding?.tabId) return null;
       return await this.getTab(binding.tabId) ? binding.tabId : null;
+    }
+    async addTabToSession(sessionId, tabId, options = {}) {
+      const tab = await this.waitForTab(tabId);
+      if (!tab) throw new AgentError("BROWSER_TAB_NOT_FOUND", `Tab not found: ${tabId}`);
+      const binding = this.sessions.get(sessionId);
+      if (!binding) {
+        throw new AgentError("BROWSER_SESSION_NOT_FOUND", `Browser session not found: ${sessionId}`);
+      }
+      if (!this.tabs.group) {
+        throw new AgentError("BROWSER_GROUP_UNAVAILABLE", "Chrome tabGroups are unavailable");
+      }
+      const existingGroup = binding.groupId ?? (await this.getTab(binding.tabId))?.groupId;
+      binding.groupId = existingGroup !== void 0 && existingGroup >= 0 ? await this.tabs.group({
+        groupId: existingGroup,
+        tabIds: [Number(tabId)]
+      }) : await this.tabs.group({
+        tabIds: [Number(binding.tabId), Number(tabId)]
+      });
+      binding.tabId = tabId;
+      if (options.owned) binding.ownedTabs.add(tabId);
+      this.sessions.set(sessionId, binding);
+      await this.tabGroups?.update(binding.groupId, { title: tabGroupTitle(tab.title) }).catch(() => void 0);
+      return this.groupRef(sessionId, binding);
+    }
+    async listSessionTabs(sessionId) {
+      const binding = this.sessions.get(sessionId);
+      if (!binding) return [];
+      if (binding.groupId !== void 0) {
+        return (await this.listTabs()).filter(
+          (tab2) => tab2.groupId === binding.groupId
+        );
+      }
+      const tab = await this.getTab(binding.tabId);
+      return tab ? [tab] : [];
+    }
+    async assertSessionTab(sessionId, tabId) {
+      const tabs = await this.listSessionTabs(sessionId);
+      if (!tabs.some((tab) => tab.id === tabId)) {
+        throw new AgentError(
+          "TARGET_OUTSIDE_WORKSPACE",
+          `Tab ${tabId} does not belong to session ${sessionId}`
+        );
+      }
     }
     async closeSessionTabs(sessionId) {
       const binding = this.sessions.get(sessionId);
@@ -217,7 +265,10 @@
         await this.detach(tabId).catch(() => void 0);
       }
       const groupedTabs = new Set([binding.tabId, ...binding.ownedTabs].filter(Boolean));
-      if (this.tabs.ungroup && groupedTabs.size) {
+      const sharedGroup = binding.groupId !== void 0 && [...this.sessions.entries()].some(
+        ([otherSession, other]) => otherSession !== sessionId && other.groupId === binding.groupId
+      );
+      if (this.tabs.ungroup && groupedTabs.size && !sharedGroup) {
         await this.tabs.ungroup([...groupedTabs].map(Number)).catch(() => void 0);
       }
       this.sessions.delete(sessionId);
@@ -553,6 +604,16 @@
       for (const binding of this.sessions.values()) {
         if (binding.tabId === tabId) binding.attached.add(tabId);
       }
+    }
+    async waitForTab(tabId, attempts = 20) {
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const tab = await this.getTab(tabId);
+        if (tab) return tab;
+        await new Promise(
+          (resolve) => this.clock.setTimeout(resolve, 25)
+        );
+      }
+      return null;
     }
     async detach(tabId) {
       await this.debuggerApi.detach({ tabId: Number(tabId) });
@@ -2561,7 +2622,7 @@
     });
   }
 
-  // src/runtime/prompts.ts
+  // src/adapters/chrome-prompts.ts
   var baseSystemPrompt = [
     "You are tinyai, an AI agent operating the user's real Chrome browser.",
     "",
@@ -2578,9 +2639,24 @@
     "- To act on an element, target it by an @ref from snapshot/find, or a CSS selector.",
     "- Screenshot only when the task genuinely needs visual appearance.",
     "",
-    "When several tabs are open, act on the tab the task refers to (switch_tab / list_tabs).",
+    "When tabs are grouped as the current workspace, use list_tabs / switch_tab only within that group. Never operate on tabs outside the active workspace.",
     "Keep answers concise and in the user's language."
   ].join("\n");
+  var chromePromptProfile = {
+    id: "chrome-browser",
+    build({ profile, skills }) {
+      const instructions = profile?.instructions.trim();
+      const skillListing = skills.map((skill) => `- ${skill.name}: ${skill.description}`).join("\n");
+      return [
+        baseSystemPrompt,
+        instructions ? `
+${instructions}` : "",
+        skillListing ? `
+Available skills:
+${skillListing}` : ""
+      ].join("");
+    }
+  };
 
   // src/runtime/approval-broker.ts
   var PortApprovalBroker = class {
@@ -2833,98 +2909,109 @@
       await bundle?.dispose();
       this.runtime = void 0;
     }
-    async forgetTab(windowId, tabId) {
-      const bundle = await this.runtime?.catch(() => void 0);
-      await bundle?.tabSessions?.forget({ windowId, tabId });
-    }
     async handle(port, request) {
-      const requestId = request.requestId ?? (request.type === "command" ? request.command.commandId : `${request.type}_${this.clock.now()}_${Math.random().toString(36).slice(2, 8)}`);
+      const coreRequest = isCoreRuntimeRequest(request) ? request : void 0;
+      const requestId = request.requestId ?? (coreRequest?.type === "command" ? coreRequest.command.commandId : `${request.type}_${this.clock.now()}_${Math.random().toString(36).slice(2, 8)}`);
       try {
         const bundle = await this.ensureRuntime();
-        if (request.type === "hello") {
+        if (!coreRequest) {
+          if (bundle.extension) {
+            const result = await bundle.extension.tryHandle(request);
+            if (result.handled) {
+              this.reply(port, requestId, result.data);
+              return;
+            }
+          }
+          throw new AgentError(
+            "RUNTIME_REQUEST_UNSUPPORTED",
+            `Unsupported runtime request: ${request.type}`
+          );
+        }
+        const core = coreRequest;
+        if (core.type === "hello") {
           port.postMessage({ type: "ready", revision: this.clock.now() });
           return;
         }
-        if (request.type === "approval_response") {
-          const accepted = bundle.approval?.respond(request.approvalId, request.approved) ?? false;
+        if (core.type === "approval_response") {
+          const accepted = bundle.approval?.respond(core.approvalId, core.approved) ?? false;
           this.reply(port, requestId, accepted);
           return;
         }
-        if (request.type === "handoff_response") {
-          const accepted = bundle.approval?.respondHandoff(request.handoffId, request.decision) ?? false;
+        if (core.type === "handoff_response") {
+          const accepted = bundle.approval?.respondHandoff(core.handoffId, core.decision) ?? false;
           this.reply(port, requestId, accepted);
           return;
         }
-        if (request.type === "subscribe") {
-          await this.subscribe(port, bundle.runtime, request.sessionId, requestId);
+        if (core.type === "subscribe") {
+          await this.subscribe(port, bundle.runtime, core.sessionId, requestId);
           return;
         }
-        if (request.type === "unsubscribe") {
-          const subscription = this.subscriptions.get(port)?.get(request.sessionId);
+        if (core.type === "unsubscribe") {
+          const subscription = this.subscriptions.get(port)?.get(core.sessionId);
           subscription?.unsubscribe();
-          this.subscriptions.get(port)?.delete(request.sessionId);
+          this.subscriptions.get(port)?.delete(core.sessionId);
           this.reply(port, requestId, true);
           return;
         }
-        if (request.type === "command") {
-          const ack = await bundle.runtime.command(request.command);
+        if (core.type === "command") {
+          const ack = await bundle.runtime.command(core.command);
           this.reply(port, requestId, ack);
           return;
         }
-        if (request.type === "get_projection") {
-          this.reply(port, requestId, await bundle.runtime.loadProjection(request.sessionId));
+        if (core.type === "get_projection") {
+          this.reply(port, requestId, await bundle.runtime.loadProjection(core.sessionId));
           return;
         }
-        if (request.type === "query_command") {
+        if (core.type === "query_command") {
           this.reply(
             port,
             requestId,
-            bundle.runtime.queryCommand(request.sessionId, request.commandId) ?? null
+            bundle.runtime.queryCommand(core.sessionId, core.commandId) ?? null
           );
           return;
         }
-        if (request.type === "stop_session") {
-          await bundle.runtime.stop(request.sessionId);
+        if (core.type === "stop_session") {
+          await bundle.runtime.stop(core.sessionId);
           this.reply(port, requestId, true);
           return;
         }
-        if (request.type === "list_sessions") {
+        if (core.type === "list_sessions") {
           this.reply(port, requestId, await bundle.runtime.listSessions());
           return;
         }
-        if (request.type === "clear_history") {
-          await bundle.tabSessions?.clear();
+        if (core.type === "clear_history") {
+          await bundle.extension?.beforeClearHistory?.();
           const deleted = await bundle.runtime.deleteAllSessions();
           this.reply(port, requestId, { deleted });
           return;
         }
-        if (request.type === "delete_session") {
-          await bundle.tabSessions?.releaseSession(request.sessionId);
-          await bundle.runtime.deleteSession(request.sessionId);
+        if (core.type === "delete_session") {
+          await bundle.extension?.beforeDeleteSession?.(core.sessionId);
+          await bundle.runtime.deleteSession(core.sessionId);
           this.reply(port, requestId, true);
           return;
         }
-        if (request.type === "restart_session") {
-          await bundle.runtime.restart(request.sessionId);
+        if (core.type === "restart_session") {
+          await bundle.runtime.restart(core.sessionId);
           this.reply(port, requestId, true);
           return;
         }
-        if (request.type === "list_skills") {
+        if (core.type === "list_skills") {
           this.reply(port, requestId, await bundle.skills?.() ?? []);
           return;
         }
-        if (request.type === "reload_runtime") {
+        if (core.type === "reload_runtime") {
           const current = await this.runtime;
           await current?.dispose();
           this.runtime = void 0;
           this.reply(port, requestId, true);
           return;
         }
-        if (request.type === "read_artifact") {
-          const metadata = await bundle.artifacts?.metadata(request.artifactId);
-          const data = await bundle.artifacts?.read(request.artifactId);
+        if (core.type === "read_artifact") {
+          const metadata = await bundle.artifacts?.metadata(core.artifactId);
+          const data = await bundle.artifacts?.read(core.artifactId);
           if (!metadata || !data) {
-            throw new AgentError("ARTIFACT_NOT_FOUND", `Artifact not found: ${request.artifactId}`);
+            throw new AgentError("ARTIFACT_NOT_FOUND", `Artifact not found: ${core.artifactId}`);
           }
           this.reply(port, requestId, {
             metadata,
@@ -2932,59 +3019,10 @@
           });
           return;
         }
-        if (request.type === "list_tabs") {
-          this.reply(port, requestId, await bundle.browser?.listTabs() ?? []);
-          return;
-        }
-        if (request.type === "select_tab") {
-          if (!bundle.browser) {
-            throw new AgentError("BROWSER_UNAVAILABLE", "Browser provider is unavailable");
-          }
-          await bundle.browser.setWorkingTab(request.sessionId, request.tabId);
-          this.reply(port, requestId, true);
-          return;
-        }
-        if (request.type === "resolve_tab_session") {
-          const tabs = bundle.tabSessions;
-          if (!tabs) throw new AgentError("TAB_SESSIONS_UNAVAILABLE", "Tab sessions are unavailable");
-          const binding = await tabs.resolve({
-            windowId: request.windowId,
-            tabId: request.tabId
-          });
-          const projection = await bundle.runtime.loadProjection(binding.sessionId);
-          this.reply(port, requestId, { ...binding, projection });
-          return;
-        }
-        if (request.type === "create_tab_session") {
-          const tabs = bundle.tabSessions;
-          if (!tabs) throw new AgentError("TAB_SESSIONS_UNAVAILABLE", "Tab sessions are unavailable");
-          const binding = await tabs.create({
-            windowId: request.windowId,
-            tabId: request.tabId
-          });
-          const projection = await bundle.runtime.loadProjection(binding.sessionId);
-          this.reply(port, requestId, { ...binding, projection });
-          return;
-        }
-        if (request.type === "bind_tab_session") {
-          const tabs = bundle.tabSessions;
-          if (!tabs) throw new AgentError("TAB_SESSIONS_UNAVAILABLE", "Tab sessions are unavailable");
-          const binding = await tabs.bind(
-            { windowId: request.windowId, tabId: request.tabId },
-            request.sessionId
-          );
-          const projection = await bundle.runtime.loadProjection(binding.sessionId);
-          this.reply(port, requestId, { ...binding, projection });
-          return;
-        }
-        if (request.type === "forget_tab_session") {
-          await bundle.tabSessions?.forget({
-            windowId: request.windowId,
-            tabId: request.tabId
-          });
-          this.reply(port, requestId, true);
-          return;
-        }
+        throw new AgentError(
+          "RUNTIME_REQUEST_UNSUPPORTED",
+          `Unsupported runtime request: ${request.type}`
+        );
       } catch (error) {
         port.postMessage({
           type: "response",
@@ -3041,6 +3079,27 @@
     for (const byte of value) binary += String.fromCharCode(byte);
     return btoa(binary);
   }
+  function isCoreRuntimeRequest(request) {
+    return CORE_REQUEST_TYPES.has(request.type);
+  }
+  var CORE_REQUEST_TYPES = /* @__PURE__ */ new Set([
+    "hello",
+    "subscribe",
+    "unsubscribe",
+    "command",
+    "get_projection",
+    "query_command",
+    "stop_session",
+    "list_sessions",
+    "clear_history",
+    "delete_session",
+    "restart_session",
+    "list_skills",
+    "reload_runtime",
+    "read_artifact",
+    "approval_response",
+    "handoff_response"
+  ]);
 
   // src/core/tool-executor.ts
   var ToolExecutor = class {
@@ -5410,6 +5469,11 @@ ${lines.join("\n")}
         "read",
         ["browser:read"],
         async (_input, invocation) => {
+          if (dependencies.workspaceTabs) {
+            return await dependencies.workspaceTabs.listTabs(
+              invocation.sessionId
+            );
+          }
           const [tabs, current] = await Promise.all([
             browser.listTabs(),
             browser.getWorkingTab(invocation.sessionId)
@@ -5438,13 +5502,17 @@ ${lines.join("\n")}
         "write",
         ["browser:read"],
         async (input, invocation) => {
+          const tabId = requiredString2(input, "tabId");
+          if (dependencies.workspaceTabs) {
+            await dependencies.workspaceTabs.switchTab(invocation.sessionId, tabId);
+            return { tabId };
+          }
           if (dependencies.tabScoped) {
             throw new AgentError(
               "TAB_SCOPED_SESSION",
               "Tabs are isolated conversations and cannot share a working tab."
             );
           }
-          const tabId = requiredString2(input, "tabId");
           await browser.setWorkingTab(invocation.sessionId, tabId);
           return { tabId };
         }
@@ -5456,6 +5524,13 @@ ${lines.join("\n")}
         "write",
         ["browser:navigate"],
         async (input, invocation) => {
+          if (dependencies.workspaceTabs) {
+            const tab2 = await dependencies.workspaceTabs.createTab(
+              invocation.sessionId,
+              optionalString2(input, "url") ?? "about:blank"
+            );
+            return tab2;
+          }
           if (dependencies.tabScoped) {
             throw new AgentError(
               "TAB_SCOPED_SESSION",
@@ -6021,20 +6096,39 @@ ${lines.join("\n")}
     );
   }
 
-  // src/runtime/workspace-factory.ts
+  // src/adapters/browser-tool-pack.ts
+  function createBrowserToolPack(browser, dependencies = {}) {
+    return {
+      id: "browser",
+      register() {
+        return createBrowserTools(browser, dependencies).map((definition) => ({
+          definition,
+          source: "builtin",
+          sourceId: "browser"
+        }));
+      }
+    };
+  }
+
+  // src/adapters/browser-workspace-factory.ts
   function createBrowserWorkspace(options) {
+    const permissionModes = options.permissionModes ?? new PermissionModeRegistry("guarded", () => options.clock.now());
     const registry = new ToolRegistry();
-    const browserTools = createBrowserTools(options.browser, {
+    const browserPack = createBrowserToolPack(options.browser, {
       download: options.download,
       handoff: options.handoff,
-      tabScoped: options.tabScoped
+      tabScoped: options.tabScoped,
+      workspaceTabs: options.workspaceTabs
     });
     registry.registerAll(
-      browserTools.map((definition) => ({ definition, source: "builtin" }))
+      browserPack.register({
+        approval: options.approval,
+        permissions: permissionModes,
+        ...options.artifactStore ? { artifacts: options.artifactStore } : {}
+      })
     );
     registry.registerAll(options.additionalTools ?? []);
     const selected = registry.resolve(options.toolSelection ?? {});
-    const permissionModes = options.permissionModes ?? new PermissionModeRegistry("guarded", () => options.clock.now());
     const tools = new ToolExecutor(selected, options.approval, {
       defaultTimeoutMs: options.defaultToolTimeoutMs,
       policy: new PolicyEngine((sessionId) => permissionModes.mode(sessionId)),
@@ -6054,9 +6148,6 @@ ${lines.join("\n")}
       trace: options.trace,
       maxSteps: options.maxSteps,
       systemPrompt: options.systemPrompt,
-      onOpen: async (sessionId) => {
-        await options.browser.ensureTaskGroup(sessionId);
-      },
       onClose: async (sessionId) => {
         const report = await options.browser.closeSessionTabs(sessionId);
         if (report.errors.length > 0) {
@@ -6508,7 +6599,7 @@ ${lines.join("\n")}
     });
   }
 
-  // src/runtime/tab-session-registry.ts
+  // src/adapters/chrome-workspace-session-registry.ts
   var DEFAULT_STORAGE_KEY = "tinyai:tab-sessions:v1";
   var TabSessionRegistry = class {
     constructor(options) {
@@ -6529,15 +6620,37 @@ ${lines.join("\n")}
         await this.ensureLoaded();
         const existing = this.bindings.get(tabKey(context));
         if (existing) {
-          const session = await this.options.runtime.hydrateSession(existing.sessionId);
+          if (existing.scope === "group" && existing.groupId !== void 0 && existing.memberTabIds.length > 0) {
+            const members = (await this.options.browser.listTabs()).filter(
+              (tab) => tab.windowId === existing.windowId && tab.groupId === existing.groupId
+            ).map((tab) => tab.id);
+            if (members.length > 0 && !members.some((tabId) => existing.memberTabIds.includes(tabId))) {
+              this.bindings.delete(tabKey(context));
+            }
+          }
+        }
+        const currentBinding = this.bindings.get(tabKey(context));
+        if (currentBinding) {
+          const session = await this.options.runtime.hydrateSession(currentBinding.sessionId);
           if (session) {
-            await this.options.runtime.ensureSessionReady(existing.sessionId);
-            await this.options.browser.setWorkingTab(existing.sessionId, context.tabId, {
+            await this.options.runtime.ensureSessionReady(currentBinding.sessionId);
+            await this.options.browser.setWorkingTab(currentBinding.sessionId, context.tabId, {
               activate: false
             });
-            return { ...existing };
+            return this.refreshBinding(currentBinding, context);
           }
           this.bindings.delete(tabKey(context));
+        }
+        if (context.groupId !== void 0 && context.groupId >= 0) {
+          const promoted = this.bindings.get(
+            tabKey({ windowId: context.windowId, tabId: context.tabId })
+          );
+          if (promoted) {
+            this.bindings.delete(
+              tabKey({ windowId: context.windowId, tabId: context.tabId })
+            );
+            return this.bindLocked(context, promoted.sessionId);
+          }
         }
         return this.createLocked(context);
       });
@@ -6564,7 +6677,30 @@ ${lines.join("\n")}
     forget(context) {
       return this.serialized(async () => {
         await this.ensureLoaded();
-        if (this.bindings.delete(tabKey(context))) await this.persist();
+        let changed = this.bindings.delete(
+          tabKey({ windowId: context.windowId, tabId: context.tabId })
+        );
+        const tabs = await this.options.browser.listTabs();
+        for (const [key, binding] of this.bindings) {
+          if (binding.scope !== "group" || binding.windowId !== context.windowId) {
+            continue;
+          }
+          const members = tabs.filter(
+            (tab) => tab.windowId === binding.windowId && tab.groupId === binding.groupId
+          );
+          if (members.length === 0) {
+            this.bindings.delete(key);
+            changed = true;
+          } else {
+            binding.memberTabIds = members.map((tab) => tab.id);
+            if (!binding.memberTabIds.includes(binding.activeTabId)) {
+              binding.activeTabId = binding.memberTabIds[0];
+            }
+            binding.updatedAt = this.now();
+            changed = true;
+          }
+        }
+        if (changed) await this.persist();
       });
     }
     releaseSession(sessionId) {
@@ -6599,6 +6735,74 @@ ${lines.join("\n")}
       await this.ensureLoaded();
       return [...this.bindings.values()].map((binding) => ({ ...binding }));
     }
+    async createTab(sessionId, url = "about:blank") {
+      return this.serialized(async () => {
+        await this.ensureLoaded();
+        const existing = [...this.bindings.values()].find(
+          (binding2) => binding2.sessionId === sessionId
+        );
+        if (!existing) {
+          throw new AgentError(
+            "WORKSPACE_NOT_FOUND",
+            `No browser workspace is bound to session ${sessionId}`
+          );
+        }
+        const tab = await this.options.browser.createTab(url, { active: false });
+        const group = await this.options.browser.addTabToSession?.(
+          sessionId,
+          tab.id,
+          { owned: true }
+        );
+        if (!group) {
+          throw new AgentError(
+            "WORKSPACE_GROUP_UNAVAILABLE",
+            "The browser adapter cannot add tabs to a workspace"
+          );
+        }
+        const tabs = await this.options.browser.listSessionTabs?.(sessionId) ?? [tab];
+        this.removeBindings(sessionId);
+        const binding = {
+          scope: "group",
+          windowId: group.groupId !== void 0 ? tab.windowId ?? existing.windowId : existing.windowId,
+          ...group.groupId !== void 0 ? { groupId: group.groupId } : {},
+          activeTabId: tab.id,
+          memberTabIds: tabs.map((item) => item.id),
+          sessionId,
+          updatedAt: this.now()
+        };
+        this.bindings.set(tabKeyFromBinding(binding), binding);
+        await this.persist();
+        await this.options.browser.setWorkingTab(sessionId, tab.id, {
+          activate: true
+        });
+        return {
+          ...tab,
+          active: true,
+          ...group.groupId !== void 0 ? { groupId: group.groupId } : {}
+        };
+      });
+    }
+    async switchTab(sessionId, tabId) {
+      return this.serialized(async () => {
+        await this.ensureLoaded();
+        await this.options.browser.assertSessionTab?.(sessionId, tabId);
+        await this.options.browser.setWorkingTab(sessionId, tabId, {
+          activate: true
+        });
+        const binding = [...this.bindings.values()].find(
+          (item) => item.sessionId === sessionId
+        );
+        if (binding) {
+          binding.activeTabId = tabId;
+          binding.updatedAt = this.now();
+          await this.persist();
+        }
+      });
+    }
+    async listTabs(sessionId) {
+      await this.ensureLoaded();
+      return await this.options.browser.listSessionTabs?.(sessionId) ?? [];
+    }
     async createLocked(context) {
       return this.bindLocked(context, this.createSessionId());
     }
@@ -6613,9 +6817,15 @@ ${lines.join("\n")}
       await this.options.browser.setWorkingTab(sessionId, context.tabId, {
         activate: false
       });
+      const groupTabs = context.groupId !== void 0 && context.groupId >= 0 ? await this.options.browser.listTabs() : [];
       const binding = {
+        scope: context.groupId !== void 0 && context.groupId >= 0 ? "group" : "tab",
         windowId: context.windowId,
-        tabId: context.tabId,
+        ...context.groupId !== void 0 && context.groupId >= 0 ? { groupId: context.groupId } : {},
+        activeTabId: context.tabId,
+        memberTabIds: context.groupId !== void 0 && context.groupId >= 0 ? groupTabs.filter(
+          (tab) => tab.windowId === context.windowId && tab.groupId === context.groupId
+        ).map((tab) => tab.id) : [context.tabId],
         sessionId,
         updatedAt: this.now()
       };
@@ -6627,6 +6837,21 @@ ${lines.join("\n")}
       this.loaded ??= this.load();
       await this.loaded;
     }
+    async refreshBinding(binding, context) {
+      binding.activeTabId = context.tabId;
+      binding.updatedAt = this.now();
+      if (binding.scope === "group" && binding.groupId !== void 0) {
+        const tabs = await this.options.browser.listTabs();
+        binding.memberTabIds = tabs.filter(
+          (tab) => tab.windowId === binding.windowId && tab.groupId === binding.groupId
+        ).map((tab) => tab.id);
+      }
+      await this.persist();
+      return {
+        ...binding,
+        memberTabIds: [...binding.memberTabIds]
+      };
+    }
     async load() {
       if (!this.options.storage) return;
       const stored = await this.options.storage.get(this.storageKey);
@@ -6636,12 +6861,18 @@ ${lines.join("\n")}
         if (!value || typeof value !== "object" || Array.isArray(value)) continue;
         const item = value;
         const windowId = Number(item.windowId);
-        const tabId = typeof item.tabId === "string" ? item.tabId : "";
+        const groupId = Number(item.groupId);
+        const tabId = typeof item.activeTabId === "string" ? item.activeTabId : typeof item.tabId === "string" ? item.tabId : "";
         const sessionId = typeof item.sessionId === "string" ? item.sessionId : "";
         if (!Number.isFinite(windowId) || !tabId || !sessionId) continue;
-        const context = { windowId, tabId };
+        const scopedGroupId = Number.isFinite(groupId) && groupId >= 0 ? groupId : void 0;
+        const context = { windowId, tabId, ...scopedGroupId !== void 0 ? { groupId: scopedGroupId } : {} };
         this.bindings.set(tabKey(context), {
-          ...context,
+          scope: scopedGroupId !== void 0 ? "group" : "tab",
+          windowId,
+          ...scopedGroupId !== void 0 ? { groupId: scopedGroupId } : {},
+          activeTabId: tabId,
+          memberTabIds: Array.isArray(item.memberTabIds) ? item.memberTabIds.map(String) : [tabId],
           sessionId,
           updatedAt: Number(item.updatedAt ?? this.now())
         });
@@ -6655,6 +6886,11 @@ ${lines.join("\n")}
         }))
       });
     }
+    removeBindings(sessionId) {
+      for (const [key, binding] of this.bindings) {
+        if (binding.sessionId === sessionId) this.bindings.delete(key);
+      }
+    }
     serialized(operation) {
       const next = this.tail.then(operation, operation);
       this.tail = next.then(
@@ -6665,7 +6901,110 @@ ${lines.join("\n")}
     }
   };
   function tabKey(context) {
-    return `${context.windowId}:${context.tabId}`;
+    return context.groupId !== void 0 && context.groupId >= 0 ? `group:${context.windowId}:${context.groupId}` : `tab:${context.windowId}:${context.tabId}`;
+  }
+  function tabKeyFromBinding(binding) {
+    return binding.scope === "group" && binding.groupId !== void 0 ? `group:${binding.windowId}:${binding.groupId}` : `tab:${binding.windowId}:${binding.activeTabId}`;
+  }
+
+  // src/adapters/chrome-runtime-extension.ts
+  var ChromeRuntimeExtension = class {
+    constructor(runtime, tabs, browser, chromeApi) {
+      this.runtime = runtime;
+      this.tabs = tabs;
+      this.browser = browser;
+      this.chromeApi = chromeApi;
+      this.chromeApi.tabs.onRemoved.addListener(this.onTabRemoved);
+    }
+    runtime;
+    tabs;
+    browser;
+    chromeApi;
+    onTabRemoved = (tabId, info) => {
+      void this.tabs.forget({
+        windowId: info.windowId,
+        tabId: String(tabId)
+      });
+    };
+    async tryHandle(request) {
+      if (request.type === "list_tabs") {
+        return { handled: true, data: await this.browser.listTabs() };
+      }
+      if (request.type === "select_tab") {
+        await this.browser.setWorkingTab(
+          requiredString3(request, "sessionId"),
+          requiredString3(request, "tabId")
+        );
+        return { handled: true, data: true };
+      }
+      if (request.type === "resolve_tab_session") {
+        return this.activate(request, "resolve");
+      }
+      if (request.type === "create_tab_session") {
+        return this.activate(request, "create");
+      }
+      if (request.type === "bind_tab_session") {
+        const binding = await this.tabs.bind(
+          activationContext(request),
+          requiredString3(request, "sessionId")
+        );
+        return {
+          handled: true,
+          data: {
+            ...binding,
+            projection: await this.runtime.loadProjection(binding.sessionId)
+          }
+        };
+      }
+      if (request.type === "forget_tab_session") {
+        await this.tabs.forget(activationContext(request));
+        return { handled: true, data: true };
+      }
+      return { handled: false };
+    }
+    async beforeDeleteSession(sessionId) {
+      await this.tabs.releaseSession(sessionId);
+    }
+    async beforeClearHistory() {
+      await this.tabs.clear();
+    }
+    dispose() {
+      this.chromeApi.tabs.onRemoved.removeListener(this.onTabRemoved);
+    }
+    async activate(request, mode) {
+      const context = activationContext(request);
+      const binding = mode === "resolve" ? await this.tabs.resolve(context) : await this.tabs.create(context);
+      return {
+        handled: true,
+        data: {
+          ...binding,
+          projection: await this.runtime.loadProjection(binding.sessionId)
+        }
+      };
+    }
+  };
+  function activationContext(request) {
+    const windowId = Number(request.windowId);
+    const tabId = requiredString3(request, "tabId");
+    if (!Number.isFinite(windowId)) {
+      throw new AgentError("TAB_CONTEXT_INVALID", "A valid windowId is required");
+    }
+    const groupId = Number(request.groupId);
+    return {
+      windowId,
+      tabId,
+      ...Number.isFinite(groupId) && groupId >= 0 ? { groupId } : {}
+    };
+  }
+  function requiredString3(request, key) {
+    const value = request[key];
+    if (typeof value !== "string" || !value) {
+      throw new AgentError(
+        "RUNTIME_EXTENSION_INVALID_REQUEST",
+        `Missing ${key}`
+      );
+    }
+    return value;
   }
 
   // src/adapters/legacy-session-importer.ts
@@ -6984,7 +7323,6 @@ ${lines.join("\n")}
       skills: initialSkills
     });
     const skillTools = createSkillTools(extensions, skillStore);
-    const skillListing = initialSkills.map((skill) => `- ${skill.name}: ${skill.description}`).join("\n");
     const mcpClients = [];
     const mcpTools = [];
     for (const server of parseMcpServers(mcpConfig["tinyai-mcp-servers"])) {
@@ -7035,12 +7373,10 @@ ${lines.join("\n")}
         artifactStore,
         trace,
         hooks,
-        systemPrompt: `${baseSystemPrompt}
-
-${profile.instructions}${skillListing ? `
-
-Available skills:
-${skillListing}` : ""}`,
+        systemPrompt: chromePromptProfile.build({
+          profile,
+          skills: initialSkills
+        }),
         maxSteps: spec.budget.maxTurns,
         toolSelection: {
           allow: profile.tools.allow,
@@ -7063,6 +7399,18 @@ ${skillListing}` : ""}`,
       }).runtime
     });
     let mainWorkspace;
+    let tabSessions;
+    const workspaceTabs = {
+      createTab: (sessionId, url) => requireTabSessions().createTab(sessionId, url),
+      switchTab: (sessionId, tabId) => requireTabSessions().switchTab(sessionId, tabId),
+      listTabs: (sessionId) => requireTabSessions().listTabs(sessionId)
+    };
+    const requireTabSessions = () => {
+      if (!tabSessions) {
+        throw new AgentError("WORKSPACE_NOT_READY", "Browser workspace is not initialized");
+      }
+      return tabSessions;
+    };
     const coordinator = new SubagentCoordinator({
       registry,
       driver: subagentDriver,
@@ -7094,10 +7442,7 @@ ${skillListing}` : ""}`,
       artifactStore,
       trace,
       hooks,
-      systemPrompt: `${baseSystemPrompt}${skillListing ? `
-
-Available skills:
-${skillListing}` : ""}`,
+      systemPrompt: chromePromptProfile.build({ skills: initialSkills }),
       download: async (name, mime, base64) => {
         await chrome.downloads.download({
           url: `data:${mime};base64,${base64}`,
@@ -7122,7 +7467,7 @@ ${skillListing}` : ""}`,
           sourceId: "mcp"
         }))
       ],
-      tabScoped: true
+      workspaceTabs
     });
     const unsubscribeChildren = coordinator.subscribe((child) => {
       mainWorkspace.runtime.updateChildTask(child.parentTaskId, {
@@ -7136,19 +7481,25 @@ ${skillListing}` : ""}`,
         ...child.completedAt ? { updatedAt: child.completedAt } : {}
       });
     });
-    const tabSessions = new TabSessionRegistry({
+    tabSessions = new TabSessionRegistry({
       runtime: mainWorkspace.runtime,
       browser,
       storage: options.tabSessionStorage
     });
+    const extension = new ChromeRuntimeExtension(
+      mainWorkspace.runtime,
+      tabSessions,
+      browser,
+      options.chromeApi ?? chrome
+    );
     return {
       runtime: mainWorkspace.runtime,
-      tabSessions,
+      extension,
       approval,
       skills: () => skillStore.list(),
       artifacts: artifactStore,
-      browser,
       async dispose() {
+        await extension.dispose();
         unsubscribeChildren();
         approval.dispose();
         await coordinator.dispose();
@@ -7161,16 +7512,14 @@ ${skillListing}` : ""}`,
     const gateway = new RuntimeGateway(
       async () => createChromeRuntimeBundle({
         storage: chromeApi.storage.local,
-        tabSessionStorage: chromeApi.storage.session
+        tabSessionStorage: chromeApi.storage.session,
+        chromeApi
       })
     );
     chromeApi.runtime.onConnect.addListener((port) => {
       if (port.name !== KERNEL_PORT_NAME) return;
       gateway.connect(asRuntimePort(port));
       void ensureRuntimeOffscreen(chromeApi);
-    });
-    chromeApi.tabs.onRemoved.addListener((tabId, info) => {
-      void gateway.forgetTab(info.windowId, String(tabId));
     });
     return gateway;
   }

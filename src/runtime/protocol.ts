@@ -4,6 +4,7 @@ import type {
   StructuredError,
 } from '../core/types';
 import type { ProjectionFrame } from '../core/projection';
+import type { RuntimeExtensionRequest } from '../platform/runtime-extension';
 
 export type RuntimeRequest =
   | { type: 'hello'; clientId: string; requestId?: string }
@@ -20,33 +21,6 @@ export type RuntimeRequest =
   | { type: 'list_skills'; requestId?: string }
   | { type: 'reload_runtime'; requestId?: string }
   | { type: 'read_artifact'; artifactId: string; requestId?: string }
-  | { type: 'list_tabs'; requestId?: string }
-  | { type: 'select_tab'; sessionId: string; tabId: string; requestId?: string }
-  | {
-      type: 'resolve_tab_session';
-      windowId: number;
-      tabId: string;
-      requestId?: string;
-    }
-  | {
-      type: 'create_tab_session';
-      windowId: number;
-      tabId: string;
-      requestId?: string;
-    }
-  | {
-      type: 'bind_tab_session';
-      windowId: number;
-      tabId: string;
-      sessionId: string;
-      requestId?: string;
-    }
-  | {
-      type: 'forget_tab_session';
-      windowId: number;
-      tabId: string;
-      requestId?: string;
-    }
   | { type: 'approval_response'; approvalId: string; approved: boolean; requestId?: string }
   | {
       type: 'handoff_response';
@@ -80,10 +54,20 @@ export type RuntimeResponse =
     };
 
 export interface RuntimePort {
-  postMessage(message: RuntimeResponse | RuntimeRequest): void;
+  postMessage(
+    message: RuntimeResponse | RuntimeRequest | RuntimeExtensionRequest
+  ): void;
   onMessage: {
-    addListener(listener: (message: RuntimeRequest | RuntimeResponse) => void): void;
-    removeListener(listener: (message: RuntimeRequest | RuntimeResponse) => void): void;
+    addListener(
+      listener: (
+        message: RuntimeRequest | RuntimeExtensionRequest | RuntimeResponse
+      ) => void
+    ): void;
+    removeListener(
+      listener: (
+        message: RuntimeRequest | RuntimeExtensionRequest | RuntimeResponse
+      ) => void
+    ): void;
   };
   onDisconnect: {
     addListener(listener: () => void): void;

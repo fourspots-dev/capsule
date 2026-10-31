@@ -24,7 +24,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f1f4;padding:1px 5px;
 <header>
 <small>TINYAI / WORKSPACE TEST PLAN / V2</small>
 <h1>双作用域 Workspace 测试方案</h1>
-<p>验证“标签组共享 Workspace Session、组外标签独立 Session”，同时验证 Chrome 特有实现不会泄漏到 Core，TUI/CLI 可以通过自己的 WorkspacePort 独立运行。</p>
+<p>验证“标签组共享 Workspace Session、组外标签独立 Session”，同时验证 Chrome 特有实现不会泄漏到 Core，TUI/CLI 可以通过自己的 WorkspacePort 独立运行。当前自动化：179 个确定性测试通过、1 个 Live 跳过、5 个 Chrome E2E 通过。</p>
 <div class="metrics"><div class="metric"><b>6</b>测试层级</div><div class="metric"><b>45+</b>核心用例</div><div class="metric"><b>4</b>关键竞态</div><div class="metric"><b>1</b>跨端门禁</div></div>
 </header>
 <nav><a href="#strategy">策略</a><a href="#matrix">核心矩阵</a><a href="#race">竞态</a><a href="#tools">工具并发</a><a href="#ports">跨端隔离</a><a href="#ui">UI</a><a href="#migration">迁移</a><a href="#acceptance">验收</a></nav>
@@ -123,7 +123,7 @@ inactive_workspace
 <h2>8. 发布门禁</h2>
 <div class="grid"><div class="card"><h3>功能</h3><p>组内多 target 共享 Session；组外自动独立；Agent 可在组内新开与切换。</p></div><div class="card"><h3>隔离</h3><p>组外工具拒绝；快速切换不串消息、审批、草稿和任务状态。</p></div><div class="card"><h3>跨端</h3><p>Core 和 Session Snapshot 无 Chrome 依赖；TUI standalone 构建通过。</p></div></div>
 <ul><li>Registry 单元测试覆盖所有作用域转换与成员状态。</li><li>Tool contract 覆盖组内/组外和 stale membership。</li><li>至少 3 个真实 Chrome E2E：组内协作、组外隔离、Agent 建组。</li><li>至少 2 个并发测试：快速标签切换、运行中成员变化。</li><li>v1 映射迁移、全量清理和 TUI 隔离均有回归测试。</li><li>不引入跨组审批越权、内部 ID 泄漏或历史消息自动合并。</li></ul>
-<div class="note">本文件描述下一阶段方案；当前上线版本仍是“一标签一 Session”。</div>
+<div class="note">M1-M4 已实现并通过 Core 边界检查与 Chrome E2E；TUI/Web Adapter 仍是后续端口接入工作。</div>
 <p><a href="group-workspace-sessions-design.html">← 返回设计方案</a></p>
 </section>
 </div>

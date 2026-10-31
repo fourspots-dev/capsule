@@ -1,7 +1,6 @@
 export * from './agent-loop';
 export * from './agent-profile';
 export * from './artifact-store';
-export * from './browser-provider';
 export * from './command-inbox';
 export * from './compaction';
 export * from './context-manager';

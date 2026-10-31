@@ -1,4 +1,4 @@
-import type { BrowserProvider } from '../core/browser-provider';
+import type { BrowserProvider } from './browser-provider';
 import type { ArtifactStore } from '../core/artifact-store';
 import type { HookRunner } from '../core/hooks';
 import { AgentError } from '../core/errors';
@@ -16,7 +16,8 @@ import { ToolRegistry, type ToolRegistration } from '../core/tool-registry';
 import type { ToolDefinition } from '../core/types';
 import type { TraceRecorder } from '../core/trace-recorder';
 import { WorkspaceRuntime, type WorkspaceRuntimeOptions } from '../core/workspace-runtime';
-import { createBrowserTools } from '../adapters/browser-tools';
+import { createBrowserToolPack } from './browser-tool-pack';
+import type { WorkspaceTabControl } from './browser-tools';
 
 export interface BrowserWorkspaceFactoryOptions {
   model: ModelTransport;
@@ -42,6 +43,7 @@ export interface BrowserWorkspaceFactoryOptions {
   trace?: TraceRecorder;
   hooks?: HookRunner;
   tabScoped?: boolean;
+  workspaceTabs?: WorkspaceTabControl;
 }
 
 export interface BrowserWorkspaceBundle {
@@ -54,19 +56,25 @@ export interface BrowserWorkspaceBundle {
 export function createBrowserWorkspace(
   options: BrowserWorkspaceFactoryOptions
 ): BrowserWorkspaceBundle {
+  const permissionModes =
+    options.permissionModes ??
+    new PermissionModeRegistry('guarded', () => options.clock.now());
   const registry = new ToolRegistry();
-  const browserTools = createBrowserTools(options.browser, {
+  const browserPack = createBrowserToolPack(options.browser, {
     download: options.download,
     handoff: options.handoff,
     tabScoped: options.tabScoped,
+    workspaceTabs: options.workspaceTabs,
   });
   registry.registerAll(
-    browserTools.map((definition) => ({ definition, source: 'builtin' as const }))
+    browserPack.register({
+      approval: options.approval,
+      permissions: permissionModes,
+      ...(options.artifactStore ? { artifacts: options.artifactStore } : {}),
+    })
   );
   registry.registerAll(options.additionalTools ?? []);
   const selected = registry.resolve(options.toolSelection ?? {});
-  const permissionModes =
-    options.permissionModes ?? new PermissionModeRegistry('guarded', () => options.clock.now());
   const tools = new ToolExecutor(selected, options.approval, {
     defaultTimeoutMs: options.defaultToolTimeoutMs,
     policy: new PolicyEngine((sessionId) => permissionModes.mode(sessionId)),
@@ -88,9 +96,6 @@ export function createBrowserWorkspace(
     trace: options.trace,
     maxSteps: options.maxSteps,
     systemPrompt: options.systemPrompt,
-    onOpen: async (sessionId) => {
-      await options.browser.ensureTaskGroup(sessionId);
-    },
     onClose: async (sessionId) => {
       const report = await options.browser.closeSessionTabs(sessionId);
       if (report.errors.length > 0) {

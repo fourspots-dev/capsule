@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createBrowserTools } from '../../src/adapters/browser-tools';
-import type { BrowserProvider } from '../../src/core/browser-provider';
+import type { BrowserProvider } from '../../src/adapters/browser-provider';
 import { FakeApproval } from '../harness/fakes';
 import { ToolExecutor } from '../../src/core';
 
@@ -96,6 +96,52 @@ describe('browser tool adapter', () => {
       output: { tabId: '1', text: 'page text' },
     });
     expect(provider.getWorkingTab).toHaveBeenCalledWith('session_1');
+  });
+
+  it('routes new_tab and switch_tab through the tab workspace adapter', async () => {
+    const workspaceTabs = {
+      createTab: vi.fn(async () => ({
+        id: '9',
+        title: 'Workspace',
+        url: 'https://example.com/workspace',
+        active: true,
+        groupId: 5,
+      })),
+      switchTab: vi.fn(async () => undefined),
+      listTabs: vi.fn(async () => [
+        { id: '9', title: 'Workspace', active: true, groupId: 5 },
+      ]),
+    };
+    const executor = new ToolExecutor(
+      createBrowserTools(browser(), { workspaceTabs }),
+      new FakeApproval(true)
+    );
+    const invoke = (id: string, name: string, args: string) =>
+      executor.execute({
+        sessionId: 'session_1',
+        taskId: 'task_1',
+        signal: new AbortController().signal,
+        call: { id, name, arguments: args },
+      });
+
+    await expect(
+      invoke('call_new', 'new_tab', '{"url":"https://example.com/workspace"}')
+    ).resolves.toMatchObject({
+      status: 'succeeded',
+      output: { id: '9', groupId: 5 },
+    });
+    await expect(
+      invoke('call_switch', 'switch_tab', '{"tabId":"9"}')
+    ).resolves.toMatchObject({ status: 'succeeded', output: { tabId: '9' } });
+    await expect(invoke('call_list', 'list_tabs', '{}')).resolves.toMatchObject({
+      status: 'succeeded',
+      output: [expect.objectContaining({ id: '9', groupId: 5 })],
+    });
+    expect(workspaceTabs.createTab).toHaveBeenCalledWith(
+      'session_1',
+      'https://example.com/workspace'
+    );
+    expect(workspaceTabs.switchTab).toHaveBeenCalledWith('session_1', '9');
   });
 
   it('filters accessibility nodes without introducing a separate UI adapter', async () => {

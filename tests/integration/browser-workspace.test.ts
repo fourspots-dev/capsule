@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { BrowserProvider, ToolDefinition } from '../../src/core';
+import type { ToolDefinition } from '../../src/core';
+import type { BrowserProvider } from '../../src/adapters/browser-provider';
 import { FakeApproval, FakeClock, events, text } from '../harness/fakes';
 import { SequentialIdGenerator } from '../../src/core';
 import { InMemorySessionStore } from '../../src/core';
-import { createBrowserWorkspace } from '../../src/runtime/workspace-factory';
+import { createBrowserWorkspace } from '../../src/adapters/browser-workspace-factory';
 import { command } from '../harness/workspace';
 
 function browser(): BrowserProvider & { dispose: ReturnType<typeof vi.fn> } {
@@ -71,9 +72,7 @@ describe('createBrowserWorkspace', () => {
     const ack = await bundle.runtime.command(command('session_1', 'command_1', 'hello'));
     expect(ack.status).toBe('accepted');
     await bundle.runtime.waitForSessionIdle('session_1');
-    expect(browserProvider.ensureTaskGroup).toHaveBeenCalledWith('session_1');
     await bundle.runtime.restart('session_1');
-    expect(browserProvider.ensureTaskGroup).toHaveBeenCalledTimes(2);
     expect(browserProvider.closeSessionTabs).toHaveBeenCalledTimes(1);
 
     await bundle.dispose();
