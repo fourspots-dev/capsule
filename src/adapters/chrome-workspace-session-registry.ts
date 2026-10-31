@@ -139,24 +139,34 @@ export class TabSessionRegistry {
   forget(context: TabContext): Promise<void> {
     return this.serialized(async () => {
       await this.ensureLoaded();
-      let changed = this.bindings.delete(
-        tabKey({ windowId: context.windowId, tabId: context.tabId })
-      );
+      await this.forgetLocked(context);
+    });
+  }
+
+  reconcile(context: TabContext): Promise<void> {
+    return this.serialized(async () => {
+      await this.ensureLoaded();
+      const tab = await this.options.browser.getTab(context.tabId);
+      if (!tab) {
+        await this.forgetLocked(context);
+        return;
+      }
       const tabs = await this.options.browser.listTabs();
+      let changed = false;
       for (const [key, binding] of this.bindings) {
         if (binding.scope !== 'group' || binding.windowId !== context.windowId) {
           continue;
         }
         const members = tabs.filter(
-          (tab) =>
-            tab.windowId === binding.windowId &&
-            tab.groupId === binding.groupId
+          (candidate) =>
+            candidate.windowId === binding.windowId &&
+            candidate.groupId === binding.groupId
         );
         if (members.length === 0) {
           this.bindings.delete(key);
           changed = true;
         } else {
-          binding.memberTabIds = members.map((tab) => tab.id);
+          binding.memberTabIds = members.map((candidate) => candidate.id);
           if (!binding.memberTabIds.includes(binding.activeTabId)) {
             binding.activeTabId = binding.memberTabIds[0];
           }
@@ -398,6 +408,35 @@ export class TabSessionRegistry {
     for (const [key, binding] of this.bindings) {
       if (binding.sessionId === sessionId) this.bindings.delete(key);
     }
+  }
+
+  private async forgetLocked(context: TabContext): Promise<void> {
+    let changed = this.bindings.delete(
+      tabKey({ windowId: context.windowId, tabId: context.tabId })
+    );
+    const tabs = await this.options.browser.listTabs();
+    for (const [key, binding] of this.bindings) {
+      if (binding.scope !== 'group' || binding.windowId !== context.windowId) {
+        continue;
+      }
+      const members = tabs.filter(
+        (tab) =>
+          tab.windowId === binding.windowId &&
+          tab.groupId === binding.groupId
+      );
+      if (members.length === 0) {
+        this.bindings.delete(key);
+        changed = true;
+      } else {
+        binding.memberTabIds = members.map((tab) => tab.id);
+        if (!binding.memberTabIds.includes(binding.activeTabId)) {
+          binding.activeTabId = binding.memberTabIds[0];
+        }
+        binding.updatedAt = this.now();
+        changed = true;
+      }
+    }
+    if (changed) await this.persist();
   }
 
   private serialized<T>(operation: () => Promise<T>): Promise<T> {

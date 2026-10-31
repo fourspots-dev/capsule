@@ -15,6 +15,10 @@
     "typecheck:core": "tsc --noEmit -p tsconfig.core.json",
     "check:boundaries": "node scripts/check-core-boundaries.mjs",
     "test": "vitest run",
+    "test:state": "vitest run tests/state-space tests/adapters/chrome-browser.test.ts tests/integration/chrome-runtime-extension.test.ts",
+    "test:state:deep": "STATE_SPACE_DEEP=1 vitest run tests/state-space",
+    "test:chrome:fault": "vitest run tests/adapters/chrome-browser.test.ts tests/integration/chrome-runtime-extension.test.ts",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "test:e2e": "npm run build && vitest run --config vitest.e2e.config.mts",
     "check": "npm run typecheck && npm run typecheck:tests && npm run typecheck:core && npm run check:boundaries && npm test && npm run build"
@@ -22,6 +26,7 @@
   "devDependencies": {
     "@types/chrome": "^0.3.6",
     "@types/node": "^24.19.2",
+    "@vitest/coverage-v8": "^4.1.12",
     "esbuild": "^0.28.2",
     "fast-check": "^4.10.2",
     "playwright-core": "^1.64.1",

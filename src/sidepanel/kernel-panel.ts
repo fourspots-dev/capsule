@@ -294,8 +294,8 @@ export async function initKernelUi(): Promise<void> {
     return true;
   }
 
-  async function switchToTab(tabId: string): Promise<void> {
-    if (windowId === undefined || tabId === activeTabId) return;
+  async function switchToTab(tabId: string, force = false): Promise<void> {
+    if (windowId === undefined || (tabId === activeTabId && !force)) return;
     let tab: chrome.tabs.Tab;
     try {
       tab = await chrome.tabs.get(Number(tabId));
@@ -429,6 +429,19 @@ export async function initKernelUi(): Promise<void> {
   chrome.tabs.onActivated.addListener((info) => {
     if (windowId === undefined || info.windowId !== windowId) return;
     void switchToTab(String(info.tabId)).catch(showError);
+  });
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (
+      windowId === undefined ||
+      changeInfo.groupId === undefined ||
+      String(tabId) !== activeTabId
+    ) {
+      return;
+    }
+    const groupId =
+      changeInfo.groupId >= 0 ? changeInfo.groupId : undefined;
+    if (groupId === activeGroupId) return;
+    void switchToTab(String(tabId), true).catch(showError);
   });
   chrome.tabs.onRemoved.addListener((tabId) => {
     if (!activeTabId || String(tabId) !== activeTabId) return;

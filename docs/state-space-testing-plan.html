@@ -25,7 +25,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <small>TINYAI / STATE-SPACE TESTING / DESIGN</small>
 <h1>状态空间测试方案</h1>
 <p>用“有界穷举 + 参考模型 + 并发模型检查 + Chrome 故障注入 + UI 状态组合 + 代表性 E2E”覆盖 Coding Agent 和浏览器 Workspace 的关键行为，而不是依赖不断增加顺序手写测试。</p>
-<div class="chips"><span class="chip">当前基线：180 个确定性测试</span><span class="chip">5 个 Chrome E2E</span><span class="chip">7 个属性</span><span class="chip">目标：状态与交错可复现</span></div>
+<div class="chips"><span class="chip">当前基线：187 个确定性测试</span><span class="chip">5 个 Chrome E2E</span><span class="chip">首批参考模型与故障注入已实现</span><span class="chip">覆盖率 55.86% statements</span></div>
 </header>
 <nav><a href="#goal">目标</a><a href="#model">状态模型</a><a href="#invariants">不变量</a><a href="#levels">六级测试</a><a href="#matrix">顺序矩阵</a><a href="#fault">故障注入</a><a href="#ui">UI组合</a><a href="#oracle">判定与复现</a><a href="#ci">CI门禁</a><a href="#gaps">当前缺口</a></nav>
 <section id="goal">
@@ -35,6 +35,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <div class="card"><h3>不追求的目标</h3><ul><li>穷举真实网页 DOM 和所有外部网络行为。</li><li>穷举任意长度模型输出和用户输入。</li><li>在 CI 中全量运行所有 Chrome/OS 组合。</li><li>用行覆盖率替代行为判断。</li></ul></div>
 </div>
 <div class="rule">核心策略：对控制面做有限抽象和有界穷举；对输入空间做属性测试；对真实浏览器只保留代表性 E2E 和故障注入。</div>
+<p><b>首批实现状态：</b>Workspace 参考模型、固定事件顺序矩阵、关闭/延迟/分组失败故障注入、RuntimeExtension 事件、Projection 组合和 V8 覆盖率门禁已经接入；TLA+、深度 soak、mutation testing 仍是后续阶段。</p>
 </section>
 <section id="model">
 <h2>2. 被测状态模型</h2>

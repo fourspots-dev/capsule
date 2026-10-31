@@ -908,8 +908,8 @@
       render();
       return true;
     }
-    async function switchToTab(tabId) {
-      if (windowId === void 0 || tabId === activeTabId) return;
+    async function switchToTab(tabId, force = false) {
+      if (windowId === void 0 || tabId === activeTabId && !force) return;
       let tab;
       try {
         tab = await chrome.tabs.get(Number(tabId));
@@ -1023,6 +1023,14 @@
     chrome.tabs.onActivated.addListener((info) => {
       if (windowId === void 0 || info.windowId !== windowId) return;
       void switchToTab(String(info.tabId)).catch(showError);
+    });
+    chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+      if (windowId === void 0 || changeInfo.groupId === void 0 || String(tabId) !== activeTabId) {
+        return;
+      }
+      const groupId = changeInfo.groupId >= 0 ? changeInfo.groupId : void 0;
+      if (groupId === activeGroupId) return;
+      void switchToTab(String(tabId), true).catch(showError);
     });
     chrome.tabs.onRemoved.addListener((tabId) => {
       if (!activeTabId || String(tabId) !== activeTabId) return;

@@ -19,6 +19,25 @@ export class ChromeRuntimeExtension implements RuntimeExtension {
     });
   };
 
+  private readonly onTabUpdated = (
+    tabId: number,
+    changeInfo: chrome.tabs.OnUpdatedInfo
+  ): void => {
+    if (changeInfo.groupId === undefined) return;
+    void this.chromeApi.tabs
+      .get(tabId)
+      .then((tab) =>
+        this.tabs.reconcile({
+          windowId: tab.windowId,
+          tabId: String(tabId),
+          ...(tab.groupId !== undefined && tab.groupId >= 0
+            ? { groupId: tab.groupId }
+            : {}),
+        })
+      )
+      .catch(() => undefined);
+  };
+
   constructor(
     private readonly runtime: WorkspaceRuntime,
     private readonly tabs: TabSessionRegistry,
@@ -26,6 +45,7 @@ export class ChromeRuntimeExtension implements RuntimeExtension {
     private readonly chromeApi: typeof chrome
   ) {
     this.chromeApi.tabs.onRemoved.addListener(this.onTabRemoved);
+    this.chromeApi.tabs.onUpdated.addListener(this.onTabUpdated);
   }
 
   async tryHandle(
@@ -77,6 +97,7 @@ export class ChromeRuntimeExtension implements RuntimeExtension {
 
   dispose(): void {
     this.chromeApi.tabs.onRemoved.removeListener(this.onTabRemoved);
+    this.chromeApi.tabs.onUpdated.removeListener(this.onTabUpdated);
   }
 
   private async activate(

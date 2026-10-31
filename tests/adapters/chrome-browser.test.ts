@@ -53,6 +53,14 @@ function fakeTabs(initial: chrome.tabs.Tab[]): ChromeTabsApi & { values: chrome.
         if (remove.has(Number(values[index].id))) values.splice(index, 1);
       }
     }),
+    group: vi.fn(async (options) => {
+      const groupId = 7;
+      for (const id of options.tabIds) {
+        const found = values.find((item) => item.id === Number(id));
+        if (found) found.groupId = groupId;
+      }
+      return groupId;
+    }),
   };
 }
 
@@ -300,6 +308,63 @@ describe('ChromeBrowserProvider', () => {
     });
     expect(tabs.create).not.toHaveBeenCalled();
     expect(debuggerApi.detach).not.toHaveBeenCalled();
+  });
+
+  it('rejects a working target that disappeared and waits for delayed new-tab visibility', async () => {
+    const tabs = fakeTabs([tab(1)]);
+    const browser = new ChromeBrowserProvider({
+      tabs,
+      debugger: fakeDebugger(),
+      clock: { now: () => 10, setTimeout: (callback) => callback() },
+    });
+    await browser.setWorkingTab('session_1', '1', { activate: false });
+    await tabs.remove(1);
+    await expect(
+      browser.setWorkingTab('session_1', '1', { activate: false })
+    ).rejects.toMatchObject({ code: 'BROWSER_TAB_NOT_FOUND' });
+
+    const delayed = fakeTabs([tab(2)]);
+    let firstRead = true;
+    vi.mocked(delayed.get).mockImplementation(async (id) => {
+      if (id === 99 && firstRead) {
+        firstRead = false;
+        throw new Error('Tab is not visible yet');
+      }
+      const found = delayed.values.find((item) => item.id === id);
+      if (!found) throw new Error('No tab');
+      return found;
+    });
+    const delayedBrowser = new ChromeBrowserProvider({
+      tabs: delayed,
+      debugger: fakeDebugger(),
+      clock: { now: () => 10, setTimeout: (callback) => callback() },
+    });
+    await delayedBrowser.setWorkingTab('session_2', '2', { activate: false });
+    const created = await delayedBrowser.createTab('about:blank', { active: false });
+    await expect(
+      delayedBrowser.addTabToSession('session_2', created.id)
+    ).resolves.toMatchObject({ groupId: 7 });
+  });
+
+  it('keeps the previous working target when tab grouping fails', async () => {
+    const tabs = fakeTabs([tab(1)]);
+    tabs.group = vi.fn(async () => {
+      throw new Error('group failed');
+    });
+    const browser = new ChromeBrowserProvider({
+      tabs,
+      debugger: fakeDebugger(),
+      clock: { now: () => 10, setTimeout: (callback) => callback() },
+    });
+    await browser.setWorkingTab('session_1', '1', { activate: false });
+    const created = await browser.createTab('about:blank', { active: false });
+
+    await expect(
+      browser.addTabToSession('session_1', created.id)
+    ).rejects.toThrow('group failed');
+    expect(await browser.listSessionTabs('session_1')).toEqual([
+      expect.objectContaining({ id: '1' }),
+    ]);
   });
 
   it('captures screenshots and validates navigation URLs', async () => {

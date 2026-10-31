@@ -6690,22 +6690,31 @@ ${lines.join("\n")}
     forget(context) {
       return this.serialized(async () => {
         await this.ensureLoaded();
-        let changed = this.bindings.delete(
-          tabKey({ windowId: context.windowId, tabId: context.tabId })
-        );
+        await this.forgetLocked(context);
+      });
+    }
+    reconcile(context) {
+      return this.serialized(async () => {
+        await this.ensureLoaded();
+        const tab = await this.options.browser.getTab(context.tabId);
+        if (!tab) {
+          await this.forgetLocked(context);
+          return;
+        }
         const tabs = await this.options.browser.listTabs();
+        let changed = false;
         for (const [key, binding] of this.bindings) {
           if (binding.scope !== "group" || binding.windowId !== context.windowId) {
             continue;
           }
           const members = tabs.filter(
-            (tab) => tab.windowId === binding.windowId && tab.groupId === binding.groupId
+            (candidate) => candidate.windowId === binding.windowId && candidate.groupId === binding.groupId
           );
           if (members.length === 0) {
             this.bindings.delete(key);
             changed = true;
           } else {
-            binding.memberTabIds = members.map((tab) => tab.id);
+            binding.memberTabIds = members.map((candidate) => candidate.id);
             if (!binding.memberTabIds.includes(binding.activeTabId)) {
               binding.activeTabId = binding.memberTabIds[0];
             }
@@ -6904,6 +6913,32 @@ ${lines.join("\n")}
         if (binding.sessionId === sessionId) this.bindings.delete(key);
       }
     }
+    async forgetLocked(context) {
+      let changed = this.bindings.delete(
+        tabKey({ windowId: context.windowId, tabId: context.tabId })
+      );
+      const tabs = await this.options.browser.listTabs();
+      for (const [key, binding] of this.bindings) {
+        if (binding.scope !== "group" || binding.windowId !== context.windowId) {
+          continue;
+        }
+        const members = tabs.filter(
+          (tab) => tab.windowId === binding.windowId && tab.groupId === binding.groupId
+        );
+        if (members.length === 0) {
+          this.bindings.delete(key);
+          changed = true;
+        } else {
+          binding.memberTabIds = members.map((tab) => tab.id);
+          if (!binding.memberTabIds.includes(binding.activeTabId)) {
+            binding.activeTabId = binding.memberTabIds[0];
+          }
+          binding.updatedAt = this.now();
+          changed = true;
+        }
+      }
+      if (changed) await this.persist();
+    }
     serialized(operation) {
       const next = this.tail.then(operation, operation);
       this.tail = next.then(
@@ -6928,6 +6963,7 @@ ${lines.join("\n")}
       this.browser = browser;
       this.chromeApi = chromeApi;
       this.chromeApi.tabs.onRemoved.addListener(this.onTabRemoved);
+      this.chromeApi.tabs.onUpdated.addListener(this.onTabUpdated);
     }
     runtime;
     tabs;
@@ -6938,6 +6974,16 @@ ${lines.join("\n")}
         windowId: info.windowId,
         tabId: String(tabId)
       });
+    };
+    onTabUpdated = (tabId, changeInfo) => {
+      if (changeInfo.groupId === void 0) return;
+      void this.chromeApi.tabs.get(tabId).then(
+        (tab) => this.tabs.reconcile({
+          windowId: tab.windowId,
+          tabId: String(tabId),
+          ...tab.groupId !== void 0 && tab.groupId >= 0 ? { groupId: tab.groupId } : {}
+        })
+      ).catch(() => void 0);
     };
     async tryHandle(request) {
       if (request.type === "list_tabs") {
@@ -6983,6 +7029,7 @@ ${lines.join("\n")}
     }
     dispose() {
       this.chromeApi.tabs.onRemoved.removeListener(this.onTabRemoved);
+      this.chromeApi.tabs.onUpdated.removeListener(this.onTabUpdated);
     }
     async activate(request, mode) {
       const context = activationContext(request);
