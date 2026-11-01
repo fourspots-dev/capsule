@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.0
+
+### Infrastructure
+
+- `REQ-ENG-006`: add an agent-owned Decision Inbox for durable decisions made
+  during discussion, independent of an existing requirement.
+- Add mandatory `adrReview` triage for new requirements from 0.5.0, including
+  traceable `existing`, `proposed`, and `not_required` outcomes.
+- Allow ADRs without a current REQ when they retain an `Origin decision` and
+  require the Agent to create a Proposed ADR before requesting user review.
+- Add DEC/ADR/REQ three-way validation, documented interaction checkpoints and
+  the first promoted decision chain `DEC-001 → ADR-013 → REQ-ENG-006`.
+
+### Verification
+
+- `npm run decisions:check`
+- `npm run adr:check`
+- `npm run requirements:check`
+- `npm run check`
+
 ## 0.4.3
 
 ### Infrastructure

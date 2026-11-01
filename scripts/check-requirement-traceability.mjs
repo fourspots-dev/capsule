@@ -10,9 +10,15 @@ export function checkRequirementTraceability(root = resolve(dirname(scriptPath),
   const errors = [];
   const registry = JSON.parse(readFileSync(registryPath, 'utf8'));
   const packageJson = JSON.parse(readFileSync(packagePath, 'utf8'));
+  const adrRegistry = JSON.parse(
+    readFileSync(join(root, 'policy/adr-registry.json'), 'utf8')
+  );
   const requirements = Array.isArray(registry.requirements)
     ? registry.requirements
     : [];
+  const adrById = new Map(
+    (adrRegistry.decisions ?? []).map((adr) => [adr.id, adr])
+  );
   const ids = new Set();
   const aliases = new Set();
   const requirementTypes = new Set([
@@ -33,6 +39,12 @@ export function checkRequirementTraceability(root = resolve(dirname(scriptPath),
     'released',
   ]);
   const designStatuses = new Set(['draft', 'review', 'approved']);
+  const adrReviewStatuses = new Set([
+    'pending',
+    'existing',
+    'proposed',
+    'not_required',
+  ]);
 
   if (registry.schemaVersion !== 1) errors.push('schemaVersion must be 1');
   if (!/^[a-f0-9]{7,40}$/.test(String(registry.baselineCommit))) {
@@ -91,6 +103,7 @@ export function checkRequirementTraceability(root = resolve(dirname(scriptPath),
       requireDocument(requirement.design, `${label}: design`, root, errors);
       requireDocument(requirement.testDesign, `${label}: testDesign`, root, errors);
     }
+    validateAdrReview(requirement, label, adrById, adrReviewStatuses, errors);
     if (
       requirement.architectureImpact !== undefined &&
       typeof requirement.architectureImpact !== 'boolean'
@@ -134,6 +147,94 @@ export function checkRequirementTraceability(root = resolve(dirname(scriptPath),
   return { errors, requirements, version: packageJson.version };
 }
 
+function validateAdrReview(requirement, label, adrById, statuses, errors) {
+  const required = isVersionAtLeast(requirement.targetVersion, 0, 5, 0);
+  const review = requirement.adrReview;
+  if (review === undefined) {
+    if (required) {
+      errors.push(`${label}: adrReview is required from targetVersion 0.5.0`);
+    }
+    return;
+  }
+  if (!review || typeof review !== 'object' || Array.isArray(review)) {
+    errors.push(`${label}: adrReview must be an object`);
+    return;
+  }
+  if (!statuses.has(review.status)) {
+    errors.push(`${label}: invalid adrReview.status ${review.status}`);
+  }
+  if (
+    !Array.isArray(review.adrs) ||
+    review.adrs.some((id) => typeof id !== 'string')
+  ) {
+    errors.push(`${label}: adrReview.adrs must be an array of ADR ids`);
+    return;
+  }
+  if (new Set(review.adrs).size !== review.adrs.length) {
+    errors.push(`${label}: adrReview.adrs contains duplicate ids`);
+  }
+  if (typeof review.rationale !== 'string' || !review.rationale.trim()) {
+    errors.push(`${label}: adrReview.rationale is required`);
+  }
+  if (
+    typeof review.reviewedAt !== 'string' ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(review.reviewedAt)
+  ) {
+    errors.push(`${label}: adrReview.reviewedAt must be YYYY-MM-DD`);
+  }
+
+  if (review.status === 'existing' || review.status === 'proposed') {
+    if (review.adrs.length === 0) {
+      errors.push(`${label}: ${review.status} adrReview requires an ADR`);
+    }
+    for (const adrId of review.adrs) {
+      const adr = adrById.get(adrId);
+      if (!adr) {
+        errors.push(`${label}: adrReview references unknown ADR ${adrId}`);
+        continue;
+      }
+      const expectedStatus =
+        review.status === 'existing' ? 'accepted' : 'proposed';
+      if (adr.status !== expectedStatus) {
+        errors.push(
+          `${label}: ${adrId} must be ${expectedStatus} for adrReview ${review.status}`
+        );
+      }
+      if (!(adr.requirements ?? []).includes(requirement.id)) {
+        errors.push(
+          `${label}: ${adrId} does not list REQ ${requirement.id}`
+        );
+      }
+    }
+  }
+  if (review.status === 'not_required' && review.adrs.length !== 0) {
+    errors.push(`${label}: not_required adrReview must not list ADR ids`);
+  }
+  if (
+    review.status === 'pending' &&
+    (requirement.designStatus === 'review' ||
+      requirement.designStatus === 'approved' ||
+      ['in_progress', 'implemented', 'verified', 'released'].includes(
+        requirement.status
+      ))
+  ) {
+    errors.push(
+      `${label}: pending adrReview blocks design review and implementation`
+    );
+  }
+  if (
+    review.status === 'proposed' &&
+    (requirement.designStatus === 'approved' ||
+      ['in_progress', 'implemented', 'verified', 'released'].includes(
+        requirement.status
+      ))
+  ) {
+    errors.push(
+      `${label}: proposed ADR review blocks design approval and implementation`
+    );
+  }
+}
+
 export function requireDocument(value, label, projectRoot, target = []) {
   if (typeof value !== 'string' || !value.trim()) {
     target.push(`${label} is required`);
@@ -163,6 +264,16 @@ export function isSemver(value) {
   return /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(
     String(value)
   );
+}
+
+export function isVersionAtLeast(value, major, minor, patch) {
+  if (!isSemver(value)) return false;
+  const [actualMajor, actualMinor, actualPatch] = String(value)
+    .split('.')
+    .map(Number);
+  if (actualMajor !== major) return actualMajor > major;
+  if (actualMinor !== minor) return actualMinor > minor;
+  return actualPatch >= patch;
 }
 
 export function requireAnchor(value, anchor, label, projectRoot, target = []) {

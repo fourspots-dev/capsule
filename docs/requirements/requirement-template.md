@@ -8,6 +8,9 @@
 - Target version: A.B.C
 - Architecture impact: yes | no
 - Architecture decisions: ADR-NNN, ADR-NNN | none
+- ADR review: pending | existing | proposed | not_required
+- ADR review rationale:
+- ADR reviewed at: YYYY-MM-DD
 - Design: docs/<path>#<anchor>
 - Test design: docs/<path>#<anchor>
 - Legacy aliases:

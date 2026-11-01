@@ -4,6 +4,7 @@
 - Date: 2026-11-01
 - Approved by: user
 - Requirements: REQ-WORKSPACE-001, REQ-WORKSPACE-002
+- Origin decision: none
 - Supersedes: none
 - Superseded by: none
 

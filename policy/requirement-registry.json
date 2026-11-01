@@ -172,6 +172,12 @@
       "testDesign": "docs/capability-completion-detailed-testing-v3.html#test-action-001-detailed",
       "acceptance": "Trusted local, native and remote providers expose stable named actions with schemas, probe state, approval, cancellation and structured results; TestReports and artifacts become current evidence only when bound to the active workspace generation and environment.",
       "legacyAliases": [],
+      "adrReview": {
+        "status": "existing",
+        "adrs": ["ADR-001", "ADR-003", "ADR-005"],
+        "rationale": "The action runtime is governed by the four-layer boundary, trusted leaf Action model, evidence-bound completion and rejected generic-exec alternatives.",
+        "reviewedAt": "2026-11-01"
+      },
       "architectureImpact": true
     },
     {
@@ -187,6 +193,12 @@
       "testDesign": "docs/capability-completion-detailed-testing-v3.html#test-host-002-detailed",
       "acceptance": "Every host profile has a normative minimum matrix for core boot, portable workspace, portable coding and optional executable actions; startup probes fail missing baselines and degrade absent execution without replacing base ports with actions.",
       "legacyAliases": [],
+      "adrReview": {
+        "status": "existing",
+        "adrs": ["ADR-001"],
+        "rationale": "The baseline matrix must preserve the Host Backend boundary and the rejection of representing every base capability as an Action.",
+        "reviewedAt": "2026-11-01"
+      },
       "architectureImpact": true
     },
     {
@@ -202,6 +214,12 @@
       "testDesign": "docs/capability-completion-detailed-testing-v3.html#test-test-001-detailed",
       "acceptance": "Test reports are structured and bound to workspace generation, file hashes, action version and environment; zero tests, malformed reports and stale evidence cannot complete a coding task.",
       "legacyAliases": [],
+      "adrReview": {
+        "status": "existing",
+        "adrs": ["ADR-001", "ADR-005"],
+        "rationale": "TestEvidence is a portable runtime concern constrained by current environment-bound completion.",
+        "reviewedAt": "2026-11-01"
+      },
       "architectureImpact": true
     },
     {
@@ -217,6 +235,12 @@
       "testDesign": "docs/capability-completion-detailed-testing-v3.html#test-workspace-002-detailed",
       "acceptance": "TUI can preview and atomically import replace or merge capsules; capsule v2 streams compressed content-addressed partitions, survives interruption and rebinds or invalidates actions and evidence.",
       "legacyAliases": [],
+      "adrReview": {
+        "status": "existing",
+        "adrs": ["ADR-001", "ADR-002", "ADR-004"],
+        "rationale": "Capsule v2 remains the sole cross-host transfer unit and must preserve portable repository semantics.",
+        "reviewedAt": "2026-11-01"
+      },
       "architectureImpact": true
     },
     {
@@ -232,6 +256,12 @@
       "testDesign": "docs/capability-completion-detailed-testing-v3.html#test-lsp-001-detailed",
       "acceptance": "Hosts can expose LSP-backed diagnostics, symbols, definitions, references and code actions through a language-neutral port with a portable text/symbol fallback.",
       "legacyAliases": [],
+      "adrReview": {
+        "status": "not_required",
+        "adrs": [],
+        "rationale": "The design adds a language-service port and portable fallback within the existing layered architecture; it does not alter a durable cross-cutting rule or persistence format.",
+        "reviewedAt": "2026-11-01"
+      },
       "architectureImpact": true
     },
     {
@@ -247,6 +277,12 @@
       "testDesign": "docs/capability-completion-detailed-testing-v3.html#test-subagent-001-detailed",
       "acceptance": "Child agents can call only actions compatible with their workspace binding and generation; parallel execution, cancellation, conflict detection and merge evidence are isolated from parent and sibling workspaces.",
       "legacyAliases": [],
+      "adrReview": {
+        "status": "existing",
+        "adrs": ["ADR-007"],
+        "rationale": "Subagents remain configurable profiles with capability subsets and explicit workspace/action bindings.",
+        "reviewedAt": "2026-11-01"
+      },
       "architectureImpact": true
     },
     {
@@ -262,6 +298,12 @@
       "testDesign": "docs/capability-completion-detailed-testing-v3.html#test-chrome-001-detailed",
       "acceptance": "Chrome runtime uses the shared capability composition, exposes browser and remote actions without shell fallback, and matches TUI/Headless tool schemas and evidence semantics.",
       "legacyAliases": [],
+      "adrReview": {
+        "status": "existing",
+        "adrs": ["ADR-003", "ADR-006"],
+        "rationale": "Chrome is a composition root and adapter, not a separate Core implementation; remote execution remains a named Action capability.",
+        "reviewedAt": "2026-11-01"
+      },
       "architectureImpact": true
     },
     {
@@ -277,6 +319,12 @@
       "testDesign": "docs/capability-completion-detailed-testing-v3.html#test-platform-001-detailed",
       "acceptance": "Windows, Linux and iOS adapters satisfy the host baseline profiles, preserve portable coding without native processes and keep platform-specific path, execution and secret behavior outside Core.",
       "legacyAliases": [],
+      "adrReview": {
+        "status": "existing",
+        "adrs": ["ADR-002"],
+        "rationale": "Cross-platform behavior depends on the portable-runtime-first decision and optional native interoperability backends.",
+        "reviewedAt": "2026-11-01"
+      },
       "architectureImpact": true
     },
     {
@@ -292,6 +340,12 @@
       "testDesign": "docs/capability-completion-detailed-testing-v3.html#test-eval-001-detailed",
       "acceptance": "Multi-language benchmarks, fault injection and soak runs quantify completion, false completion, regression, repair cost, latency and manual intervention against release thresholds.",
       "legacyAliases": [],
+      "adrReview": {
+        "status": "existing",
+        "adrs": ["ADR-005"],
+        "rationale": "Evaluation must measure current environment-bound evidence and false completion rather than historical or narrative claims.",
+        "reviewedAt": "2026-11-01"
+      },
       "architectureImpact": true
     },
     {
@@ -322,6 +376,27 @@
       "testDesign": "docs/engineering-versioning-and-traceability.html#adr-test-design",
       "acceptance": "Durable architecture decisions use immutable ADR ids, a registered document set, user approval, bilateral supersede links, requirement traceability, and automated CI validation.",
       "legacyAliases": [],
+      "architectureImpact": true
+    },
+    {
+      "id": "REQ-ENG-006",
+      "title": "Agent-initiated decision intake and ADR triage",
+      "type": "infrastructure",
+      "priority": "P0",
+      "status": "verified",
+      "designStatus": "approved",
+      "implementationAuthorized": true,
+      "targetVersion": "0.5.0",
+      "design": "docs/decisions/REQ-ENG-006-design.html#architecture-impact",
+      "testDesign": "docs/decisions/REQ-ENG-006-testing.html#architecture-completeness",
+      "acceptance": "Agents proactively capture durable discussion decisions in a DEC inbox, triage every new requirement for ADR needs, draft Proposed ADRs when architecture conditions apply, and cannot enter design approval or implementation with unresolved triage.",
+      "legacyAliases": [],
+      "adrReview": {
+        "status": "existing",
+        "adrs": ["ADR-013"],
+        "rationale": "The implementation applies the accepted agent-initiated decision intake and ADR triage rule.",
+        "reviewedAt": "2026-11-01"
+      },
       "architectureImpact": true
     }
   ]

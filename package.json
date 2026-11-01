@@ -1,7 +1,7 @@
 {
   "name": "tinyai",
   "private": true,
-  "version": "0.4.3",
+  "version": "0.5.0",
   "scripts": {
     "build": "npm run typecheck && npm run clean && npm run build:sidepanel && npm run build:background && npm run build:cli && npm run build:tui && npm run build:workspace-agent && npm run build:workspace-transfer && npm run build:runner && npm run build:proxy && npm run build:package",
     "build:sidepanel": "esbuild src/sidepanel.ts --bundle --format=iife --target=chrome120 --outfile=extension/js/sidepanel/main.js",
@@ -21,6 +21,7 @@
     "check:boundaries": "node scripts/check-core-boundaries.mjs",
     "requirements:check": "node scripts/check-requirement-traceability.mjs",
     "adr:check": "node scripts/check-adr-registry.mjs",
+    "decisions:check": "node scripts/check-decision-registry.mjs",
     "commit:check": "node scripts/check-commit-message.mjs",
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "test": "vitest run",
@@ -41,7 +42,7 @@
     "test:acceptance": "npm run typecheck && npm run typecheck:tests && npm run typecheck:core && npm run check:boundaries && npm test && npm run test:e2e",
     "test:watch": "vitest",
     "test:e2e": "npm run build && vitest run --config vitest.e2e.config.mts",
-    "check": "npm run requirements:check && npm run adr:check && npm run typecheck && npm run typecheck:tests && npm run typecheck:core && npm run check:boundaries && npm test && npm run build"
+    "check": "npm run requirements:check && npm run adr:check && npm run decisions:check && npm run typecheck && npm run typecheck:tests && npm run typecheck:core && npm run check:boundaries && npm test && npm run build"
   },
   "devDependencies": {
     "@types/chrome": "^0.3.6",

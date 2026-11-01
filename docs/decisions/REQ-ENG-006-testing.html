@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>REQ-ENG-006 Decision Intake and ADR Triage Test Design</title>
+<style>
+:root{--bg:#f4f5f7;--paper:#fff;--text:#191a1e;--muted:#6f7179;--line:#e2e3e8;--accent:#5145d8;--soft:#efedff;--ok:#137a4b;--warn:#986100;--danger:#b42318;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1160px;margin:auto;padding:34px 24px 90px}
+header{padding:36px;border-radius:24px;background:radial-gradient(circle at 86% 8%,#6ee7b7 0,transparent 24%),linear-gradient(135deg,#11131a,#1f4948 58%,#137a4b);color:#fff}header small{letter-spacing:.12em;opacity:.72}header h1{font-size:34px;line-height:1.18;margin:12px 0}header p{max-width:930px;margin:0;color:#e0fff2}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}
+nav{position:sticky;top:0;z-index:2;display:flex;gap:14px;overflow:auto;margin:18px 0;padding:10px 14px;border:1px solid var(--line);border-radius:12px;background:#f4f5f7ed;backdrop-filter:blur(10px)}nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}
+section{margin:18px 0;padding:25px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:23px;margin:0 0 14px}h3{font-size:16px;margin:22px 0 8px}p{color:#44454c}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafafa}.card h3{margin:0 0 8px}.card ul{margin:8px 0 0;padding-left:18px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafafa;color:var(--muted)}
+code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{padding:16px;overflow:auto;border-radius:11px;background:#171821;color:#edecff;font:12px/1.6 var(--mono)}
+.rule{padding:12px 14px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#f5f3ff}.warn{border-color:var(--warn);background:#fff8e8}.danger{border-color:var(--danger);background:#fff1f0}.ok{border-color:var(--ok);background:#eef8f2}
+@media(max-width:800px){.grid{grid-template-columns:1fr}header h1{font-size:28px}.wrap{padding:20px 12px 70px}section{padding:20px}table{display:block;max-width:100%;overflow-x:auto}}
+@media print{nav{display:none}body{background:#fff}.wrap{max-width:none;padding:0}header{border-radius:0}section{break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+<small>TINYAI / ENGINEERING GOVERNANCE / VERIFICATION</small>
+<h1>Decision Intake 与 ADR Triage<br>详细测试设计</h1>
+<p>验证讨论决定能被捕获、分类和提升，验证 Agent 无法跳过 ADR triage，并证明 DEC、ADR、REQ 三方关联与实现门禁不可被悄然绕过。</p>
+<div class="chips"><span class="chip">REQ-ENG-006</span><span class="chip">Unit</span><span class="chip">Contract</span><span class="chip">Negative</span><span class="chip">End-to-End</span></div>
+</header>
+<nav><a href="#trace">追踪矩阵</a><a href="#fixtures">Fixtures</a><a href="#cases">测试用例</a><a href="#architecture-completeness">架构完整性</a><a href="#evidence">证据门禁</a></nav>
+
+<section id="trace">
+<h2>1. Requirement Trace Matrix</h2>
+<table><thead><tr><th>FR</th><th>可观察要求</th><th>测试</th></tr></thead><tbody>
+<tr><td>FR-1</td><td>讨论决定可独立于 REQ 记录为 DEC</td><td>DEC-T01, DEC-T02</td></tr>
+<tr><td>FR-2</td><td>DEC 可分类为 ADR、REQ、局部或无动作</td><td>DEC-T03, DEC-T04</td></tr>
+<tr><td>FR-3</td><td>Agent 在新 REQ 设计中必须留下 adrReview</td><td>REQ-T01, REQ-T02</td></tr>
+<tr><td>FR-4</td><td>Proposed ADR 与 pending triage 阻断实现</td><td>REQ-T03, REQ-T04</td></tr>
+<tr><td>FR-5</td><td>ADR 可在没有 REQ 时由 DEC 提供来源</td><td>ADR-T01, ADR-T02</td></tr>
+<tr><td>FR-6</td><td>DEC → ADR → REQ 关系双向可验证</td><td>E2E-T01</td></tr>
+<tr><td>FR-7</td><td>不合法记录、孤立文档和元数据漂移进入 CI 失败</td><td>DEC-T05, ADR-T03</td></tr>
+<tr><td>FR-8</td><td>AGENTS.md 明确主动 sweep、发起 ADR、停止等待确认</td><td>DOC-T01</td></tr>
+</tbody></table>
+</section>
+
+<section id="fixtures">
+<h2>2. Fixture 策略</h2>
+<div class="grid">
+<div class="card"><h3>临时仓库 Fixture</h3><p>每个负向测试使用 <code>mkdtemp</code> 创建最小 policy/docs 目录，复制或生成单一实体，避免依赖当前 13 个 ADR 的偶然状态。</p></div>
+<div class="card"><h3>真实 Registry Fixture</h3><p>当前仓库作为正向 baseline：DEC-001、ADR-013、REQ-ENG-006 必须形成完整闭环。</p></div>
+<div class="card"><h3>版本边界 Fixture</h3><p>targetVersion 0.5.0 强制 adrReview；0.4.x 历史需求保持兼容。</p></div>
+<div class="card"><h3>CI Gate Fixture</h3><p>独立运行 <code>decisions:check</code>、<code>adr:check</code>、<code>requirements:check</code>，再运行全量 <code>check</code>。</p></div>
+</div>
+</section>
+
+<section id="cases">
+<h2>3. 测试用例</h2>
+<h3>Decision Registry</h3>
+<table><thead><tr><th>ID</th><th>场景</th><th>期望</th><th>目标文件</th></tr></thead><tbody>
+<tr><td>DEC-T01</td><td>当前 DEC registry 与文档一致</td><td>0 errors；DEC-001 为 promoted</td><td>tests/unit/decision-policy.test.ts</td></tr>
+<tr><td>DEC-T02</td><td>captured DEC 没有 triage 和 REQ</td><td>合法，允许先于需求存在</td><td>tests/unit/decision-policy.test.ts</td></tr>
+<tr><td>DEC-T03</td><td>promoted DEC 引用未知 ADR/REQ</td><td>报告 unknown target</td><td>tests/unit/decision-policy.test.ts</td></tr>
+<tr><td>DEC-T04</td><td>promoted DEC 的 ADR 未设置 originDecision</td><td>报告 broken backlink</td><td>tests/unit/decision-policy.test.ts</td></tr>
+<tr><td>DEC-T05</td><td>重复 ID、非法状态、孤立 DEC 文档</td><td>全部阻断</td><td>tests/unit/decision-policy.test.ts</td></tr>
+<tr><td>DEC-T06</td><td>正文状态/来源/triage 与 registry 漂移</td><td>全部阻断</td><td>tests/unit/decision-policy.test.ts</td></tr>
+</tbody></table>
+<h3>Requirement / ADR Gate</h3>
+<table><thead><tr><th>ID</th><th>场景</th><th>期望</th><th>目标文件</th></tr></thead><tbody>
+<tr><td>REQ-T01</td><td>target 0.5.0 REQ 缺少 adrReview</td><td>requirements:check 失败</td><td>tests/unit/requirement-policy.test.ts</td></tr>
+<tr><td>REQ-T02</td><td>existing/proposed/not_required/pending 四状态</td><td>校验 ADR 状态、数组和 rationale</td><td>tests/unit/requirement-policy.test.ts</td></tr>
+<tr><td>REQ-T03</td><td>adrReview pending + design review</td><td>designStatus 提高时阻断</td><td>tests/unit/requirement-policy.test.ts</td></tr>
+<tr><td>REQ-T04</td><td>Proposed ADR + implementation ready</td><td>in_progress 被阻断</td><td>tests/unit/requirement-policy.test.ts</td></tr>
+<tr><td>ADR-T01</td><td>ADR requirements 为空但 Origin=DEC</td><td>合法</td><td>tests/unit/adr-policy.test.ts</td></tr>
+<tr><td>ADR-T02</td><td>ADR requirements 为空且 Origin=none</td><td>报告 missing provenance</td><td>tests/unit/adr-policy.test.ts</td></tr>
+<tr><td>ADR-T03</td><td>Origin DEC 不存在或正文漂移</td><td>报告 unknown/mismatch</td><td>tests/unit/adr-policy.test.ts</td></tr>
+<tr><td>E2E-T01</td><td>DEC-001 → ADR-013 → REQ-ENG-006</td><td>三方关系及文件全部一致</td><td>tests/unit/decision-policy.test.ts</td></tr>
+<tr><td>DOC-T01</td><td>AGENTS 包含主动 sweep、批量确认、停止编码规则</td><td>文档契约测试通过</td><td>tests/unit/decision-policy.test.ts</td></tr>
+</tbody></table>
+<h3>边界与恢复</h3>
+<ul><li>DEC title 或 file 的 ID 不一致时失败。</li><li>superseded DEC 没有 replacement 或 replacement 不回指时失败。</li><li>not_required 缺少 rationale 或 reviewedAt 时失败。</li><li>existing 引用 non-accepted ADR 时失败。</li><li>proposed 引用 non-proposed ADR 时失败。</li><li>删除 ADR 但保留 DEC promotion 时失败。</li></ul>
+</section>
+
+<section id="architecture-completeness">
+<h2>4. Architecture Completeness</h2>
+<table><thead><tr><th>Surface</th><th>Required proof</th><th>Case / command</th></tr></thead><tbody>
+<tr><td>AGENTS contract</td><td>Agent 在 REQ、设计和实现检查点主动 triage</td><td>DOC-T01</td></tr>
+<tr><td>DEC lifecycle</td><td>无 REQ 捕获、分类、提升、终态</td><td>DEC-T01..T06</td></tr>
+<tr><td>ADR provenance</td><td>REQ 或 DEC 至少一个来源；无 REQ 合法路径</td><td>ADR-T01..T03</td></tr>
+<tr><td>REQ gate</td><td>pending/proposed 阻断 design approved 和 implementation</td><td>REQ-T01..T04</td></tr>
+<tr><td>Cross-registry</td><td>三 registry 双向关系和版本边界</td><td>E2E-T01</td></tr>
+<tr><td>Legacy cleanup</td><td>已有 0.4.x REQ 无 adrReview 不误报；0.5.0 起强制</td><td>REQ-T01 + baseline test</td></tr>
+<tr><td>Runtime isolation</td><td>src Core 不导入 governance registry</td><td>npm run check:boundaries</td></tr>
+</tbody></table>
+</section>
+
+<section id="evidence">
+<h2>5. Evidence 与发布门禁</h2>
+<pre>npx vitest run tests/unit/decision-policy.test.ts \
+  tests/unit/adr-policy.test.ts \
+  tests/unit/requirement-policy.test.ts
+
+npm run decisions:check
+npm run adr:check
+npm run requirements:check
+npm run check</pre>
+<div class="danger rule">任一 registry 错误、三方 backlink 缺失、Proposed ADR 被用于实现、pending triage、孤立文档或当前文档测试失败，均阻止 0.5.0 发布。</div>
+<div class="ok rule">完成证据必须包含：测试通过数量、三个 checker 的实际输出、`npm run check` 成功结果和 tag 指向。</div>
+</section>
+</div>
+</body>
+</html>

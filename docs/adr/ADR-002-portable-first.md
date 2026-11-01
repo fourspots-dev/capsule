@@ -3,7 +3,8 @@
 - Status: accepted
 - Date: 2026-11-01
 - Approved by: user
-- Requirements: REQ-WORKSPACE-001, REQ-GIT-001, REQ-PLATFORM-001
+- Requirements: REQ-WORKSPACE-001, REQ-WORKSPACE-002, REQ-GIT-001, REQ-PLATFORM-001
+- Origin decision: none
 - Supersedes: ADR-009
 - Superseded by: none
 

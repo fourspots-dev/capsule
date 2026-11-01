@@ -30,7 +30,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <p>把“需求、设计、测试、实现、提交、发布”变成可执行、可自动检查的完整链路。版本使用三段式；每个新需求有唯一编号；每个功能提交关联需求、目标版本、设计文档、测试文档和验证证据。</p>
 <div class="chips"><span class="chip">SemVer A.B.C</span><span class="chip">REQ-ID</span><span class="chip">Design + Test Trace</span><span class="chip">Commit Hook</span><span class="chip">Release Tag</span><span class="chip">Auditable</span></div>
 </header>
-<nav><a href="#version">版本</a><a href="#requirements">需求编号</a><a href="#documents">设计/测试</a><a href="#implementation-gate">实现门禁</a><a href="#adr-governance">ADR治理</a><a href="#architecture-impact">架构影响面</a><a href="#architecture-completeness">架构完整性</a><a href="#commits">提交协议</a><a href="#workflow">工作流</a><a href="#release">发布</a><a href="#automation">自动检查</a><a href="#baseline">当前基线</a><a href="#verification">验收</a></nav>
+<nav><a href="#version">版本</a><a href="#requirements">需求编号</a><a href="#documents">设计/测试</a><a href="#implementation-gate">实现门禁</a><a href="#decision-intake">决定捕获</a><a href="#adr-governance">ADR治理</a><a href="#architecture-impact">架构影响面</a><a href="#architecture-completeness">架构完整性</a><a href="#commits">提交协议</a><a href="#workflow">工作流</a><a href="#release">发布</a><a href="#automation">自动检查</a><a href="#baseline">当前基线</a><a href="#verification">验收</a></nav>
 
 <section id="version">
 <h2>1. 版本规则</h2>
@@ -113,8 +113,27 @@ docs/&lt;area&gt;/vX.Y-testing.html#&lt;requirement-anchor&gt;
 <ul><li>每个 FR 到测试 ID 的映射。</li><li>具体 fixture、计划测试文件和命令。</li><li>正常、边界、故障、安全和恢复用例。</li><li>跨模块、跨执行面和架构边界测试。</li><li>证据 Artifact、发布阻断和阶段门禁。</li></ul>
 </section>
 
+<section id="decision-intake">
+<h2>3.2 Decision Inbox 与主动 ADR Triage</h2>
+<p>讨论中出现的长期决定先记录为 <code>DEC-NNN</code>，不要求已有 REQ。Agent 必须主动扫描讨论并分类，不能等待用户要求写 ADR；用户只在形成正式架构选择时裁决。</p>
+<div class="grid">
+<div class="card"><h3>何时捕获 DEC</h3><ul><li>选择长期默认值、边界、协议或优先级。</li><li>接受或拒绝长期架构替代方案。</li><li>规则影响多个未来需求或执行面。</li><li>实现中接受长期例外或 workaround。</li></ul></div>
+<div class="card"><h3>何时重新 triage</h3><ul><li>讨论形成决定时。</li><li>新 REQ 创建或接受时。</li><li>详细设计进入 review 前。</li><li>实现发现新边界时。</li><li>每次发布前；每个 A.B 版本做一次完整 ADR 组合审查。</li></ul></div>
+</div>
+<pre>讨论
+  └─ DEC-NNN
+       ├─ 局部细节 → REQ 设计
+       ├─ 可执行工作 → REQ
+       ├─ 长期架构规则 → ADR
+       ├─ ADR + 未来 REQ → 先定规则，稍后落地
+       └─ 不采用 → no_action / withdrawn</pre>
+<p>新 REQ（targetVersion ≥ 0.5.0）必须记录 <code>adrReview</code>：<code>pending | existing | proposed | not_required</code>。<code>pending</code> 阻止设计 Approved 和实现；<code>proposed</code> 允许评审但阻止编码；<code>not_required</code> 必须有具体理由。</p>
+<div class="rule"><b>Agent 主动发起：</b>识别到 ADR 条件后，先创建 Proposed ADR 和来源 DEC，再向用户提交一个包含决定、原因、替代方案和影响面的评审包，并停止依赖该决定的实现。多个日常决定可在自然阶段合并确认。</div>
+<p>DEC、ADR 和 REQ 使用永久编号。没有 REQ 的 ADR 合法，但必须保留 <code>Origin decision: DEC-NNN</code>。完整设计见 <a href="decisions/REQ-ENG-006-design.html">REQ-ENG-006 Design</a>，测试见 <a href="decisions/REQ-ENG-006-testing.html">REQ-ENG-006 Test Design</a>。</p>
+</section>
+
 <section id="adr-governance">
-<h2>3.2 Architecture Decision Records</h2>
+<h2>3.3 Architecture Decision Records</h2>
 <p>ADR 保存长期架构决策及原因，REQ 保存待交付的工作。一个 REQ 可以引用多个 Accepted ADR；ADR 可以关联多个 REQ。普通局部实现通常只需要 REQ。</p>
 <div class="grid">
 <div class="card"><h3>必须创建 ADR</h3><ul><li>模块边界或依赖方向变化。</li><li>公共协议、持久化格式、信任模型和跨端契约。</li><li>多个长期方案之间的选择。</li><li>影响多个需求或执行面。</li><li>替代旧 Accepted 决策。</li></ul></div>
@@ -124,7 +143,7 @@ docs/&lt;area&gt;/vX.Y-testing.html#&lt;requirement-anchor&gt;
 policy/adr-registry.json
 docs/adr/README.md
 docs/adr/template.md</pre>
-<p>Accepted ADR 不可删除或静默改写。只允许不改变语义的排版、链接或错字修订，并应在提交中说明；Decision、Invariants 或边界变化必须创建新 ADR。替代关系使用 <code>Supersedes</code> / <code>Superseded by</code> 双向引用。ADR Accepted 不等于实现授权，实现仍受 REQ 详细设计确认和用户授权门禁控制。</p>
+<p>Accepted ADR 不可删除或静默改写。只允许不改变语义的排版、链接或错字修订，并应在提交中说明；Decision、Invariants 或边界变化必须创建新 ADR。替代关系使用 <code>Supersedes</code> / <code>Superseded by</code> 双向引用。ADR 至少具有一个来源：受影响 REQ 或 <code>Origin decision: DEC-NNN</code>；无当前 REQ 的架构规则可以合法存在。ADR Accepted 不等于实现授权。</p>
 <div class="rule"><b>单一事实链：</b>ADR 回答“为什么必须保持这条架构规则”，REQ 回答“要交付什么”，详细设计回答“具体怎样实现”，详细测试设计回答“怎样证明实现正确”。四者缺一不可，但只有 REQ 的 <code>implementationAuthorized</code> 能授予编码权限。</div>
 <pre>npm run adr:check
 
@@ -133,16 +152,16 @@ docs/adr/template.md</pre>
   文件名、正文标题、状态、日期、批准人和关联 REQ 与 registry 匹配
   必需章节齐全
   Accepted/Rejected 有用户批准和日期
-  受影响 REQ 存在且 ADR 至少关联一个 REQ
+  受影响 REQ 存在；无 REQ 时必须存在且回指 Origin decision
   Supersede 双向对称且无循环</pre>
 <h3>ADR 变更流程</h3>
 <div class="flow"><div class="step"><b>1 · 识别</b>模块边界、协议或长期选择变化</div><div class="step"><b>2 · Proposed</b>新建不可复用 ID 和完整 ADR</div><div class="step"><b>3 · 关联</b>连接受影响 REQ 与验证证据</div><div class="step"><b>4 · 确认</b>用户批准或拒绝</div><div class="step"><b>5 · 落地</b>REQ 详细设计引用 Accepted ADR</div><div class="step"><b>6 · 演进</b>新 ADR 替代旧 ADR，不改写历史</div></div>
 <h3 id="adr-test-design">详细测试设计</h3>
 <table><thead><tr><th>Case</th><th>必须证明</th><th>执行位置</th></tr></thead><tbody>
-<tr><td>Registry baseline</td><td>12 个 ADR 的 ID、文件、正文元数据、REQ 关联和 supersede 链全部一致</td><td><code>tests/unit/adr-policy.test.ts</code></td></tr>
+<tr><td>Registry baseline</td><td>13 个 ADR 的 ID、文件、正文元数据、REQ/DEC 来源和 supersede 链全部一致</td><td><code>tests/unit/adr-policy.test.ts</code></td></tr>
 <tr><td>Document contract</td><td>缺少 Context、Decision、Invariants、Alternatives、Consequences、Affected surfaces 或 Verification 时失败</td><td><code>tests/unit/adr-policy.test.ts</code></td></tr>
 <tr><td>Approval boundary</td><td>非 proposed ADR 没有 <code>approvedBy: user</code> 时失败；Agent 自批不可通过</td><td><code>tests/unit/adr-policy.test.ts</code></td></tr>
-<tr><td>Traceability</td><td>未知 REQ、空 REQ、重复 REQ 和正文/registry 元数据漂移时失败</td><td><code>npm run adr:check</code></td></tr>
+<tr><td>Traceability</td><td>未知来源、无来源、重复 REQ 和正文/registry 元数据漂移时失败</td><td><code>npm run adr:check</code></td></tr>
 <tr><td>Supersede integrity</td><td>未知目标、缺失反向引用、错误目标状态、自替代和循环引用时失败</td><td><code>npm run adr:check</code></td></tr>
 <tr><td>Document set</td><td><code>docs/adr/ADR-*.md</code> 中存在未注册文件或注册文件路径不合法时失败</td><td><code>npm run adr:check</code></td></tr>
 <tr><td>Release gate</td><td><code>adr:check</code> 在 requirements、类型、边界、单测和构建之前执行，任一失败阻断 <code>npm run check</code></td><td><code>package.json</code></td></tr>
@@ -209,7 +228,7 @@ git log --format='%h %(trailers:key=Version,valueonly) %s'</pre>
 <section id="workflow">
 <h2>7. 需求交付工作流</h2>
 <div class="flow">
-<div class="step"><b>1. Intake</b>建立 REQ，写验收和非目标</div>
+<div class="step"><b>1. Intake</b>DEC sweep、REQ 与 ADR triage</div>
 <div class="step"><b>2. Design</b>详细设计与对象接口</div>
 <div class="step"><b>3. Test</b>详细测试设计与追踪矩阵</div>
 <div class="step"><b>4. Confirm</b>用户确认设计并授权实现</div>
@@ -217,12 +236,12 @@ git log --format='%h %(trailers:key=Version,valueonly) %s'</pre>
 <div class="step"><b>6. Verify</b>自动检查、真实 E2E、证据</div>
 <div class="step"><b>7. Release</b>版本、tag、变更记录</div>
 </div>
-<ol><li>需求登记后状态为 <code>accepted</code>，分配目标版本，详细设计状态从 <code>draft</code> 开始。</li><li>详细设计和详细测试提交后设为 <code>designStatus: review</code>。</li><li>用户确认后设为 <code>approved</code>，并显式设置 <code>implementationAuthorized: true</code>。</li><li>满足门禁后才能进入 <code>in_progress</code> 并开始代码实现。</li><li>实现提交必须携带需求与文档链接。</li><li>测试通过且验收项有证据后进入 <code>verified</code>。</li><li>发布时更新版本、CHANGELOG、annotated tag 和注册表状态。</li></ol>
+<ol><li>讨论决定先进入 DEC；需求登记后分配目标版本，并完成 <code>adrReview</code>。</li><li>详细设计和详细测试提交后设为 <code>designStatus: review</code>。</li><li>用户确认设计后设为 <code>approved</code>，并显式设置 <code>implementationAuthorized: true</code>。</li><li>满足 ADR triage、设计与实现门禁后才能进入 <code>in_progress</code>。</li><li>实现提交必须携带需求与文档链接。</li><li>测试通过且验收项有证据后进入 <code>verified</code>。</li><li>发布时更新版本、CHANGELOG、annotated tag 和注册表状态。</li></ol>
 <h3>状态约束</h3>
 <table><thead><tr><th>状态</th><th>必要条件</th></tr></thead><tbody>
 <tr><td>proposed</td><td>标题、目标、验收草案</td></tr>
-<tr><td>accepted</td><td>优先级、目标版本、详细 design/test 路径，<code>designStatus: draft/review</code></td></tr>
-<tr><td>in_progress</td><td>用户确认，<code>designStatus: approved</code>，<code>implementationAuthorized: true</code></td></tr>
+<tr><td>accepted</td><td>优先级、目标版本、详细 design/test 路径，<code>designStatus: draft/review</code>；0.5.0 起完成 <code>adrReview</code></td></tr>
+<tr><td>in_progress</td><td>用户确认，<code>designStatus: approved</code>，<code>implementationAuthorized: true</code>，ADR triage 无 pending/proposed</td></tr>
 <tr><td>implemented</td><td>代码完成，至少相关测试通过</td></tr>
 <tr><td>verified</td><td>完整测试、E2E、性能和兼容门禁通过</td></tr>
 <tr><td>released</td><td>版本 tag 和 release record 存在</td></tr>
@@ -252,25 +271,34 @@ git log --format='%h %(trailers:key=Version,valueonly) %s'</pre>
 policy/
   requirement-registry.json     机器可读需求注册表
   adr-registry.json             ADR 状态和关联
-  docs/adr/README.md            ADR 管理流程
-  docs/adr/template.md          ADR 模板
-  requirement-template.md       新需求模板
-  design-template.html          设计文档模板
-  testing-template.html         测试文档模板
-  architecture-change-contract.md 架构影响面审查清单
+  decision-registry.json        DEC 捕获、分类与提升
+docs/
+  decisions/README.md           Decision Inbox 流程
+  decisions/template.md         DEC 模板
+  adr/README.md                 ADR 管理流程
+  adr/template.md               ADR 模板
+  requirements/
+    requirement-template.md     新需求模板
+    design-template.html        设计文档模板
+    testing-template.html       测试文档模板
+    architecture-change-contract.md 架构影响面审查清单
 .githooks/
   commit-msg                    提交信息强制检查
 .gitmessage                     提交模板
 scripts/
   check-requirement-traceability.mjs
+  check-adr-registry.mjs
+  check-decision-registry.mjs
   check-commit-message.mjs
   install-git-hooks.mjs</pre>
 <table><thead><tr><th>命令</th><th>作用</th></tr></thead><tbody>
 <tr><td><code>AGENTS.md</code></td><td>Coding agent 进入仓库后必须读取并执行的工作流、版本、需求和提交规则</td></tr>
 <tr><td><code>npm run requirements:check</code></td><td>校验 REQ 唯一性、版本、状态、设计/测试文档和锚点</td></tr>
+<tr><td><code>npm run adr:check</code></td><td>校验 ADR 来源、用户批准、文档和 Supersede 关系</td></tr>
+<tr><td><code>npm run decisions:check</code></td><td>校验 DEC 捕获、triage 和 DEC/ADR/REQ 双向关联</td></tr>
 <tr><td><code>npm run commit:check -- &lt;file&gt;</code></td><td>校验提交标题和 trailers</td></tr>
 <tr><td><code>npm run hooks:install</code></td><td>启用仓库内版本化 commit-msg hook</td></tr>
-<tr><td><code>npm run check</code></td><td>工程检查包含 requirements:check</td></tr>
+<tr><td><code>npm run check</code></td><td>工程检查包含 requirements、ADR 和 decision registry</td></tr>
 </tbody></table>
 <h3 id="agent-instructions">7.1 AGENTS.md 强制入口</h3>
 <p>根目录 <code>AGENTS.md</code> 是 coding agent 的强制入口，负责汇总需求登记、设计与测试文档、版本升级、提交 trailers、验证和发布规则。子目录规则可以补充本目录特例，但不能放宽本文的版本、需求追踪和验收要求。</p>
@@ -281,10 +309,10 @@ scripts/
 <h2>10. 当前采用基线</h2>
 <table><thead><tr><th>项目</th><th>值</th></tr></thead><tbody>
 <tr><td>历史基线提交</td><td><code>e48b5b1</code></td></tr>
-<tr><td>当前目标版本</td><td><code>0.4.3</code></td></tr>
-<tr><td>本次纳入需求</td><td><code>REQ-ENG-005</code>： Architecture Decision Record governance</td></tr>
-<tr><td>当前决策基线</td><td><code>12</code> 个已登记 ADR，其中 8 Accepted、2 Rejected、2 Superseded</td></tr>
-<tr><td>版本理由</td><td>新增向后兼容的工程治理流程和自动校验，按 C 段发布</td></tr>
+<tr><td>当前目标版本</td><td><code>0.5.0</code></td></tr>
+<tr><td>本次纳入需求</td><td><code>REQ-ENG-006</code>： Agent-initiated decision intake and ADR triage</td></tr>
+<tr><td>当前决策基线</td><td><code>1</code> 个 DEC、<code>13</code> 个 ADR；ADR 中 9 Accepted、2 Rejected、2 Superseded</td></tr>
+<tr><td>版本理由</td><td>新增向后兼容的 Decision Inbox、主动 ADR triage 和自动门禁，按 B 段发布</td></tr>
 <tr><td>历史兼容</td><td><code>e48b5b1</code> 之前的提交视为 legacy，不回溯改写</td></tr>
 </tbody></table>
 </section>
@@ -293,7 +321,7 @@ scripts/
 <h2>11. 本规范验收</h2>
 <ul><li>注册表中每个 REQ 都有唯一 ID、目标版本、Design、Tests、Design Status 和 Implementation Authorization。</li><li>需求/设计/测试模板可以直接复制使用。</li><li>ADR 文件、注册表、正文元数据和受影响 REQ 完全一致，且没有未注册 ADR。</li><li>Accepted/Rejected ADR 有用户批准、完整章节和合法状态转换；Supersede 双向对称且无循环。</li><li>标记 <code>architectureImpact: true</code> 的需求必须包含架构影响面和完整性证据锚点。</li><li>未获用户确认和实现授权的 REQ 不能标记 <code>in_progress</code>。</li><li>commit hook 拒绝缺少 REQ、Version、Design、Tests 或 Test-Evidence 的提交。</li><li>hook 拒绝不存在的 REQ、文档路径和版本不一致。</li><li><code>npm run requirements:check</code> 和 <code>npm run adr:check</code> 在正常检查链中执行。</li><li>从一个需求请求到发布 tag 的完整流程可以按本文执行并复核。</li></ul>
 <p>机器可读注册表：<code>policy/requirement-registry.json</code>。需求状态以注册表为准，设计事实以设计文档为准，验收事实以测试文档和 CI 证据为准。</p>
-<p class="foot">规范版本：1.1 · 产品目标版本：0.4.3 · 生效基线：e48b5b1 之后</p>
+<p class="foot">规范版本：1.2 · 产品目标版本：0.5.0 · 生效基线：e48b5b1 之后</p>
 </section>
 </div>
 </body>

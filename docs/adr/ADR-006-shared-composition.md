@@ -4,6 +4,7 @@
 - Date: 2026-11-01
 - Approved by: user
 - Requirements: REQ-TUI-002, REQ-CHROME-001
+- Origin decision: none
 - Supersedes: none
 - Superseded by: none
 

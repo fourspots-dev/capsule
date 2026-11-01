@@ -64,7 +64,8 @@ Rejected、Superseded 和 Deprecated 是历史终态，不得改回当前架构�
 ## 与 REQ 的关系
 
 - REQ 可以在详细设计中引用一个或多个 Accepted ADR。
-- 每个 ADR 至少关联一个受影响 REQ；若尚无对应需求，应先建立治理或架构 REQ。
+- 每个 ADR 必须至少有一个来源：受影响 REQ 或 `Origin decision: DEC-NNN`。
+- 讨论中先形成的规则可以暂时没有 REQ，但不能没有 DEC 来源。
 - ADR registry 保存机器可读关联，ADR 正文的 Requirements 必须与其一致。
 - ADR 回答为什么保持规则，REQ 回答要交付什么，详细设计回答怎样实现，
   详细测试设计回答怎样证明。
@@ -83,14 +84,18 @@ npm run adr:check
 
 ## 创建流程
 
-1. 预留新的 `ADR-NNN` ID。
-2. 从 `template.md` 创建文件。
-3. 写 Context、Decision、Invariants、Alternatives、Consequences、Affected
+1. Agent 在 decision sweep 中判断这是长期架构决定。
+2. 先创建或引用 `DEC-NNN`，保留原始决定来源。
+3. 预留新的 `ADR-NNN` ID。
+4. 从 `template.md` 创建文件。
+5. 写 Context、Decision、Invariants、Alternatives、Consequences、Affected
    surfaces 和 Verification。
-4. 在 `policy/adr-registry.json` 注册，状态设为 `proposed`。
-5. 请求用户确认。
-6. 用户确认后设为 `accepted` 或 `rejected`，记录批准来源和日期。
-7. 运行 `npm run adr:check`。
+6. 在 `policy/adr-registry.json` 注册，状态设为 `proposed`，写入
+   `originDecision`。
+7. 主动向用户提交确认包；用户确认后设为 `accepted` 或 `rejected`，记录批准
+   来源和日期。
+8. 运行 `npm run decisions:check`、`npm run adr:check` 和
+   `npm run requirements:check`。
 
 ## 改变已有决策
 

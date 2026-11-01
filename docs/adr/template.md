@@ -3,7 +3,8 @@
 - Status: proposed
 - Date: YYYY-MM-DD
 - Approved by: none
-- Requirements: REQ-AREA-NNN
+- Requirements: REQ-AREA-NNN | none
+- Origin decision: none
 - Supersedes: none
 - Superseded by: none
 

@@ -3,7 +3,8 @@
 - Status: accepted
 - Date: 2026-11-01
 - Approved by: user
-- Requirements: REQ-TEST-001, REQ-ACTION-001
+- Requirements: REQ-TEST-001, REQ-ACTION-001, REQ-EVAL-001
+- Origin decision: none
 - Supersedes: none
 - Superseded by: none
 

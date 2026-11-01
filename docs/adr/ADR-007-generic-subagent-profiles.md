@@ -4,6 +4,7 @@
 - Date: 2026-11-01
 - Approved by: user
 - Requirements: REQ-SUBAGENT-001
+- Origin decision: none
 - Supersedes: none
 - Superseded by: none
 

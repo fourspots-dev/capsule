@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "decisions": [
+    {
+      "id": "DEC-001",
+      "title": "Agent-initiated decision intake and ADR triage",
+      "statement": "讨论中形成的长期决定需要由 Agent 主动捕获、留痕并在正确检查点发起 ADR 或需求确认，而不是等待用户记得要求写 ADR。",
+      "normalizedDecision": "Use an append-only Decision Inbox for durable discussion decisions; Agent-owned triage classifies each decision and proposes a new ADR when architecture conditions apply. ADRs may exist without a REQ when they retain an originating DEC.",
+      "capturedAt": "2026-11-01",
+      "source": "discussion",
+      "scope": ["agent-workflow", "adr", "requirements"],
+      "status": "promoted",
+      "triage": {
+        "disposition": "adr_and_requirement",
+        "adrs": ["ADR-013"],
+        "requirements": ["REQ-ENG-006"],
+        "rationale": "The rule changes the cross-cutting governance contract and requires implementation of registries, gates and tests."
+      },
+      "supersedes": [],
+      "supersededBy": null,
+      "file": "docs/decisions/DEC-001-agent-decision-intake.md"
+    }
+  ]
+}

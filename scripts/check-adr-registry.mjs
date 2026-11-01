@@ -24,12 +24,25 @@ export function checkAdrRegistry(root = resolve(dirname(scriptPath), '..')) {
   const errors = [];
   const registryPath = resolve(root, 'policy/adr-registry.json');
   const requirementsPath = resolve(root, 'policy/requirement-registry.json');
+  const decisionRegistryPath = resolve(root, 'policy/decision-registry.json');
   const registry = JSON.parse(readFileSync(registryPath, 'utf8'));
   const requirementRegistry = JSON.parse(
     readFileSync(requirementsPath, 'utf8')
   );
+  const decisionRegistry = JSON.parse(
+    readFileSync(decisionRegistryPath, 'utf8')
+  );
   const requirementIds = new Set(
     (requirementRegistry.requirements ?? []).map((requirement) => requirement.id)
+  );
+  const decisionIds = new Set(
+    (decisionRegistry.decisions ?? []).map((decision) => decision.id)
+  );
+  const decisionById = new Map(
+    (decisionRegistry.decisions ?? []).map((decision) => [
+      decision.id,
+      decision,
+    ])
   );
   if (registry.schemaVersion !== 1) errors.push('schemaVersion must be 1');
   if (!Array.isArray(registry.decisions)) {
@@ -55,8 +68,6 @@ export function checkAdrRegistry(root = resolve(dirname(scriptPath), '..')) {
     }
     if (!Array.isArray(decision?.requirements)) {
       errors.push(`${label}: requirements must be an array`);
-    } else if (decision.requirements.length === 0) {
-      errors.push(`${label}: requirements must contain at least one REQ id`);
     } else {
       if (new Set(decision.requirements).size !== decision.requirements.length) {
         errors.push(`${label}: requirements contains duplicate ids`);
@@ -66,6 +77,37 @@ export function checkAdrRegistry(root = resolve(dirname(scriptPath), '..')) {
           errors.push(`${label}: unknown requirement ${requirementId}`);
         }
       }
+    }
+    if (
+      decision?.originDecision !== null &&
+      typeof decision?.originDecision !== 'string'
+    ) {
+      errors.push(`${label}: originDecision must be a DEC id or null`);
+    } else if (
+      decision?.originDecision &&
+      !decisionIds.has(decision.originDecision)
+    ) {
+      errors.push(
+        `${label}: unknown origin decision ${decision.originDecision}`
+      );
+    } else if (
+      decision?.originDecision &&
+      !(decisionById.get(decision.originDecision)?.triage?.adrs ?? []).includes(
+        decision.id
+      )
+    ) {
+      errors.push(
+        `${label}: origin decision ${decision.originDecision} does not list this ADR`
+      );
+    }
+    if (
+      Array.isArray(decision?.requirements) &&
+      decision.requirements.length === 0 &&
+      !decision.originDecision
+    ) {
+      errors.push(
+        `${label}: ADR requires at least one requirement or originDecision`
+      );
     }
     if (
       !Array.isArray(decision?.supersedes) ||
@@ -229,6 +271,12 @@ function checkMetadata(body, decision, errors) {
   const requirements = readListField(body, 'Requirements');
   if (!sameSet(requirements, decision.requirements ?? [])) {
     errors.push(`${label}: file Requirements do not match registry`);
+  }
+
+  const originDecision = readField(body, 'Origin decision');
+  const expectedOrigin = decision.originDecision ?? 'none';
+  if (originDecision !== expectedOrigin) {
+    errors.push(`${label}: file Origin decision does not match registry`);
   }
 
   const supersedes = readListField(body, 'Supersedes');

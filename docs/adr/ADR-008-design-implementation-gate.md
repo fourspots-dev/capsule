@@ -4,6 +4,7 @@
 - Date: 2026-11-01
 - Approved by: user
 - Requirements: REQ-ENG-004, REQ-ENG-005
+- Origin decision: none
 - Supersedes: ADR-011
 - Superseded by: none
 

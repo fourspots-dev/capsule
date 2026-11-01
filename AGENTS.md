@@ -9,9 +9,11 @@ documentation.
 1. Product version: `package.json.version`.
 2. Requirement state and links: `policy/requirement-registry.json`.
 3. Engineering process: `docs/engineering-versioning-and-traceability.html`.
-4. Architecture decisions: `policy/adr-registry.json` and `docs/adr/`.
-5. Requirement templates: `docs/requirements/`.
-6. Commit format: `.gitmessage`.
+4. Discussion decisions: `policy/decision-registry.json` and
+   `docs/decisions/`.
+5. Architecture decisions: `policy/adr-registry.json` and `docs/adr/`.
+6. Requirement templates: `docs/requirements/`.
+7. Commit format: `.gitmessage`.
 
 The requirement registry uses schema version 1. Historical commits before
 `e48b5b1` are legacy and must not be rewritten.
@@ -23,18 +25,20 @@ change follows this order:
 
 1. Identify or create a requirement id.
 2. Add or update its entry in `policy/requirement-registry.json`.
-3. Ensure a detailed design document and detailed test-design document exist
+3. Perform the decision sweep and record `adrReview` for the requirement:
+   `existing`, `proposed`, or `not_required`. Do not leave it `pending`.
+4. Ensure a detailed design document and detailed test-design document exist
    and are linked with precise anchors. For architecture-impacting changes,
    complete the architecture impact map before implementation.
-4. Set `designStatus: "review"` and request explicit user confirmation.
-5. After confirmation, set `designStatus: "approved"` and
+5. Set `designStatus: "review"` and request explicit user confirmation.
+6. After confirmation, set `designStatus: "approved"` and
    `implementationAuthorized: true`. Agents must not self-authorize.
-6. Move the requirement to `in_progress` and implement code and tests across
+7. Move the requirement to `in_progress` and implement code and tests across
    every affected surface listed by the impact map.
-7. Update the requirement status and `CHANGELOG.md` when appropriate.
-8. Run `npm run check` and relevant live/E2E tests.
-9. Commit using the required requirement-linked message.
-10. Create or move a release tag only through the release process.
+8. Update the requirement status and `CHANGELOG.md` when appropriate.
+9. Run `npm run check` and relevant live/E2E tests.
+10. Commit using the required requirement-linked message.
+11. Create or move a release tag only through the release process.
 
 Never begin a new product behavior with code while leaving it unregistered.
 Documentation-only typo fixes may reference an existing engineering
@@ -44,6 +48,54 @@ An `accepted` requirement is a reviewed problem statement, not implementation
 permission. Do not change product code until the user has confirmed the detailed
 design and the registry records both `designStatus: "approved"` and
 `implementationAuthorized: true`.
+
+## Decision Intake
+
+Agents must proactively sweep discussions for durable decisions. Do not wait for
+the user to ask for an ADR and do not rely on a REQ existing when the decision is
+made.
+
+Capture a `DEC-NNN` in `policy/decision-registry.json` and
+`docs/decisions/DEC-NNN-<slug>.md` when the user:
+
+- chooses a durable default, boundary, protocol or priority;
+- accepts or rejects a long-lived architectural alternative;
+- creates a rule that affects multiple future requirements or surfaces;
+- accepts a long-running exception or workaround during implementation.
+
+Do not capture transient guesses, unconfirmed options or the entire
+conversation. Store the concise decision, normalized rule, scope, rationale and
+minimal provenance only.
+
+Sweep and triage at all of these checkpoints:
+
+1. While the discussion produces a durable decision.
+2. When a requirement is created or accepted.
+3. Before detailed design moves to `review`.
+4. When implementation discovers a new boundary or contract.
+5. Before every release; perform a complete ADR portfolio audit for every `A.B`
+   release and whenever a superseded dependency or repeated exception appears.
+
+Each new requirement with `targetVersion >= 0.5.0` records `adrReview`:
+
+```text
+pending | existing | proposed | not_required
+```
+
+`pending` blocks design review and implementation. `existing` cites Accepted
+ADRs. `proposed` cites a Proposed ADR and blocks implementation until the user
+decides. `not_required` contains a concrete rationale. The Agent may determine
+`not_required`; the rationale remains reviewable in the design.
+
+If triage requires an ADR, the Agent must create the Proposed ADR and linked DEC
+before asking the user. At the end of that turn, present one compact decision
+pack, stop dependent work, and wait. Routine decisions may be batched at a
+natural discussion boundary. Never infer approval or implementation permission
+from silence.
+
+Run `npm run decisions:check`. It is included in `npm run check`.
+
+Use `docs/decisions/template.md` and `docs/decisions/README.md`.
 
 ## Architecture Decision Records
 
@@ -75,6 +127,8 @@ Rules:
 - Accepted ADRs are never deleted or silently rewritten.
 - A changed decision requires a new ADR with `Supersedes`.
 - A superseded ADR records the replacement in `Superseded by`.
+- An ADR has at least one provenance source: an affected REQ or an originating
+  DEC. `Requirements: none` is valid only with `Origin decision: DEC-NNN`.
 - ADR acceptance does not grant implementation authorization.
 - Requirement designs must cite relevant accepted ADRs.
 - Rejected alternatives may be recorded as rejected ADRs but cannot be used as
@@ -118,6 +172,8 @@ Allowed requirement fields:
 - `status`: `proposed | accepted | in_progress | implemented | verified | released`
 - `designStatus`: `draft | review | approved`
 - `implementationAuthorized`: boolean
+- `adrReview`: required from `targetVersion` 0.5.0; records ADR triage and
+  cites Accepted/Proposed ADRs or explains why no ADR is required.
 - `architectureImpact`: optional boolean; `true` requires the architecture
   impact and completeness anchors.
 

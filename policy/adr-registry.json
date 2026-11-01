@@ -12,6 +12,7 @@
         "REQ-TEST-001",
         "REQ-WORKSPACE-002"
       ],
+      "originDecision": null,
       "decidedAt": "2026-11-01",
       "approvedBy": "user",
       "supersedes": [],
@@ -24,9 +25,11 @@
       "file": "docs/adr/ADR-002-portable-first.md",
       "requirements": [
         "REQ-WORKSPACE-001",
+        "REQ-WORKSPACE-002",
         "REQ-GIT-001",
         "REQ-PLATFORM-001"
       ],
+      "originDecision": null,
       "decidedAt": "2026-11-01",
       "approvedBy": "user",
       "supersedes": ["ADR-009"],
@@ -39,8 +42,10 @@
       "file": "docs/adr/ADR-003-application-actions.md",
       "requirements": [
         "REQ-HOST-001",
-        "REQ-ACTION-001"
+        "REQ-ACTION-001",
+        "REQ-CHROME-001"
       ],
+      "originDecision": null,
       "decidedAt": "2026-11-01",
       "approvedBy": "user",
       "supersedes": [],
@@ -55,6 +60,7 @@
         "REQ-WORKSPACE-001",
         "REQ-WORKSPACE-002"
       ],
+      "originDecision": null,
       "decidedAt": "2026-11-01",
       "approvedBy": "user",
       "supersedes": [],
@@ -67,8 +73,10 @@
       "file": "docs/adr/ADR-005-evidence-bound-completion.md",
       "requirements": [
         "REQ-TEST-001",
-        "REQ-ACTION-001"
+        "REQ-ACTION-001",
+        "REQ-EVAL-001"
       ],
+      "originDecision": null,
       "decidedAt": "2026-11-01",
       "approvedBy": "user",
       "supersedes": [],
@@ -83,6 +91,7 @@
         "REQ-TUI-002",
         "REQ-CHROME-001"
       ],
+      "originDecision": null,
       "decidedAt": "2026-11-01",
       "approvedBy": "user",
       "supersedes": [],
@@ -96,6 +105,7 @@
       "requirements": [
         "REQ-SUBAGENT-001"
       ],
+      "originDecision": null,
       "decidedAt": "2026-11-01",
       "approvedBy": "user",
       "supersedes": [],
@@ -110,6 +120,7 @@
         "REQ-ENG-004",
         "REQ-ENG-005"
       ],
+      "originDecision": null,
       "decidedAt": "2026-11-01",
       "approvedBy": "user",
       "supersedes": ["ADR-011"],
@@ -121,6 +132,7 @@
       "status": "superseded",
       "file": "docs/adr/ADR-009-git-cli-primary.md",
       "requirements": ["REQ-GIT-001"],
+      "originDecision": null,
       "decidedAt": "2026-11-01",
       "approvedBy": "user",
       "supersedes": [],
@@ -132,6 +144,7 @@
       "status": "rejected",
       "file": "docs/adr/ADR-010-all-capabilities-as-actions.md",
       "requirements": ["REQ-HOST-002", "REQ-ACTION-001"],
+      "originDecision": null,
       "decidedAt": "2026-11-01",
       "approvedBy": "user",
       "supersedes": [],
@@ -143,6 +156,7 @@
       "status": "superseded",
       "file": "docs/adr/ADR-011-accepted-starts-implementation.md",
       "requirements": ["REQ-ENG-004"],
+      "originDecision": null,
       "decidedAt": "2026-11-01",
       "approvedBy": "user",
       "supersedes": [],
@@ -154,6 +168,19 @@
       "status": "rejected",
       "file": "docs/adr/ADR-012-generic-exec-baseline.md",
       "requirements": ["REQ-HOST-001", "REQ-ACTION-001"],
+      "originDecision": null,
+      "decidedAt": "2026-11-01",
+      "approvedBy": "user",
+      "supersedes": [],
+      "supersededBy": null
+    },
+    {
+      "id": "ADR-013",
+      "title": "Agent-initiated decision intake and ADR triage",
+      "status": "accepted",
+      "file": "docs/adr/ADR-013-agent-decision-triage.md",
+      "requirements": ["REQ-ENG-006"],
+      "originDecision": "DEC-001",
       "decidedAt": "2026-11-01",
       "approvedBy": "user",
       "supersedes": [],
