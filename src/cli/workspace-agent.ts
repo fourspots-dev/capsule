@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { createHostActionTools } from '../adapters/host-action-tools';
 import { HostArtifactStore } from '../adapters/host-artifact-store';
 import { HostSessionStore } from '../adapters/host-session-store';
 import { NpmScriptActionProvider, type NpmScriptActionDefinition } from '../adapters/npm-action-provider';
@@ -23,10 +22,12 @@ import { PortableGitBackend } from '../git/backend';
 import { NodeHostFileSystem } from '../node/host-fs';
 import { NodeHostBridge } from '../node/node-host';
 import { HostActionRegistry } from '../platform/host-action';
-import { CapabilityGraph } from '../platform/capability';
-import { ToolPackComposer } from '../platform/tool-pack';
 import { workspaceEditPrompt } from '../platform/workspace-edit-prompt';
 import { WorkspaceSubagentDriver } from '../runtime/workspace-subagent-driver';
+import {
+  createWorkspaceCapabilityComposition,
+  createWorkspaceCompletionGuard,
+} from '../runtime/workspace-capability-composition';
 import { VirtualWorkspace } from '../virtual';
 import { parseWorkspaceCapsule, serializeWorkspaceCapsule } from '../workspace/codec';
 import { WorkspaceContinuityService } from '../workspace/continuity';
@@ -77,31 +78,16 @@ async function main(): Promise<void> {
   });
   const actionRegistry = new HostActionRegistry();
   actionRegistry.register('workspace-app', npmActions);
-  const actionTools = await createHostActionTools(actionRegistry, {
+  const capability = await createWorkspaceCapabilityComposition({
+    workspace,
+    profile: 'portable',
+    actionRegistry,
     workspacePath: '',
+    hostProfile: 'local-coding',
+    environmentFingerprint: `local-${process.platform}-${process.arch}`,
   });
-  const capabilityGraph = new CapabilityGraph();
-  capabilityGraph.setEnvironmentFingerprint(
-    `local-${process.platform}-${process.arch}`
-  );
-  capabilityGraph.register({
-    id: 'filesystem',
-    version: '1',
-    state: 'available',
-    limitations: [],
-  });
-  capabilityGraph.register({
-    id: 'git',
-    version: '1',
-    state: 'available',
-    limitations: ['portable-common-subset'],
-  });
-  capabilityGraph.register({
-    id: 'actions',
-    version: '1',
-    state: actionTools.length > 1 ? 'available' : 'unavailable',
-    limitations: actionTools.length > 1 ? [] : ['No actions configured'],
-  });
+  const actionTools = capability.actionTools;
+  const applicationActions = capability.applicationActions;
   const continuity = new WorkspaceContinuityService({
     workspaceId: 'tinyai-workspace',
     vfs: fs,
@@ -135,21 +121,7 @@ async function main(): Promise<void> {
 
   const modes = new PermissionModeRegistry('sandbox-auto', () => systemClock.now());
   const ids = new SequentialIdGenerator();
-  const baseTools = createVirtualWorkspaceTools(workspace, {
-    includeVirtualShell: false,
-  });
-  const toolPackComposer = new ToolPackComposer();
-  toolPackComposer.register({
-    id: 'workspace-coding',
-    requiredCapabilities: ['filesystem', 'git'],
-    tools: baseTools,
-  });
-  toolPackComposer.register({
-    id: 'application-actions',
-    requiredCapabilities: ['actions'],
-    tools: actionTools,
-  });
-  const composition = toolPackComposer.compose(capabilityGraph);
+  const baseTools = capability.baseTools;
   const rootPermissions: PermissionPolicy = {
     capabilities: [
       'workspace:read',
@@ -242,11 +214,9 @@ async function main(): Promise<void> {
   const executor = new ToolExecutor(
     [
       ...routedBase.filter((tool) =>
-        composition.tools.some((candidate) => candidate.name === tool.name)
+        capability.tools.some((candidate) => candidate.name === tool.name)
       ),
-      ...composition.tools.filter((tool) =>
-        actionTools.some((candidate) => candidate.name === tool.name)
-      ),
+      ...actionTools,
       ...subagents,
     ],
     denyApproval,
@@ -267,46 +237,11 @@ async function main(): Promise<void> {
     sessionStore: sessions,
     permissionModes: modes,
     maxSteps: options.maxSteps,
-    completionGuard: ({ view }) => {
-      if (actionTools.length <= 1) return { ok: true };
-      let lastWrite = -1;
-      let lastCheck = -1;
-      view.rows.forEach((row, index) => {
-        if (
-          row.kind === 'tool' &&
-          row.status === 'completed' &&
-          ['write_file', 'replace_in_file', 'append_file', 'apply_patch', 'apply_unified_diff', 'delete_file', 'git_commit'].includes(
-            row.toolName ?? ''
-          )
-        ) {
-          lastWrite = index;
-        }
-        if (
-          row.kind === 'tool' &&
-          row.status === 'completed' &&
-          row.toolName?.startsWith('action_')
-        ) {
-          lastCheck = index;
-        }
-      });
-      return lastWrite >= 0 && lastCheck <= lastWrite
-        ? {
-            ok: false,
-            reason:
-              'Files changed after the last successful application action check',
-          }
-        : { ok: true };
-    },
-    systemPrompt: [
-      'You are tinyai operating in a portable coding workspace.',
-      'Use workspace-relative paths only. The .git directory is managed by git_* tools.',
-      'Use git_init/git_status/git_add/git_commit/git_log as needed.',
-      'Use list_host_actions to inspect application-provided actions.',
-      'There is no generic shell. Run checks only through a registered action; do not invent an exec tool.',
-      'Build the requested application completely and verify concrete behavior.',
-      'Do not claim a check passed unless its action result was observed.',
-      workspaceEditPrompt,
-    ].join('\n'),
+    completionGuard: createWorkspaceCompletionGuard(
+      'portable',
+      applicationActions
+    ),
+    systemPrompt: [capability.prompt, workspaceEditPrompt].join('\n'),
   });
   const unsubscribe = coordinator.subscribe((child) => {
     runtime.updateChildTask(child.parentTaskId, {

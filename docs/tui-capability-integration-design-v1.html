@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tinyai TUI Capability Integration 设计 V1</title>
+<style>
+:root{--bg:#f4f5f7;--paper:#fff;--text:#191a1e;--muted:#6f7179;--line:#e2e3e8;--accent:#285c9e;--accent-soft:#eaf2ff;--ok:#137a4b;--ok-soft:#eef8f2;--warn:#986100;--warn-soft:#fff8e8;--danger:#b42318;--danger-soft:#fff1f0;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.72 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1180px;margin:auto;padding:36px 24px 90px}.hero{padding:38px;border-radius:25px;background:radial-gradient(circle at 88% 8%,#9fd1ff 0,transparent 25%),linear-gradient(135deg,#111923,#203d67 58%,#356da9);color:#fff}.hero small{letter-spacing:.12em;opacity:.72}.hero h1{font-size:36px;line-height:1.2;margin:12px 0}.hero p{margin:0;color:#ecf5ff}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}nav{position:sticky;top:0;z-index:5;display:flex;gap:14px;overflow:auto;margin:18px 0;padding:10px 14px;border:1px solid var(--line);border-radius:13px;background:#f4f5f7ed;backdrop-filter:blur(12px)}nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}section{margin:18px 0;padding:25px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:23px;margin:0 0 14px}h3{font-size:16px;margin:20px 0 8px}p{color:#44454c}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafafa;color:var(--muted)}code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{padding:16px;overflow:auto;border-radius:11px;background:#111820;color:#eaf3ff;font:12px/1.6 var(--mono)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafafa}.card h3{margin:0 0 8px}.rule{padding:13px 15px;border-left:3px solid var(--accent);background:#eef5ff;border-radius:0 9px 9px 0}.warn{border-color:var(--warn);background:var(--warn-soft)}.ok{border-color:var(--ok);background:var(--ok-soft)}.foot{color:var(--muted);font-size:12px}@media(max-width:760px){.grid{grid-template-columns:1fr}.hero h1{font-size:28px}.wrap{padding:20px 12px 70px}table{display:block;overflow-x:auto}section{padding:20px}}
+</style>
+</head>
+<body><div class="wrap">
+<header class="hero"><small>REQ-TUI-002 / HOST CAPABILITY INTEGRATION / DESIGN V1</small><h1>TUI 能力组合与架构完整性</h1><p>让 TUI 与 Headless Agent 共用 Capability Graph、ToolPack Composer、应用 Action Provider、动态 Prompt 和完成门禁；Portable Profile 默认不暴露通用 shell，Legacy Profile 仅显式选择。</p><div class="chips"><span class="chip">Target 0.4.0</span><span class="chip">Shared Composition</span><span class="chip">Portable Default</span><span class="chip">Legacy Opt-in</span><span class="chip">Architecture Impact</span></div></header>
+<nav><a href="#scope">范围</a><a href="#architecture-impact">影响面</a><a href="#architecture">架构</a><a href="#profiles">Profile</a><a href="#prompt">Prompt</a><a href="#verification">完成门禁</a><a href="#cli">CLI</a><a href="#invariants">不变量</a><a href="#acceptance">验收</a></nav>
+
+<section id="scope"><h2>1. 问题与范围</h2><p>0.3.0 已实现 Action Provider、Portable Git 和 Workspace Capsule，但 TUI 仍使用独立的工具拼接、硬编码 Prompt 和 <code>exec/job_read</code> 完成门禁。它虽然可以启动，却没有完整消费新的架构能力。</p><div class="grid"><div class="card"><h3>本次必须完成</h3><ul><li>TUI 与 Headless 共用一个能力组合模块。</li><li>TUI 支持注册应用 npm-script Actions。</li><li>Portable 默认排除通用 VirtualShell。</li><li>Prompt 根据真实工具集合生成。</li><li>CompletionGuard 识别 Action 证据。</li><li>旧工具模式保留为显式 Legacy Profile。</li></ul></div><div class="card"><h3>非目标</h3><ul><li>新增图形审批弹窗；本轮 auto/deny 策略显式配置。</li><li>新增 TUI Capsule 专用按钮；继续复用 transfer CLI。</li><li>改变 TUI 的会话、子 Agent 和 Rich Render 布局。</li></ul></div></div></section>
+
+<section id="architecture-impact"><h2>2. Architecture Impact Map</h2><table><thead><tr><th>Surface</th><th>Action</th><th>Evidence</th></tr></thead><tbody>
+<tr><td>Shared runtime composition</td><td>modify</td><td>New shared workspace capability composer used by TUI and Headless</td></tr>
+<tr><td>TUI entrypoint</td><td>modify</td><td>profiles, action scripts, approval mode, generated Prompt and guard</td></tr>
+<tr><td>Headless Workspace Agent</td><td>modify</td><td>consume same composer and guard</td></tr>
+<tr><td>CapabilityGraph / ToolPackComposer</td><td>reuse</td><td>golden tool set and capability report tests</td></tr>
+<tr><td>Prompt / ToolRegistry</td><td>modify</td><td>Prompt derived from composition; no absolute root</td></tr>
+<tr><td>Verifier / CompletionGuard</td><td>modify</td><td>latest successful action must follow latest write</td></tr>
+<tr><td>Session restore</td><td>modify</td><td>approval auto/deny applies to imported Session explicitly</td></tr>
+<tr><td>Chrome / CLI</td><td>none</td><td>No TUI-specific contract; existing tests remain</td></tr>
+<tr><td>Legacy VirtualShell</td><td>preserve behind profile</td><td><code>--tool-profile legacy</code></td></tr>
+</tbody></table></section>
+
+<section id="architecture"><h2>3. 架构与对象</h2><pre>Workspace capability input
+  VirtualWorkspace
+  ActionRegistry
+  includeVirtualShell
+              ↓
+createWorkspaceCapabilityComposition()
+  CapabilityGraph → ToolPackComposer
+  ToolPackSet + CapabilityReport
+  Generated capability prompt
+  Generated completion guard
+              ↓
+TUI Runtime / Headless Workspace Agent</pre><table><thead><tr><th>对象</th><th>职责</th></tr></thead><tbody><tr><td>WorkspaceCapabilityComposition</td><td>能力图、工具、Prompt、Action 信息和 Profile 摘要</td></tr><tr><td>createWorkspaceCapabilityComposition</td><td>唯一组合入口，禁止 TUI/Headless 自行拼接</td></tr><tr><td>createWorkspaceCompletionGuard</td><td>根据 Profile 与 Action 可用性生成验证门禁</td></tr><tr><td>HostActionRegistry</td><td>合并 Host Provider 与 TUI <code>--action-script</code></td></tr></tbody></table></section>
+
+<section id="profiles"><h2>4. Tool Profiles</h2><table><thead><tr><th>Profile</th><th>工具</th><th>完成证据</th></tr></thead><tbody><tr><td><code>portable</code> 默认</td><td>Workspace 文件、Search、Patch、Portable Git、应用 Actions；无 exec/job</td><td>最后一次写入之后必须成功执行 Action</td></tr><tr><td><code>legacy</code> 显式</td><td>Portable Profile + VirtualShell exec/job</td><td>最后一次写入后成功 exec/job_read，或 Action</td></tr></tbody></table><div class="rule">通用 Model 不能运行 Python/Node/Git binary。需要真实命令时，由嵌入 TUI 的应用注册 <code>--action-script</code>。</div></section>
+
+<section id="prompt"><h2>5. 动态 Prompt</h2><ul><li>只描述 Composition 中实际激活的 ToolPack。</li><li>不存在 exec 时不出现 VirtualShell 指令。</li><li>Git 可用时明确说明 <code>git_*</code> 工具。</li><li>列出 Application Action ID，不列宿主机绝对路径和二进制路径。</li><li>Project 仅显示逻辑项目名，不显示本机 root。</li></ul></section>
+
+<section id="verification"><h2>6. 审批与完成门禁</h2><table><thead><tr><th>模式</th><th>行为</th></tr></thead><tbody><tr><td><code>--approval auto</code> 默认</td><td>加载 Session 后显式恢复 sandbox-auto；网络等策略仍由 Policy Engine 决定</td></tr><tr><td><code>--approval deny</code></td><td>需要审批的调用被拒绝，UI/Agent 必须看到 denied</td></tr></tbody></table><p>CompletionGuard 以行顺序判断，历史 Action 不能验证后续新写入。</p></section>
+
+<section id="cli"><h2>7. TUI CLI</h2><pre>tinyai-tui [workspace]
+  --tool-profile portable|legacy
+  --approval auto|deny
+  --action-script id:script:title
+
+example:
+  tinyai-tui ./game \
+    --action-script app.game.check:check:Run game validation</pre></section>
+
+<section id="invariants"><h2>8. 架构不变量与禁止状态</h2><ul><li>TUI 与 Headless 只能通过共享组合函数生成 Coding ToolPack。</li><li>Prompt 工具与 ToolRegistry 激活集合一致。</li><li>Portable Profile 不得注册 exec/job。</li><li>Action 缺失必须显示 unavailable，不得隐式回退 shell。</li><li>Action 失败、denied、absent 不得完成需要验证的写入任务。</li><li>Session 历史证据不能验证当前宿主或后续修改。</li></ul><div class="warn rule">禁止只在 Headless 修复能力或只在 TUI 硬编码 Action。任何 Consumer 未接通都视为需求未完成。</div></section>
+
+<section id="acceptance"><h2>9. 验收</h2><table><tbody><tr><td>共享组合</td><td>TUI 与 Headless 的工具集合来自同一函数并通过 Golden</td></tr><tr><td>Portable</td><td>默认工具不含 exec/job，包含 git_*</td></tr><tr><td>Actions</td><td>CLI 注册后模型可见并可调用</td></tr><tr><td>Prompt</td><td>与实际工具一致且无宿主绝对路径</td></tr><tr><td>Verifier</td><td>成功 Action 验证写后完成；失败/denied 阻断</td></tr><tr><td>Session</td><td>迁移 Session 在 auto/deny 模式下行为明确</td></tr><tr><td>E2E</td><td>伪终端 TUI 完成真实模型/模拟模型闭环</td></tr></tbody></table></section>
+<p><a href="tui-capability-integration-testing-v1.html#architecture-completeness">查看测试方案 →</a></p><p class="foot">REQ-TUI-002 · Target 0.4.0 · architectureImpact: true · Status: verified</p>
+</div></body></html>

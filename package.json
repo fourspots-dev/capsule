@@ -1,7 +1,7 @@
 {
   "name": "tinyai",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.4.0",
   "scripts": {
     "build": "npm run typecheck && npm run clean && npm run build:sidepanel && npm run build:background && npm run build:cli && npm run build:tui && npm run build:workspace-agent && npm run build:workspace-transfer && npm run build:runner && npm run build:proxy && npm run build:package",
     "build:sidepanel": "esbuild src/sidepanel.ts --bundle --format=iife --target=chrome120 --outfile=extension/js/sidepanel/main.js",
@@ -31,6 +31,7 @@
     "workspace:export": "npm run build:workspace-transfer && node dist/tinyai-workspace-transfer.cjs export",
     "workspace:import": "npm run build:workspace-transfer && node dist/tinyai-workspace-transfer.cjs import",
     "verify:chrome-transfer": "npm run build:chrome-harness && node scripts/verify-chrome-transfer.mjs",
+    "verify:tui": "npm run build:tui && python3 scripts/verify-tui-capabilities.py",
     "test:soak": "TINYAI_SOAK=1 vitest run tests/soak/production.test.ts",
     "test:soak:8h": "TINYAI_SOAK=1 TINYAI_SOAK_DURATION_MS=28800000 vitest run tests/soak/production.test.ts",
     "test:soak:equivalent": "TINYAI_SOAK=1 TINYAI_SOAK_CYCLES=28800 TINYAI_SOAK_INTERVAL_MS=10 TINYAI_SOAK_DURATION_MS=600000 vitest run tests/soak/production.test.ts",

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0
+
+### Features
+
+- `REQ-TUI-002`: migrate TUI onto the shared host capability composition,
+  application Action registry, dynamic capability prompt and profile-aware
+  completion guard; Portable is the default shell-free profile and VirtualShell
+  remains available only through explicit Legacy mode.
+
+### Verification
+
+- `npm run check`
+- `npm run test:e2e`
+- `npm run verify:tui`
+
 ## 0.3.1
 
 ### Infrastructure

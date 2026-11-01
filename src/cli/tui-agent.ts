@@ -1,8 +1,11 @@
 import { resolve } from 'node:path';
 import { OpenAIModelTransport } from '../adapters/openai-model';
-import { createHostActionTools } from '../adapters/host-action-tools';
 import { HostArtifactStore } from '../adapters/host-artifact-store';
 import { HostSessionStore } from '../adapters/host-session-store';
+import {
+  NpmScriptActionProvider,
+  type NpmScriptActionDefinition,
+} from '../adapters/npm-action-provider';
 import { RemoteToolchainProvider } from '../adapters/remote-toolchain-provider';
 import { createSubagentTools } from '../adapters/subagent-tools';
 import { createVirtualWorkspaceTools } from '../adapters/virtual-workspace-tools';
@@ -22,6 +25,11 @@ import { NodeHostBridge } from '../node/node-host';
 import { NodeHostFileSystem } from '../node/host-fs';
 import { runNodeTui } from '../node/run-tui';
 import { WorkspaceSubagentDriver } from '../runtime/workspace-subagent-driver';
+import {
+  createWorkspaceCapabilityComposition,
+  createWorkspaceCompletionGuard,
+  type WorkspaceToolProfile,
+} from '../runtime/workspace-capability-composition';
 import { workspaceEditPrompt } from '../platform/workspace-edit-prompt';
 import {
   HostViewStateStorage,
@@ -37,11 +45,10 @@ interface TuiCliOptions {
   baseUrl: string;
   importProject: 'auto' | 'always' | 'never';
   workspaceMode: 'virtual' | 'host';
+  toolProfile: WorkspaceToolProfile;
+  approval: 'auto' | 'deny';
+  actionScripts: NpmScriptActionDefinition[];
 }
-
-const denyPrompt: ApprovalPort = {
-  requestApproval: async () => false,
-};
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
@@ -87,7 +94,11 @@ async function main(): Promise<void> {
       ? await workspace.checkpoint('tui-baseline')
       : undefined;
   const remoteRunner = process.env.TINYAI_REMOTE_RUNNER_URL;
-  if (remoteRunner && options.workspaceMode === 'virtual') {
+  if (
+    remoteRunner &&
+    options.workspaceMode === 'virtual' &&
+    options.toolProfile === 'legacy'
+  ) {
     workspace.shell.addProvider(
       new RemoteToolchainProvider({
         endpoint: remoteRunner,
@@ -115,11 +126,28 @@ async function main(): Promise<void> {
   if (host.actions) {
     actionRegistry.register(host.descriptor.id, host.actions);
   }
-  const actionTools = host.actions
-    ? await createHostActionTools(actionRegistry, {
-        workspacePath: '',
+  if (options.actionScripts.length) {
+    actionRegistry.register(
+      'tui-application',
+      new NpmScriptActionProvider({
+        workspaceRoot: resolve(options.workspace),
+        scripts: options.actionScripts,
       })
-    : [];
+    );
+  }
+  const capability = await createWorkspaceCapabilityComposition({
+    workspace,
+    profile: options.toolProfile,
+    actionRegistry,
+    workspacePath: '',
+    hostProfile: options.workspaceMode === 'host' ? 'local-coding' : 'portable',
+    environmentFingerprint: `tui-${options.workspaceMode}-${options.toolProfile}`,
+  });
+  const actionTools = capability.actionTools;
+  const applicationActions = capability.applicationActions;
+  const approvalPort: ApprovalPort = {
+    requestApproval: async () => options.approval === 'auto',
+  };
   const model = new OpenAIModelTransport({
     baseUrl: options.baseUrl,
     apiKey,
@@ -131,6 +159,8 @@ async function main(): Promise<void> {
       'workspace:write',
       'workspace:execute',
       'workspace:jobs',
+      'workspace:git',
+      'action:invoke',
       'agent:spawn',
       'agent:manage',
     ],
@@ -162,11 +192,15 @@ async function main(): Promise<void> {
   const sessionWorkspaces = new Map<string, VirtualWorkspace>();
   const sessionPermissions = new Map<string, PermissionPolicy>();
   const sessionDepths = new Map<string, number>();
-  const toolCache = new Map<VirtualWorkspace, ToolDefinition[]>();
+  const toolCache = new Map<VirtualWorkspace, ToolDefinition[]>([
+    [workspace, capability.baseTools],
+  ]);
   const toolsFor = (target: VirtualWorkspace): ToolDefinition[] => {
     let definitions = toolCache.get(target);
     if (!definitions) {
-      definitions = createVirtualWorkspaceTools(target);
+      definitions = createVirtualWorkspaceTools(target, {
+        includeVirtualShell: options.toolProfile === 'legacy',
+      });
       toolCache.set(target, definitions);
     }
     return definitions;
@@ -221,7 +255,7 @@ async function main(): Promise<void> {
   });
   const tools = new ToolExecutor(
     [...allTools, ...subagentTools],
-    denyPrompt,
+    approvalPort,
     {
       policy: new PolicyEngine((sessionId) => modes.mode(sessionId)),
       artifacts: {
@@ -237,43 +271,16 @@ async function main(): Promise<void> {
     ids,
     sessionStore,
     permissionModes: modes,
-    completionGuard: ({ view }) => {
-      const wrote = view.rows.some(
-        (row) =>
-          row.kind === 'tool' &&
-          ['write_file', 'apply_patch', 'apply_unified_diff', 'delete_file'].includes(
-            row.toolName ?? ''
-          ) &&
-          row.status === 'completed'
-      );
-      const verified = view.rows.some(
-        (row) =>
-          row.kind === 'tool' &&
-          ['exec', 'job_read'].includes(row.toolName ?? '') &&
-          row.status === 'completed'
-      );
-      return wrote && !verified
-        ? {
-            ok: false,
-            reason:
-              'Files changed but no successful exec/job_read verification was observed',
-          }
-        : { ok: true };
+    onOpen: async (sessionId) => {
+      modes.get(sessionId).restore({
+        mode: options.approval === 'auto' ? 'sandbox-auto' : 'guarded',
+      });
     },
-    systemPrompt: [
-      'You are tinyai, a coding agent operating in a portable virtual workspace.',
-      'All files and commands are virtual. Use search, patch, exec and job tools.',
-      'The Virtual Shell only provides builtins: true, false, set, pwd, echo, printf, uname, which, command, env, export, cd, ls, cat, touch, mkdir, rm, cp, mv, grep, rg, head, tail, wc, find, diff, patch and test.',
-      'Do not try to run node, npm, python, bash, git, sed, awk, uname from the host, /usr/bin paths or host package managers. They are intentionally unavailable.',
-      'Use write_file for complete rewrites, replace_in_file for small exact edits, and append_file for appending.',
-      workspaceEditPrompt,
-      'read_file offset and length are byte offsets. Prefer start_line/end_line for line-oriented inspection.',
-      `The imported project root is ${resolve(options.workspace)}; virtual paths are relative to that root.`,
-      'Inspect before editing. Keep modifications small and reversible.',
-      'Run relevant verification before declaring completion.',
-      'Do not claim a test passed unless its tool result was observed.',
-      'Final answers must summarize changes, verification evidence and unresolved risks.',
-    ].join('\n'),
+    completionGuard: createWorkspaceCompletionGuard(
+      options.toolProfile,
+      applicationActions
+    ),
+    systemPrompt: [capability.prompt, workspaceEditPrompt].join('\n'),
     maxSteps: Number(process.env.TINYAI_MAX_STEPS ?? 120),
   });
   const unsubscribeChildren = coordinator.subscribe((child) => {
@@ -303,7 +310,11 @@ async function main(): Promise<void> {
     project: resolve(options.workspace).split('/').at(-1) ?? options.workspace,
     branch: process.env.TINYAI_BRANCH,
     model: options.model,
-    provider: options.workspaceMode === 'host' ? 'host-fs' : 'virtual',
+    provider: [
+      options.workspaceMode === 'host' ? 'host-fs' : 'virtual',
+      options.toolProfile,
+      applicationActions.length ? `${applicationActions.length}-actions` : 'no-actions',
+    ].join('/'),
     ...(baseline
       ? {
           review: async () => {
@@ -373,8 +384,24 @@ async function main(): Promise<void> {
 function parseArgs(args: string[]): TuiCliOptions {
   const values = new Map<string, string>();
   const positional: string[] = [];
+  const actionScripts: NpmScriptActionDefinition[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
+    if (arg === '--action-script') {
+      const value = args[++index];
+      if (!value) throw new Error('--action-script requires id:script:title');
+      const [id, script, ...title] = value.split(':');
+      if (!id || !script) {
+        throw new Error(`Invalid --action-script value: ${value}`);
+      }
+      actionScripts.push({
+        id,
+        script,
+        title: title.join(':') || script,
+        description: `Run the application npm script "${script}".`,
+      });
+      continue;
+    }
     if (
       [
         '--workspace',
@@ -382,6 +409,8 @@ function parseArgs(args: string[]): TuiCliOptions {
         '--base-url',
         '--import',
         '--workspace-mode',
+        '--tool-profile',
+        '--approval',
       ].includes(arg)
     ) {
       const value = args[++index];
@@ -402,6 +431,14 @@ function parseArgs(args: string[]): TuiCliOptions {
   if (!['virtual', 'host'].includes(workspaceMode)) {
     throw new Error('--workspace-mode must be virtual or host');
   }
+  const toolProfile = values.get('--tool-profile') ?? 'portable';
+  if (!['portable', 'legacy'].includes(toolProfile)) {
+    throw new Error('--tool-profile must be portable or legacy');
+  }
+  const approval = values.get('--approval') ?? 'auto';
+  if (!['auto', 'deny'].includes(approval)) {
+    throw new Error('--approval must be auto or deny');
+  }
   return {
     workspace: resolve(values.get('--workspace') ?? positional[0] ?? process.cwd()),
     model:
@@ -416,6 +453,9 @@ function parseArgs(args: string[]): TuiCliOptions {
       'https://api.deepseek.com/v1',
     importProject: imported as TuiCliOptions['importProject'],
     workspaceMode: workspaceMode as TuiCliOptions['workspaceMode'],
+    toolProfile: toolProfile as WorkspaceToolProfile,
+    approval: approval as TuiCliOptions['approval'],
+    actionScripts,
   };
 }
 
@@ -429,6 +469,9 @@ function usage(): void {
       '  --base-url <url>     OpenAI-compatible base URL',
       '  --import <mode>      auto | always | never',
       '  --workspace-mode     virtual | host (host uses fenced range-read FS)',
+      '  --tool-profile       portable | legacy (default: portable)',
+      '  --approval           auto | deny (default: auto)',
+      '  --action-script      id:script:title (repeatable)',
       '',
       'Environment: DEEPSEEK_API_KEY / TINYAI_API_KEY / OPENAI_API_KEY',
       '',

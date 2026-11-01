@@ -110,6 +110,19 @@
       "acceptance": "Architecture-impacting requirements enumerate providers, consumers, lifecycle, persistence, migration, observability and cleanup before coding, and cannot be verified without per-surface contract, integration and end-to-end evidence.",
       "legacyAliases": [],
       "architectureImpact": true
+    },
+    {
+      "id": "REQ-TUI-002",
+      "title": "TUI host capability profile integration",
+      "type": "feature",
+      "priority": "P0",
+      "status": "verified",
+      "targetVersion": "0.4.0",
+      "design": "docs/tui-capability-integration-design-v1.html#architecture-impact",
+      "testDesign": "docs/tui-capability-integration-testing-v1.html#architecture-completeness",
+      "acceptance": "TUI and Headless share one workspace capability composition; Portable is the default shell-free Coding profile, Legacy is explicit, application Actions are configurable, Prompt derives from the actual registry, and completion requires current action or legacy execution evidence.",
+      "legacyAliases": [],
+      "architectureImpact": true
     }
   ]
 }
