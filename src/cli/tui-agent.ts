@@ -11,6 +11,7 @@ import {
 } from '../adapters/npm-action-provider';
 import { RemoteToolchainProvider } from '../adapters/remote-toolchain-provider';
 import { RemoteActionProvider } from '../adapters/remote-action-provider';
+import { LspActionCodeIntelligence } from '../adapters/lsp-action-code-intelligence';
 import { createSubagentTools } from '../adapters/subagent-tools';
 import { createVirtualWorkspaceTools } from '../adapters/virtual-workspace-tools';
 import {
@@ -204,6 +205,11 @@ async function main(): Promise<void> {
     environmentFingerprint,
     workspaceGeneration: () => workspace.generation(),
   });
+  const codeIntelligence = actionReport.available.some(
+    (action) => action.descriptor.id === 'code.lsp.query'
+  )
+    ? new LspActionCodeIntelligence(actionRegistry)
+    : undefined;
   const capability = await createWorkspaceCapabilityComposition({
     workspace,
     profile: options.toolProfile,
@@ -214,6 +220,7 @@ async function main(): Promise<void> {
     hostBaseline,
     workspaceGeneration: () => workspace.generation(),
     testEvidence,
+    ...(codeIntelligence ? { codeIntelligence } : {}),
   });
   const actionTools = capability.actionTools;
   const applicationActions = capability.applicationActions;
@@ -380,7 +387,7 @@ async function main(): Promise<void> {
     environmentId: `tui-${options.workspaceMode}-${options.toolProfile}`,
     hostProfile:
       options.workspaceMode === 'host' ? 'local-coding' : 'portable',
-    agentVersion: '0.7.0',
+    agentVersion: '0.8.0',
     environment: {
       manifestVersion: 1,
       requiredActions: options.actionScripts.map((script) => ({

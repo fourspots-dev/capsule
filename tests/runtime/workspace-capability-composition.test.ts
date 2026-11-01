@@ -45,9 +45,12 @@ describe('workspace capability composition', () => {
     expect(names).not.toContain('exec');
     expect(names).not.toContain('job_start');
     expect(names).toContain('git_status');
+    expect(names).toContain('code_symbols');
+    expect(names).toContain('code_definition');
     expect(names).toContain('action_app_game_check');
     expect(result.prompt).toContain('Portable Git');
     expect(result.prompt).toContain('action_app_game_check');
+    expect(result.prompt).toContain('Code intelligence provider: text');
     expect(result.prompt).not.toContain('/Users/');
   });
 

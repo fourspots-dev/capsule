@@ -95,6 +95,25 @@
       "supersedes": [],
       "supersededBy": null,
       "file": "docs/decisions/DEC-005-workspace-v2-authorization.md"
+    },
+    {
+      "id": "DEC-006",
+      "title": "Authorize semantic code intelligence for 0.8.0",
+      "statement": "继续实现 LSP-backed code intelligence 与 portable text/symbol fallback。",
+      "normalizedDecision": "Implement REQ-LSP-001 through a language-neutral CodeIntelligencePort, an LSP Action adapter and portable fallback tools shared by TUI and Headless.",
+      "capturedAt": "2026-11-01",
+      "source": "request",
+      "scope": ["lsp", "code-intelligence", "tools"],
+      "status": "promoted",
+      "triage": {
+        "disposition": "requirement",
+        "adrs": [],
+        "requirements": ["REQ-LSP-001"],
+        "rationale": "The prior ADR triage classified LSP as a local feature inside the accepted layered architecture."
+      },
+      "supersedes": [],
+      "supersededBy": null,
+      "file": "docs/decisions/DEC-006-code-intelligence-authorization.md"
     }
   ]
 }

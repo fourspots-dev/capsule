@@ -7,7 +7,10 @@ import type { HostActionRegistry } from '../platform/host-action';
 import type { HostBaselineReport } from '../host';
 import type { TestEvidenceService } from '../evidence';
 import { ToolPackComposer } from '../platform/tool-pack';
+import type { CodeIntelligencePort } from '../platform/code-intelligence';
 import type { VirtualWorkspace } from '../virtual';
+import { TextCodeIntelligence } from '../intelligence/text-index';
+import { createCodeIntelligenceTools } from './code-intelligence-toolpack';
 
 export type WorkspaceToolProfile = 'portable' | 'legacy';
 
@@ -21,6 +24,7 @@ export interface WorkspaceCapabilityCompositionOptions {
   hostBaseline?: HostBaselineReport;
   workspaceGeneration?: () => number | Promise<number>;
   testEvidence?: TestEvidenceService;
+  codeIntelligence?: CodeIntelligencePort;
 }
 
 export interface WorkspaceCapabilityComposition {
@@ -29,6 +33,7 @@ export interface WorkspaceCapabilityComposition {
   baseTools: ToolDefinition[];
   actionTools: ToolDefinition[];
   applicationActions: ToolDefinition[];
+  codeIntelligenceTools: ToolDefinition[];
   capabilityGraph: CapabilityGraph;
   composition: ReturnType<ToolPackComposer['compose']>;
   prompt: string;
@@ -41,6 +46,12 @@ export async function createWorkspaceCapabilityComposition(
   const baseTools = createVirtualWorkspaceTools(options.workspace, {
     includeVirtualShell,
   });
+  const codeIntelligence =
+    options.codeIntelligence ?? new TextCodeIntelligence(options.workspace.fs);
+  const codeIntelligenceCapabilities =
+    await codeIntelligence.capabilities();
+  const codeIntelligenceTools =
+    createCodeIntelligenceTools(codeIntelligence);
   const actionTools =
     options.actionRegistry &&
     (await options.actionRegistry.list()).length > 0
@@ -80,6 +91,15 @@ export async function createWorkspaceCapabilityComposition(
         : [],
   });
   graph.register({
+    id: 'code-intelligence',
+    version: '1',
+    state:
+      codeIntelligenceCapabilities.provider === 'text'
+        ? 'degraded'
+        : 'available',
+    limitations: [...codeIntelligenceCapabilities.limitations],
+  });
+  graph.register({
     id: 'git',
     version: '1',
     state: options.hostBaseline?.tierState['portable-coding'] ?? 'available',
@@ -115,6 +135,12 @@ export async function createWorkspaceCapabilityComposition(
     requiredCapabilities: ['filesystem', 'git'],
     tools: baseTools,
   });
+  composer.register({
+    id: 'code-intelligence',
+    requiredCapabilities: ['filesystem'],
+    optionalCapabilities: ['code-intelligence'],
+    tools: codeIntelligenceTools,
+  });
   if (applicationActions.length > 0) {
     composer.register({
       id: 'application-actions',
@@ -132,12 +158,14 @@ export async function createWorkspaceCapabilityComposition(
         tool.name.startsWith('action_') || tool.name === 'list_host_actions'
     ),
     applicationActions,
+    codeIntelligenceTools,
     capabilityGraph: graph,
     composition,
     prompt: buildCapabilityPrompt({
       profile: options.profile,
       actions: applicationActions,
       legacyShell: includeVirtualShell,
+      codeIntelligence: codeIntelligenceCapabilities,
     }),
   };
 }
@@ -199,6 +227,9 @@ function buildCapabilityPrompt(input: {
   profile: WorkspaceToolProfile;
   actions: readonly ToolDefinition[];
   legacyShell: boolean;
+  codeIntelligence: Awaited<
+    ReturnType<CodeIntelligencePort['capabilities']>
+  >;
 }): string {
   const lines = [
     'You are tinyai, a coding agent operating in a portable workspace.',
@@ -226,6 +257,13 @@ function buildCapabilityPrompt(input: {
       'There is no generic exec, Python, Node, shell or Git binary runner. Use declared application actions for execution.'
     );
   }
+  lines.push(
+    `Code intelligence provider: ${input.codeIntelligence.provider}. ${
+      input.codeIntelligence.limitations.length
+        ? input.codeIntelligence.limitations.join('; ')
+        : 'Semantic capabilities are available.'
+    }`
+  );
   lines.push(
     'Inspect before editing. Keep changes focused and reversible.',
     'Do not claim a check passed unless a current host Action or legacy execution result was observed.',

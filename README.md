@@ -231,6 +231,12 @@ discovery is exposed through the read-only `discover_tests` tool.
 Use `Ctrl+Y` to inspect the read-only Action Manager, including available,
 degraded and unavailable Actions with version, effects, risk and limitations.
 
+Code intelligence is exposed through `code_capabilities`, `code_diagnostics`,
+`code_symbols`, `code_definition`, `code_references` and `code_actions`.
+Without an LSP provider, tinyai uses an explicitly degraded portable
+text/symbol index. Register an Action named `code.lsp.query` to supply semantic
+diagnostics, definitions, references and WorkspaceEdit proposals.
+
 Capsules are exported as compressed, chunked and content-addressed Capsule v2;
 v1 capsules remain importable:
 

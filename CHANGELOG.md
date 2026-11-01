@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.8.0
+
+### Features
+
+- `REQ-LSP-001`: add a language-neutral CodeIntelligencePort shared by TUI and
+  Headless.
+- Add portable text/symbol discovery, lexical definitions/references,
+  cancellation, source-size limits and explicit fallback limitations.
+- Add an LSP Action adapter for diagnostics, symbols, definitions, references
+  and WorkspaceEdit code-action proposals.
+- Expose `code_capabilities`, `code_diagnostics`, `code_symbols`,
+  `code_definition`, `code_references` and `code_actions` tools with matching
+  Prompt capability reporting.
+
+### Verification
+
+- `npm run check`: 419 tests passed, 3 skipped.
+- `npm run test:e2e`: 5 Chrome extension tests passed.
+- `npm run verify:tui`: real PTY coding loop and current TestEvidence passed.
+
 ## 0.7.0
 
 ### Features

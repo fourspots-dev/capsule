@@ -7,6 +7,7 @@ import { HostWorkspaceImportJournal } from '../adapters/host-workspace-import-jo
 import { HostSessionStore } from '../adapters/host-session-store';
 import { NpmScriptActionProvider, type NpmScriptActionDefinition } from '../adapters/npm-action-provider';
 import { RemoteActionProvider } from '../adapters/remote-action-provider';
+import { LspActionCodeIntelligence } from '../adapters/lsp-action-code-intelligence';
 import { OpenAIModelTransport } from '../adapters/openai-model';
 import { createSubagentTools } from '../adapters/subagent-tools';
 import { createVirtualWorkspaceTools } from '../adapters/virtual-workspace-tools';
@@ -138,6 +139,11 @@ async function main(): Promise<void> {
     environmentFingerprint,
     workspaceGeneration: () => workspace.generation(),
   });
+  const codeIntelligence = actionReport.available.some(
+    (action) => action.descriptor.id === 'code.lsp.query'
+  )
+    ? new LspActionCodeIntelligence(actionRegistry)
+    : undefined;
   const capability = await createWorkspaceCapabilityComposition({
     workspace,
     profile: 'portable',
@@ -148,6 +154,7 @@ async function main(): Promise<void> {
     hostBaseline,
     workspaceGeneration: () => workspace.generation(),
     testEvidence,
+    ...(codeIntelligence ? { codeIntelligence } : {}),
   });
   const actionTools = capability.actionTools;
   const applicationActions = capability.applicationActions;
@@ -159,7 +166,7 @@ async function main(): Promise<void> {
     artifacts,
     environmentId: `local-${process.platform}-${process.arch}`,
     hostProfile: 'local-coding',
-    agentVersion: '0.7.0',
+    agentVersion: '0.8.0',
     newId: () => `capsule_${randomUUID()}`,
     environment: {
       manifestVersion: 1,
