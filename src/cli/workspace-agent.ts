@@ -179,7 +179,7 @@ async function main(): Promise<void> {
     artifacts,
     environmentId: `local-${process.platform}-${process.arch}`,
     hostProfile: 'local-coding',
-    agentVersion: '0.9.0',
+    agentVersion: '0.9.1',
     newId: () => `capsule_${randomUUID()}`,
     environment: {
       manifestVersion: 1,

@@ -446,6 +446,28 @@
         "reviewedAt": "2026-11-01"
       },
       "architectureImpact": true
+    },
+    {
+      "id": "REQ-ENG-008",
+      "title": "Extension manifest version synchronization",
+      "type": "bugfix",
+      "priority": "P0",
+      "status": "verified",
+      "designStatus": "approved_unreviewed",
+      "approvalNote": "User explicitly requested the Chrome extension version display be fixed.",
+      "implementationAuthorized": true,
+      "targetVersion": "0.9.1",
+      "design": "docs/release/REQ-ENG-008-design.html#architecture-impact",
+      "testDesign": "docs/release/REQ-ENG-008-testing.html#architecture-completeness",
+      "acceptance": "Builds derive extension/manifest.json version from package.json, packaged and unpacked Chrome artifacts expose the same product version, and CI rejects version drift.",
+      "legacyAliases": [],
+      "adrReview": {
+        "status": "not_required",
+        "adrs": [],
+        "rationale": "The fix enforces the existing semantic-version source-of-truth rule without changing an architecture boundary.",
+        "reviewedAt": "2026-11-01"
+      },
+      "architectureImpact": true
     }
   ]
 }

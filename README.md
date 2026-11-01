@@ -31,6 +31,10 @@ npm install
 npm run build
 ```
 
+The build synchronizes `extension/manifest.json.version` from
+`package.json.version`, so Chrome's extension card and the unpacked runtime show
+the same release version. `npm run extension:check` rejects drift.
+
 Then:
 
 1. Open `chrome://extensions`.

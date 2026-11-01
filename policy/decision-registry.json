@@ -133,6 +133,25 @@
       "supersedes": [],
       "supersededBy": null,
       "file": "docs/decisions/DEC-007-subagent-isolation-authorization.md"
+    },
+    {
+      "id": "DEC-008",
+      "title": "Synchronize extension manifest with the product version",
+      "statement": "Chrome 扩展重载后应显示与 package.json 一致的产品版本，不能继续显示 0.1.0。",
+      "normalizedDecision": "Generate extension manifest version from package.json during builds and fail CI when the checked-in manifest drifts.",
+      "capturedAt": "2026-11-01",
+      "source": "request",
+      "scope": ["extension", "release", "versioning", "build"],
+      "status": "promoted",
+      "triage": {
+        "disposition": "requirement",
+        "adrs": [],
+        "requirements": ["REQ-ENG-008"],
+        "rationale": "This enforces the existing single-product-version rule at the browser packaging boundary."
+      },
+      "supersedes": [],
+      "supersededBy": null,
+      "file": "docs/decisions/DEC-008-extension-version-sync.md"
     }
   ]
 }

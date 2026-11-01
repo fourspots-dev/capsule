@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.9.1
+
+### Fixes
+
+- `REQ-ENG-008`: synchronize Chrome's extension manifest version from the
+  single `package.json` product version during builds.
+- Add `npm run extension:check` to reject unpacked or packaged manifest version
+  drift before tests and build.
+
+### Verification
+
+- `tests/unit/extension-version.test.ts`
+- `npm run extension:check`
+- `npm run check`: 425 tests passed, 3 skipped.
+- Chrome extension E2E and packaged ZIP manifest inspection
+
 ## 0.9.0
 
 ### Features

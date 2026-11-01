@@ -1,0 +1,13 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>REQ-ENG-008 Extension Version Sync</title><style>body{margin:0;background:#f4f5f7;color:#191a1e;font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:980px;margin:auto;padding:32px 20px 80px}header,section{background:#fff;border:1px solid #e2e3e8;border-radius:18px;padding:24px;margin:16px 0}header{background:linear-gradient(135deg,#11131a,#292b55,#5145d8);color:#fff}h1{margin:0 0 10px}h2{font-size:21px}code{font-family:ui-monospace,Menlo,monospace;background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{overflow:auto;background:#171821;color:#edecff;padding:15px;border-radius:10px}.rule{padding:12px;border-left:3px solid #5145d8;background:#f5f3ff}</style></head><body><div class="wrap"><header><h1>Chrome 扩展版本同步</h1><p>REQ-ENG-008 · target 0.9.1 · 修复 unpacked extension 仍显示 0.1.0 的发布一致性问题。</p></header>
+<section><h2>1. Scope</h2><p><code>package.json.version</code> 继续作为唯一产品版本源。构建时同步 <code>extension/manifest.json.version</code>，打包 ZIP 使用同步后的 manifest。CI 校验两者一致。</p></section>
+<section id="architecture-impact"><h2>2. Architecture Impact</h2><table><tr><th>Surface</th><th>Change</th></tr><tr><td>Release scripts</td><td>新增 manifest sync 与 check 脚本</td></tr><tr><td>Extension package</td><td>显示产品版本；manifest 内容不变</td></tr><tr><td>Runtime/Core</td><td>无变化</td></tr><tr><td>Existing extension storage</td><td>无迁移</td></tr></table><div class="rule">Chrome reload 读取同一 extension 目录时，扩展卡片版本、Side Panel 代码与 package 版本保持一致。</div></section>
+<section><h2>3. Build Flow</h2><pre>package.json.version
+  → sync-extension-manifest-version.mjs
+  → extension/manifest.json
+  → extension reload / tinyai-extension.zip
+
+CI:
+check-extension-version.mjs
+  → package.version === manifest.version</pre></section>
+<section><h2>4. Failure Behavior</h2><p>缺少 manifest、版本不是三段式、JSON 损坏或版本漂移均使构建/检查失败，不生成一个版本身份错误的扩展包。</p></section>
+<section><h2>5. Acceptance</h2><ul><li>立即刷新后 <code>extension/manifest.json.version</code> 为 0.9.1。</li><li><code>npm run build</code> 自动同步。</li><li><code>npm run extension:check</code> 捕获漂移。</li><li>ZIP 内 manifest 版本一致。</li><li>Chrome E2E 继续通过。</li></ul></section></div></body></html>

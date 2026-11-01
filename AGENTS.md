@@ -276,6 +276,8 @@ Details:
 
 - `package.json.version` is the only product version source.
 - Update `package-lock.json` with `package.json`.
+- Generate `extension/manifest.json.version` from `package.json`; never maintain
+  a second release version by hand. Run `npm run extension:check`.
 - One release increments exactly one segment.
 - Do not bump repeatedly on every implementation commit for the same release.
 - Documentation-only changes that do not alter a contract usually do not change

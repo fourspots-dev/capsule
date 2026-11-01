@@ -1,0 +1,9 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>REQ-ENG-008 Testing</title><style>body{margin:0;background:#f4f5f7;color:#191a1e;font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:980px;margin:auto;padding:32px 20px 80px}header,section{background:#fff;border:1px solid #e2e3e8;border-radius:18px;padding:24px;margin:16px 0}header{background:linear-gradient(135deg,#10231b,#1b5c43);color:#fff}table{width:100%;border-collapse:collapse}th,td{padding:9px;border-bottom:1px solid #e2e3e8;text-align:left}code{font-family:ui-monospace,Menlo,monospace;background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{background:#171821;color:#edecff;padding:15px;border-radius:10px}</style></head><body><div class="wrap"><header><h1>Extension Version Sync Test Design</h1><p>REQ-ENG-008 · target 0.9.1</p></header>
+<section><h2>1. Trace Matrix</h2><table><tr><th>Case</th><th>Expected</th></tr><tr><td>EXTVER-001</td><td>当前 package 与 manifest 版本相等</td></tr><tr><td>EXTVER-002</td><td>临时 registry 版本漂移被 checker 拒绝</td></tr><tr><td>EXTVER-003</td><td>build 自动把 manifest 同步到 package 版本</td></tr><tr><td>EXTVER-004</td><td>ZIP 中的 manifest 版本一致</td></tr><tr><td>EXTVER-005</td><td>Chrome E2E 仍能加载扩展</td></tr></table></section>
+<section id="architecture-completeness"><h2>2. Architecture Completeness</h2><ul><li>Source of truth: package.json。</li><li>Consumer: unpacked extension、packaged ZIP、Chrome extension card。</li><li>Persistence: 无 Schema 变化。</li><li>Cleanup: 删除手工维护的 manifest 版本作为发布事实。</li><li>Evidence: unit checker、build artifact inspection、Chrome E2E。</li></ul></section>
+<section><h2>3. Commands</h2><pre>npx vitest run tests/unit/extension-version.test.ts
+npm run extension:check
+npm run check
+npm run test:e2e
+unzip -p dist/tinyai-extension.zip extension/manifest.json</pre></section>
+</div></body></html>
