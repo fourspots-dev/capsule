@@ -13,7 +13,7 @@
 <header class="hero"><small>CAPABILITY COMPLETION PROGRAM / DESIGN V2</small><h1>受限 Coding Agent<br>能力补全 Program</h1><p>把 Host Baseline、TestEvidence、Capsule v2、Code Intelligence、Subagent 隔离、Chrome 对齐、跨平台 Adapter 和生产评测拆分成分阶段、可独立验收的修改需求。Action 只承担应用叶子能力，不替代 Host 底座。</p><div class="chips"><span class="chip">0.5 → 1.0</span><span class="chip">8 new requirements</span><span class="chip">Baseline before Actions</span><span class="chip">Architecture Impact</span></div></header>
 <nav><a href="#principles">原则</a><a href="#requirements">需求总表</a><a href="#architecture-impact">影响面</a><a href="#req-host-002">Host基线</a><a href="#req-test-001">TestEvidence</a><a href="#req-workspace-002">Capsule v2</a><a href="#req-lsp-001">LSP</a><a href="#req-subagent-001">子Agent</a><a href="#req-chrome-001">Chrome</a><a href="#req-platform-001">跨平台</a><a href="#req-eval-001">评测</a><a href="#sequence">顺序</a><a href="#acceptance">验收</a></nav>
 
-<section id="principles"><h2>1. 总原则</h2><div class="grid3">
+<section id="principles"><h2>1. 总原则</h2><div class="rule">本 Program 是路线与依赖索引；实现级模块、接口、状态机和测试文件映射见 <a href="capability-completion-detailed-design-v3.html"> capability completion detailed design V3</a> 和 <a href="capability-completion-detailed-testing-v3.html"> detailed test design V3</a>。当前所有后续需求仍处于 Review，未授权实现。</div><div class="grid3">
 <div class="card"><h3>底座不是 Action</h3><p>Storage、FileSystem、Clock、Scheduler、Crypto、Session、Artifact、Network policy 和 Secret broker 属于 Host/Portable 基础，不允许通过 Action 提供。</p></div>
 <div class="card"><h3>Action 是叶子能力</h3><p>Python test、Xcode build、Playwright、数据库迁移、部署等应用特有操作才通过 Action 接入。</p></div>
 <div class="card"><h3>需求独立验收</h3><p>Host Baseline、TestEvidence、Capsule v2、LSP、子 Agent、Chrome 和评测分别建设计与测试，不合并成巨型需求。</p></div>

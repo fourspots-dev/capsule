@@ -22,6 +22,7 @@ describe('engineering requirement policy', () => {
         'REQ-ENG-001',
         'REQ-ENG-002',
         'REQ-ENG-003',
+        'REQ-ENG-004',
       ])
     );
   });
@@ -52,6 +53,8 @@ describe('engineering requirement policy', () => {
               type: 'infrastructure',
               priority: 'P0',
               status: 'verified',
+              designStatus: 'review',
+              implementationAuthorized: false,
               targetVersion: '0.3.1',
               design: 'docs/design.html#requirements',
               testDesign: 'docs/testing.html#trace',
@@ -67,6 +70,56 @@ describe('engineering requirement policy', () => {
         expect.arrayContaining([
           expect.stringContaining('architecture-impact design anchor'),
           expect.stringContaining('architecture-completeness test anchor'),
+        ])
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks implementation until design approval and explicit authorization', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tinyai-gate-'));
+    try {
+      await mkdir(join(root, 'policy'), { recursive: true });
+      await mkdir(join(root, 'docs'), { recursive: true });
+      await writeFile(join(root, 'package.json'), '{"version":"0.4.2"}');
+      await writeFile(
+        join(root, 'docs/design.html'),
+        '<section id="architecture-impact"></section>'
+      );
+      await writeFile(
+        join(root, 'docs/testing.html'),
+        '<section id="architecture-completeness"></section>'
+      );
+      await writeFile(
+        join(root, 'policy/requirement-registry.json'),
+        JSON.stringify({
+          schemaVersion: 1,
+          baselineCommit: 'abcdef1',
+          requirements: [
+            {
+              id: 'REQ-ENG-998',
+              title: 'Implementation gate test',
+              type: 'infrastructure',
+              priority: 'P0',
+              status: 'in_progress',
+              designStatus: 'review',
+              implementationAuthorized: false,
+              targetVersion: '0.4.2',
+              design: 'docs/design.html#architecture-impact',
+              testDesign: 'docs/testing.html#architecture-completeness',
+              acceptance: 'Implementation must wait for user approval.',
+              legacyAliases: [],
+              architectureImpact: true,
+            },
+          ],
+        })
+      );
+      const result = checkRequirementTraceability(root);
+      expect(result.errors).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('designStatus must be approved'),
+          expect.stringContaining('implementationAuthorized must be true'),
         ])
       );
     } finally {

@@ -30,7 +30,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <p>把“需求、设计、测试、实现、提交、发布”变成可执行、可自动检查的完整链路。版本使用三段式；每个新需求有唯一编号；每个功能提交关联需求、目标版本、设计文档、测试文档和验证证据。</p>
 <div class="chips"><span class="chip">SemVer A.B.C</span><span class="chip">REQ-ID</span><span class="chip">Design + Test Trace</span><span class="chip">Commit Hook</span><span class="chip">Release Tag</span><span class="chip">Auditable</span></div>
 </header>
-<nav><a href="#version">版本</a><a href="#requirements">需求编号</a><a href="#documents">设计/测试</a><a href="#architecture-impact">架构影响面</a><a href="#architecture-completeness">架构完整性</a><a href="#commits">提交协议</a><a href="#workflow">工作流</a><a href="#release">发布</a><a href="#automation">自动检查</a><a href="#baseline">当前基线</a><a href="#verification">验收</a></nav>
+<nav><a href="#version">版本</a><a href="#requirements">需求编号</a><a href="#documents">设计/测试</a><a href="#implementation-gate">实现门禁</a><a href="#architecture-impact">架构影响面</a><a href="#architecture-completeness">架构完整性</a><a href="#commits">提交协议</a><a href="#workflow">工作流</a><a href="#release">发布</a><a href="#automation">自动检查</a><a href="#baseline">当前基线</a><a href="#verification">验收</a></nav>
 
 <section id="version">
 <h2>1. 版本规则</h2>
@@ -97,6 +97,22 @@ docs/&lt;area&gt;/vX.Y-testing.html#&lt;requirement-anchor&gt;
 <p>注册表保存的是稳定锚点，不保存“看某文档大概某处”。无设计或测试链接的需求不得进入 <code>in_progress</code>。</p>
 </section>
 
+<section id="implementation-gate">
+<h2>3.1 用户确认与实现门禁</h2>
+<p><code>accepted</code> 只表示需求范围和目标被接受，不代表用户已经授权修改产品代码。每个需求必须记录详细设计状态和实现授权。</p>
+<table><thead><tr><th>字段</th><th>含义</th></tr></thead><tbody>
+<tr><td><code>designStatus: draft</code></td><td>设计仍在编写，不可评审或实现</td></tr>
+<tr><td><code>designStatus: review</code></td><td>详细设计和测试设计已提交，等待用户确认</td></tr>
+<tr><td><code>designStatus: approved</code></td><td>用户确认详细设计，但仍不一定授权写代码</td></tr>
+<tr><td><code>implementationAuthorized: true</code></td><td>用户明确要求开始实现</td></tr>
+</tbody></table>
+<div class="warn rule">Agent 不得自行把 <code>designStatus</code> 改为 <code>approved</code>，也不得自行设置 <code>implementationAuthorized: true</code>。“可以先做”“推进设计”不得解释为开始编码。</div>
+<h3>详细设计最低内容</h3>
+<ul><li>模块新增、修改和明确不得感知的边界。</li><li>公共接口、Schema、错误码和不变量。</li><li>对象归属、生命周期和状态机。</li><li>端到端交互、取消、恢复和迁移路径。</li><li>安全、审批、持久化和兼容策略。</li><li>可拆分的实现切片和验收条件。</li></ul>
+<h3>详细测试设计最低内容</h3>
+<ul><li>每个 FR 到测试 ID 的映射。</li><li>具体 fixture、计划测试文件和命令。</li><li>正常、边界、故障、安全和恢复用例。</li><li>跨模块、跨执行面和架构边界测试。</li><li>证据 Artifact、发布阻断和阶段门禁。</li></ul>
+</section>
+
 <section id="architecture-impact">
 <h2>4. 架构变更影响面</h2>
 <p>共享能力、协议、持久化模型、工具、客户端接口或跨宿主契约变更时，不能把“某个模块已实现”当作需求完成。设计文档必须提供影响面矩阵，逐项覆盖 Provider、Consumer、生命周期、持久化与迁移、UI/Prompt/ToolRegistry、降级与清理。</p>
@@ -155,18 +171,19 @@ git log --format='%h %(trailers:key=Version,valueonly) %s'</pre>
 <h2>7. 需求交付工作流</h2>
 <div class="flow">
 <div class="step"><b>1. Intake</b>建立 REQ，写验收和非目标</div>
-<div class="step"><b>2. Design</b>完成设计文档与对象接口</div>
-<div class="step"><b>3. Test</b>完成测试设计和追踪矩阵</div>
-<div class="step"><b>4. Build</b>实现，测试先行或同步</div>
-<div class="step"><b>5. Verify</b>自动检查、真实 E2E、证据</div>
-<div class="step"><b>6. Release</b>版本、tag、变更记录</div>
+<div class="step"><b>2. Design</b>详细设计与对象接口</div>
+<div class="step"><b>3. Test</b>详细测试设计与追踪矩阵</div>
+<div class="step"><b>4. Confirm</b>用户确认设计并授权实现</div>
+<div class="step"><b>5. Build</b>实现，测试先行或同步</div>
+<div class="step"><b>6. Verify</b>自动检查、真实 E2E、证据</div>
+<div class="step"><b>7. Release</b>版本、tag、变更记录</div>
 </div>
-<ol><li>需求登记后状态为 <code>accepted</code>，分配目标版本。</li><li>设计与测试都达到可评审状态后进入 <code>in_progress</code>。</li><li>实现提交必须携带需求与文档链接。</li><li>测试通过且验收项有证据后进入 <code>verified</code>。</li><li>发布时更新版本、CHANGELOG、annotated tag 和注册表状态。</li></ol>
+<ol><li>需求登记后状态为 <code>accepted</code>，分配目标版本，详细设计状态从 <code>draft</code> 开始。</li><li>详细设计和详细测试提交后设为 <code>designStatus: review</code>。</li><li>用户确认后设为 <code>approved</code>，并显式设置 <code>implementationAuthorized: true</code>。</li><li>满足门禁后才能进入 <code>in_progress</code> 并开始代码实现。</li><li>实现提交必须携带需求与文档链接。</li><li>测试通过且验收项有证据后进入 <code>verified</code>。</li><li>发布时更新版本、CHANGELOG、annotated tag 和注册表状态。</li></ol>
 <h3>状态约束</h3>
 <table><thead><tr><th>状态</th><th>必要条件</th></tr></thead><tbody>
 <tr><td>proposed</td><td>标题、目标、验收草案</td></tr>
-<tr><td>accepted</td><td>优先级、目标版本、design/test 路径</td></tr>
-<tr><td>in_progress</td><td>设计/测试文档实际存在，开始代码</td></tr>
+<tr><td>accepted</td><td>优先级、目标版本、详细 design/test 路径，<code>designStatus: draft/review</code></td></tr>
+<tr><td>in_progress</td><td>用户确认，<code>designStatus: approved</code>，<code>implementationAuthorized: true</code></td></tr>
 <tr><td>implemented</td><td>代码完成，至少相关测试通过</td></tr>
 <tr><td>verified</td><td>完整测试、E2E、性能和兼容门禁通过</td></tr>
 <tr><td>released</td><td>版本 tag 和 release record 存在</td></tr>
@@ -231,7 +248,7 @@ scripts/
 
 <section id="verification">
 <h2>11. 本规范验收</h2>
-<ul><li>注册表中每个 REQ 都有唯一 ID、目标版本、Design 和 Tests 路径。</li><li>需求/设计/测试模板可以直接复制使用。</li><li>标记 <code>architectureImpact: true</code> 的需求必须包含架构影响面和完整性证据锚点。</li><li>commit hook 拒绝缺少 REQ、Version、Design、Tests 或 Test-Evidence 的提交。</li><li>hook 拒绝不存在的 REQ、文档路径和版本不一致。</li><li><code>npm run requirements:check</code> 在正常检查链中执行。</li><li>从一个需求请求到发布 tag 的完整流程可以按本文执行并复核。</li></ul>
+<ul><li>注册表中每个 REQ 都有唯一 ID、目标版本、Design、Tests、Design Status 和 Implementation Authorization。</li><li>需求/设计/测试模板可以直接复制使用。</li><li>标记 <code>architectureImpact: true</code> 的需求必须包含架构影响面和完整性证据锚点。</li><li>未获用户确认和实现授权的 REQ 不能标记 <code>in_progress</code>。</li><li>commit hook 拒绝缺少 REQ、Version、Design、Tests 或 Test-Evidence 的提交。</li><li>hook 拒绝不存在的 REQ、文档路径和版本不一致。</li><li><code>npm run requirements:check</code> 在正常检查链中执行。</li><li>从一个需求请求到发布 tag 的完整流程可以按本文执行并复核。</li></ul>
 <p>机器可读注册表：<code>policy/requirement-registry.json</code>。需求状态以注册表为准，设计事实以设计文档为准，验收事实以测试文档和 CI 证据为准。</p>
 <p class="foot">规范版本：1.0 · 产品目标版本：0.2.0 · 生效基线：e48b5b1 之后</p>
 </section>

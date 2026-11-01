@@ -32,6 +32,7 @@ export function checkRequirementTraceability(root = resolve(dirname(scriptPath),
     'verified',
     'released',
   ]);
+  const designStatuses = new Set(['draft', 'review', 'approved']);
 
   if (registry.schemaVersion !== 1) errors.push('schemaVersion must be 1');
   if (!/^[a-f0-9]{7,40}$/.test(String(registry.baselineCommit))) {
@@ -59,6 +60,12 @@ export function checkRequirementTraceability(root = resolve(dirname(scriptPath),
     }
     if (!statuses.has(requirement?.status)) {
       errors.push(`${label}: invalid status ${requirement?.status}`);
+    }
+    if (!designStatuses.has(requirement?.designStatus)) {
+      errors.push(`${label}: invalid designStatus ${requirement?.designStatus}`);
+    }
+    if (typeof requirement?.implementationAuthorized !== 'boolean') {
+      errors.push(`${label}: implementationAuthorized must be a boolean`);
     }
     if (!isSemver(requirement?.targetVersion)) {
       errors.push(`${label}: invalid targetVersion ${requirement?.targetVersion}`);
@@ -105,6 +112,22 @@ export function checkRequirementTraceability(root = resolve(dirname(scriptPath),
         root,
         errors
       );
+    }
+    if (
+      ['in_progress', 'implemented', 'verified', 'released'].includes(
+        requirement.status
+      )
+    ) {
+      if (requirement.designStatus !== 'approved') {
+        errors.push(
+          `${label}: designStatus must be approved before ${requirement.status}`
+        );
+      }
+      if (requirement.implementationAuthorized !== true) {
+        errors.push(
+          `${label}: implementationAuthorized must be true before ${requirement.status}`
+        );
+      }
     }
   }
 

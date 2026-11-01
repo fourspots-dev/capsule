@@ -14,7 +14,7 @@ nav{position:sticky;top:0;z-index:5;display:flex;gap:14px;overflow:auto;margin:1
 <header class="hero"><small>REQ-ACTION-001 / APPLICATION ACTION RUNTIME / DESIGN V1</small><h1>应用 Action 执行平台<br>与能力补全路线</h1><p>把“真实执行”统一成可信 Provider 注册的具名 Action：可发现、可探测、可审批、可取消、可远程执行，并返回 TestReport、Artifact 和当前宿主 Evidence。不提供模型可直接调用的通用 shell。</p><div class="chips"><span class="chip">Target 0.5.0</span><span class="chip">Provider SDK</span><span class="chip">Trusted Loader</span><span class="chip">Interactive Approval</span><span class="chip">TestEvidence</span><span class="chip">Remote/Native</span></div></header>
 <nav><a href="#status">现状</a><a href="#goals">目标</a><a href="#requirements">需求</a><a href="#architecture-impact">影响面</a><a href="#architecture">架构</a><a href="#objects">对象</a><a href="#trust">可信注册</a><a href="#execution">执行</a><a href="#approval">审批</a><a href="#evidence">证据</a><a href="#surfaces">端接入</a><a href="#failure">失败恢复</a><a href="#roadmap">补全路线</a><a href="#acceptance">验收</a></nav>
 
-<section id="status"><h2>1. 当前能力基线与缺口</h2><table><thead><tr><th>能力</th><th>当前状态</th><th>缺口</th></tr></thead><tbody>
+<section id="status"><h2>1. 当前能力基线与缺口</h2><div class="rule">本文是 Action Runtime 架构说明；实现级模块、接口与测试文件映射以 <a href="capability-completion-detailed-design-v3.html#req-action-001">Detailed Design V3</a> 为准。当前状态为 Review，尚未获得实现授权。</div><table><thead><tr><th>能力</th><th>当前状态</th><th>缺口</th></tr></thead><tbody>
 <tr><td>具名 Action</td><td>已有 Descriptor、Registry、TUI/Headless ToolPack</td><td>Provider 主要来自 npm-script 与内嵌代码，缺少通用可信加载和动态更新</td></tr>
 <tr><td>真实本机执行</td><td><code>NpmScriptActionProvider</code> 可真实执行 npm script</td><td>Python/Xcode/Playwright/Remote 等需要各自实现 Provider</td></tr>
 <tr><td>审批</td><td>TUI 可显式 auto/deny</td><td>缺少 ask 交互、审批范围、审批过期和 UI</td></tr>

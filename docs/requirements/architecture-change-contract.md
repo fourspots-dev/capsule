@@ -2,6 +2,9 @@
 
 Use this checklist for any requirement with `architectureImpact: true`.
 
+Detailed design approval and explicit user authorization are mandatory before
+product code changes. `accepted` alone is not an implementation gate.
+
 ## 1. Map Before Code
 
 List every provider and consumer:

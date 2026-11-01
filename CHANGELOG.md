@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.2
+
+### Infrastructure
+
+- `REQ-ENG-004`: require detailed design and detailed test design, explicit user
+  design approval and implementation authorization before any requirement can
+  enter implementation.
+- `REQ-HOST-002`, `REQ-ACTION-001`, `REQ-TEST-001`, `REQ-WORKSPACE-002`,
+  `REQ-LSP-001`, `REQ-SUBAGENT-001`, `REQ-CHROME-001`,
+  `REQ-PLATFORM-001`, `REQ-EVAL-001`: add implementation-level design and test
+  mappings; all remain in review without implementation authorization.
+
 ## Unreleased
 
 ### Planned

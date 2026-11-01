@@ -22,19 +22,27 @@ change follows this order:
 
 1. Identify or create a requirement id.
 2. Add or update its entry in `policy/requirement-registry.json`.
-3. Ensure a design document and test-design document exist and are linked with
-   precise anchors. For architecture-impacting changes, complete the
-   architecture impact map before implementation.
-4. Implement code and tests across every affected surface listed by the impact
-   map.
-5. Update the requirement status and `CHANGELOG.md` when appropriate.
-6. Run `npm run check` and relevant live/E2E tests.
-7. Commit using the required requirement-linked message.
-8. Create or move a release tag only through the release process.
+3. Ensure a detailed design document and detailed test-design document exist
+   and are linked with precise anchors. For architecture-impacting changes,
+   complete the architecture impact map before implementation.
+4. Set `designStatus: "review"` and request explicit user confirmation.
+5. After confirmation, set `designStatus: "approved"` and
+   `implementationAuthorized: true`. Agents must not self-authorize.
+6. Move the requirement to `in_progress` and implement code and tests across
+   every affected surface listed by the impact map.
+7. Update the requirement status and `CHANGELOG.md` when appropriate.
+8. Run `npm run check` and relevant live/E2E tests.
+9. Commit using the required requirement-linked message.
+10. Create or move a release tag only through the release process.
 
 Never begin a new product behavior with code while leaving it unregistered.
 Documentation-only typo fixes may reference an existing engineering
 requirement, but changes to contracts require updated design and test documents.
+
+An `accepted` requirement is a reviewed problem statement, not implementation
+permission. Do not change product code until the user has confirmed the detailed
+design and the registry records both `designStatus: "approved"` and
+`implementationAuthorized: true`.
 
 ## Requirement IDs
 
@@ -69,11 +77,14 @@ Allowed requirement fields:
 - `type`: `feature | bugfix | security | refactor | infrastructure | documentation`
 - `priority`: `P0 | P1 | P2 | P3`
 - `status`: `proposed | accepted | in_progress | implemented | verified | released`
+- `designStatus`: `draft | review | approved`
+- `implementationAuthorized`: boolean
 - `architectureImpact`: optional boolean; `true` requires the architecture
   impact and completeness anchors.
 
 A requirement cannot enter `in_progress` until its design and test-design links
-exist. It cannot enter `verified` without observed test evidence.
+exist, `designStatus` is `approved`, and `implementationAuthorized` is `true`.
+It cannot enter `verified` without observed test evidence.
 
 ## Design and Test Documents
 
@@ -94,6 +105,24 @@ docs/<area>/<REQ-ID>-testing.html
 Related requirements may share a document only when the registry links exact
 section anchors. A link to a whole document is not sufficient when a stable
 section anchor exists.
+
+Detailed design is not a feature summary. It must include:
+
+- exact modules to add/change and modules that must remain unaware;
+- public interfaces, schemas, error codes and invariants;
+- object ownership and lifecycle/state machines;
+- end-to-end call sequences and cancellation/recovery paths;
+- persistence, migration and compatibility behavior;
+- security and approval boundaries;
+- rollout slices and acceptance criteria.
+
+Detailed test design must include:
+
+- traceability from every functional requirement to executable cases;
+- concrete fixture strategy and planned test file targets;
+- positive, negative, boundary, security and recovery cases;
+- cross-module and cross-surface architecture tests;
+- commands, evidence artifacts and release blockers.
 
 Tests should include the requirement id in the `describe` or case name whenever
 practical. Test evidence must be an observed command or artifact, not a claim.

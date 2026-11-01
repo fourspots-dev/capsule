@@ -3,6 +3,8 @@
 - Type: feature | bugfix | security | refactor | infrastructure | documentation
 - Priority: P0 | P1 | P2 | P3
 - Status: proposed
+- Design status: draft | review | approved
+- Implementation authorized: false
 - Target version: A.B.C
 - Architecture impact: yes | no
 - Design: docs/<path>#<anchor>
