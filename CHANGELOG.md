@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.3
+
+### Infrastructure
+
+- `REQ-ENG-005`: establish Architecture Decision Record governance with
+  immutable IDs, user-approved lifecycle states, bilateral supersede links,
+  requirement traceability, registered-document validation and CI enforcement.
+- Seed the registry with 12 accepted, rejected or superseded decisions covering
+  the four-layer architecture, portable runtime and Git, trusted leaf Actions,
+  Workspace Capsules, evidence-bound completion, shared capability composition,
+  generic subagent profiles and the design-to-implementation gate.
+
+### Verification
+
+- `npm run adr:check`
+- `npm run requirements:check`
+- `npm test -- tests/unit/adr-policy.test.ts tests/unit/requirement-policy.test.ts`
+
 ## 0.4.2
 
 ### Infrastructure

@@ -9,8 +9,9 @@ documentation.
 1. Product version: `package.json.version`.
 2. Requirement state and links: `policy/requirement-registry.json`.
 3. Engineering process: `docs/engineering-versioning-and-traceability.html`.
-4. Requirement templates: `docs/requirements/`.
-5. Commit format: `.gitmessage`.
+4. Architecture decisions: `policy/adr-registry.json` and `docs/adr/`.
+5. Requirement templates: `docs/requirements/`.
+6. Commit format: `.gitmessage`.
 
 The requirement registry uses schema version 1. Historical commits before
 `e48b5b1` are legacy and must not be rewritten.
@@ -43,6 +44,44 @@ An `accepted` requirement is a reviewed problem statement, not implementation
 permission. Do not change product code until the user has confirmed the detailed
 design and the registry records both `designStatus: "approved"` and
 `implementationAuthorized: true`.
+
+## Architecture Decision Records
+
+Use an ADR for durable architecture decisions, rejected alternatives, and
+superseded baselines. A requirement describes work to deliver; an ADR preserves
+why a cross-cutting rule exists.
+
+Create an ADR when a change:
+
+- introduces or changes a module boundary or dependency direction;
+- standardizes a public protocol, persistence format, trust model or client
+  contract;
+- chooses between long-lived architectural alternatives;
+- affects multiple requirements or execution surfaces;
+- supersedes an earlier accepted decision.
+
+Every ADR uses an immutable `ADR-NNN` identifier and lives in
+`docs/adr/ADR-NNN-<slug>.md`. Register it in `policy/adr-registry.json`.
+
+Allowed ADR statuses:
+
+```text
+proposed | accepted | rejected | superseded | deprecated
+```
+
+Rules:
+
+- User confirmation is required before changing `proposed` to `accepted`.
+- Accepted ADRs are never deleted or silently rewritten.
+- A changed decision requires a new ADR with `Supersedes`.
+- A superseded ADR records the replacement in `Superseded by`.
+- ADR acceptance does not grant implementation authorization.
+- Requirement designs must cite relevant accepted ADRs.
+- Rejected alternatives may be recorded as rejected ADRs but cannot be used as
+  current implementation constraints.
+- Run `npm run adr:check`; it is included in `npm run check`.
+
+Use `docs/adr/template.md` and `docs/adr/README.md`.
 
 ## Requirement IDs
 

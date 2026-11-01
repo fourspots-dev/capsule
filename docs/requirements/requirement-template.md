@@ -7,6 +7,7 @@
 - Implementation authorized: false
 - Target version: A.B.C
 - Architecture impact: yes | no
+- Architecture decisions: ADR-NNN, ADR-NNN | none
 - Design: docs/<path>#<anchor>
 - Test design: docs/<path>#<anchor>
 - Legacy aliases:

@@ -23,6 +23,7 @@ describe('engineering requirement policy', () => {
         'REQ-ENG-002',
         'REQ-ENG-003',
         'REQ-ENG-004',
+        'REQ-ENG-005',
       ])
     );
   });

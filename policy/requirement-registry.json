@@ -308,6 +308,21 @@
       "acceptance": "A requirement cannot enter implementation until it has detailed design and detailed test design, designStatus approved, and explicit user implementation authorization recorded in the registry.",
       "legacyAliases": [],
       "architectureImpact": true
+    },
+    {
+      "id": "REQ-ENG-005",
+      "title": "Architecture Decision Record governance",
+      "type": "infrastructure",
+      "priority": "P0",
+      "status": "verified",
+      "designStatus": "approved",
+      "implementationAuthorized": true,
+      "targetVersion": "0.4.3",
+      "design": "docs/engineering-versioning-and-traceability.html#adr-governance",
+      "testDesign": "docs/engineering-versioning-and-traceability.html#adr-test-design",
+      "acceptance": "Durable architecture decisions use immutable ADR ids, a registered document set, user approval, bilateral supersede links, requirement traceability, and automated CI validation.",
+      "legacyAliases": [],
+      "architectureImpact": true
     }
   ]
 }

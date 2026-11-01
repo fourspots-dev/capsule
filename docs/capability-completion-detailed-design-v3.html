@@ -11,9 +11,26 @@
 </head>
 <body><div class="wrap">
 <header class="hero"><small>DETAILED DESIGN V3 / IMPLEMENTATION-READY SPECIFICATION</small><h1>Capability Completion<br>详细设计</h1><p>将 REQ-HOST-002、REQ-ACTION-001、REQ-TEST-001、REQ-WORKSPACE-002、REQ-LSP-001、REQ-SUBAGENT-001、REQ-CHROME-001、REQ-PLATFORM-001 和 REQ-EVAL-001 展开到模块、接口、状态机、交互、错误、持久化和分阶段验收。</p><div class="chips"><span class="chip">Status: Review</span><span class="chip">No implementation authorized</span><span class="chip">Architecture Impact</span><span class="chip">Implementation-level</span></div></header>
-<nav><a href="#principles">边界原则</a><a href="#architecture-impact">影响面</a><a href="#req-host-002">Host基线</a><a href="#req-action-001">Action</a><a href="#req-test-001">Evidence</a><a href="#req-workspace-002">Capsule v2</a><a href="#req-lsp-001">LSP</a><a href="#req-subagent-001">子Agent</a><a href="#req-chrome-001">Chrome</a><a href="#req-platform-001">平台</a><a href="#req-eval-001">评测</a><a href="#review">确认门禁</a></nav>
+<nav><a href="#principles">四层架构</a><a href="#architecture-impact">影响面</a><a href="#req-host-002">Host基线</a><a href="#req-action-001">Action</a><a href="#req-test-001">Evidence</a><a href="#req-workspace-002">Capsule v2</a><a href="#req-lsp-001">LSP</a><a href="#req-subagent-001">子Agent</a><a href="#req-chrome-001">Chrome</a><a href="#req-platform-001">平台</a><a href="#req-eval-001">评测</a><a href="#review">确认门禁</a></nav>
 
-<section id="principles"><h2>1. 总边界</h2><div class="grid3"><div class="card"><h3>Host 底座</h3><p>Storage、FileSystem、Clock、Scheduler、Crypto、Network policy、Secret broker 和 Native/Browser bridge 由 Host Port 提供，不能由 Action 代理。</p></div><div class="card"><h3>Portable 语义</h3><p>VFS、Patch、Search、Diff、Portable Git、Session、Artifact、Capsule 位于包内，不需要宿主二进制。</p></div><div class="card"><h3>Action 叶子能力</h3><p>Python test、Xcode build、Playwright、数据库迁移和部署由具名 Provider Action 提供。</p></div></div><div class="danger rule">本设计仍不提供通用 exec。设计批准不等于实现授权；当前所有章节状态为 Review。</div></section>
+<section id="principles"><h2>1. 四层架构与总边界</h2>
+<pre>第一层：Host Backend
+  Storage、FileSystem、Clock、Scheduler、Crypto、
+  Network、Secret、Browser、Native Bridge
+                    ↓
+第二层：Portable Runtime
+  Workspace VFS、Patch、Search、Diff、Portable Git、
+  Session、Artifact、Capsule
+                    ↓
+第三层：Application Actions
+  Python tests、Xcode build、Playwright、
+  DB migration、部署等具体应用能力
+                    ↓
+第四层：ToolPack
+  Agent 实际看到的工具、Prompt、Risk、Approval</pre>
+<div class="grid3"><div class="card"><h3>Host 底座</h3><p>提供资源访问、系统副作用和安全边界；不能由 Application Action 代理。</p></div><div class="card"><h3>Portable 语义</h3><p>由 tinyai 包内实现，不依赖宿主是否安装 Git、Node 或 Python。</p></div><div class="card"><h3>Action 叶子能力</h3><p>只承接具体应用注册的真实操作，不是新的基础设施层。</p></div></div>
+<div class="rule">ToolPack 是模型视角的组合层，不是第四种底层实现：它从 Host Ports、Portable Runtime 和 Application Actions 组装工具、Prompt、Risk 与 Approval。</div>
+<div class="danger rule">本设计仍不提供通用 exec。设计批准不等于实现授权；当前所有章节状态为 Review。</div></section>
 
 <section id="architecture-impact"><h2>2. Architecture Impact Map</h2><table><thead><tr><th>Requirement</th><th>Modify</th><th>Must remain unaware</th></tr></thead><tbody>
 <tr><td>HOST-002</td><td>host contracts/probes, profile matrix, startup composition</td><td>Action业务、TUI布局、Git/Patch实现</td></tr>

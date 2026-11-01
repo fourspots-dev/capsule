@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 1,
+  "decisions": [
+    {
+      "id": "ADR-001",
+      "title": "Four-layer host portable action toolpack architecture",
+      "status": "accepted",
+      "file": "docs/adr/ADR-001-four-layer-architecture.md",
+      "requirements": [
+        "REQ-HOST-002",
+        "REQ-ACTION-001",
+        "REQ-TEST-001",
+        "REQ-WORKSPACE-002"
+      ],
+      "decidedAt": "2026-11-01",
+      "approvedBy": "user",
+      "supersedes": [],
+      "supersededBy": null
+    },
+    {
+      "id": "ADR-002",
+      "title": "Portable runtime and portable Git first",
+      "status": "accepted",
+      "file": "docs/adr/ADR-002-portable-first.md",
+      "requirements": [
+        "REQ-WORKSPACE-001",
+        "REQ-GIT-001",
+        "REQ-PLATFORM-001"
+      ],
+      "decidedAt": "2026-11-01",
+      "approvedBy": "user",
+      "supersedes": ["ADR-009"],
+      "supersededBy": null
+    },
+    {
+      "id": "ADR-003",
+      "title": "Application Actions are trusted leaf capabilities",
+      "status": "accepted",
+      "file": "docs/adr/ADR-003-application-actions.md",
+      "requirements": [
+        "REQ-HOST-001",
+        "REQ-ACTION-001"
+      ],
+      "decidedAt": "2026-11-01",
+      "approvedBy": "user",
+      "supersedes": [],
+      "supersededBy": null
+    },
+    {
+      "id": "ADR-004",
+      "title": "Workspace Capsule is the sole cross-host transfer unit",
+      "status": "accepted",
+      "file": "docs/adr/ADR-004-workspace-capsule.md",
+      "requirements": [
+        "REQ-WORKSPACE-001",
+        "REQ-WORKSPACE-002"
+      ],
+      "decidedAt": "2026-11-01",
+      "approvedBy": "user",
+      "supersedes": [],
+      "supersededBy": null
+    },
+    {
+      "id": "ADR-005",
+      "title": "Completion requires current environment-bound evidence",
+      "status": "accepted",
+      "file": "docs/adr/ADR-005-evidence-bound-completion.md",
+      "requirements": [
+        "REQ-TEST-001",
+        "REQ-ACTION-001"
+      ],
+      "decidedAt": "2026-11-01",
+      "approvedBy": "user",
+      "supersedes": [],
+      "supersededBy": null
+    },
+    {
+      "id": "ADR-006",
+      "title": "Shared capability composition and client-state isolation",
+      "status": "accepted",
+      "file": "docs/adr/ADR-006-shared-composition.md",
+      "requirements": [
+        "REQ-TUI-002",
+        "REQ-CHROME-001"
+      ],
+      "decidedAt": "2026-11-01",
+      "approvedBy": "user",
+      "supersedes": [],
+      "supersededBy": null
+    },
+    {
+      "id": "ADR-007",
+      "title": "Generic profiles for subagents",
+      "status": "accepted",
+      "file": "docs/adr/ADR-007-generic-subagent-profiles.md",
+      "requirements": [
+        "REQ-SUBAGENT-001"
+      ],
+      "decidedAt": "2026-11-01",
+      "approvedBy": "user",
+      "supersedes": [],
+      "supersededBy": null
+    },
+    {
+      "id": "ADR-008",
+      "title": "Detailed design approval and explicit implementation authorization",
+      "status": "accepted",
+      "file": "docs/adr/ADR-008-design-implementation-gate.md",
+      "requirements": [
+        "REQ-ENG-004",
+        "REQ-ENG-005"
+      ],
+      "decidedAt": "2026-11-01",
+      "approvedBy": "user",
+      "supersedes": ["ADR-011"],
+      "supersededBy": null
+    },
+    {
+      "id": "ADR-009",
+      "title": "Git CLI as the primary backend",
+      "status": "superseded",
+      "file": "docs/adr/ADR-009-git-cli-primary.md",
+      "requirements": ["REQ-GIT-001"],
+      "decidedAt": "2026-11-01",
+      "approvedBy": "user",
+      "supersedes": [],
+      "supersededBy": "ADR-002"
+    },
+    {
+      "id": "ADR-010",
+      "title": "Represent every capability as an Action",
+      "status": "rejected",
+      "file": "docs/adr/ADR-010-all-capabilities-as-actions.md",
+      "requirements": ["REQ-HOST-002", "REQ-ACTION-001"],
+      "decidedAt": "2026-11-01",
+      "approvedBy": "user",
+      "supersedes": [],
+      "supersededBy": null
+    },
+    {
+      "id": "ADR-011",
+      "title": "Accepted requirements automatically authorize implementation",
+      "status": "superseded",
+      "file": "docs/adr/ADR-011-accepted-starts-implementation.md",
+      "requirements": ["REQ-ENG-004"],
+      "decidedAt": "2026-11-01",
+      "approvedBy": "user",
+      "supersedes": [],
+      "supersededBy": "ADR-008"
+    },
+    {
+      "id": "ADR-012",
+      "title": "Generic exec as a baseline capability",
+      "status": "rejected",
+      "file": "docs/adr/ADR-012-generic-exec-baseline.md",
+      "requirements": ["REQ-HOST-001", "REQ-ACTION-001"],
+      "decidedAt": "2026-11-01",
+      "approvedBy": "user",
+      "supersedes": [],
+      "supersededBy": null
+    }
+  ]
+}
