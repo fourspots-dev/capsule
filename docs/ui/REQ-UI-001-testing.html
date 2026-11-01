@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>REQ-UI-001 Side Panel UI Contract 测试设计</title>
+<style>
+:root{--bg:#f5f6f8;--paper:#fff;--text:#191a1e;--muted:#6d7078;--line:#e2e3e8;--accent:#16784d;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1120px;margin:auto;padding:36px 24px 90px}
+header{padding:34px;border-radius:24px;background:linear-gradient(135deg,#102019,#205a42 60%,#2a8260);color:#fff}header small{opacity:.72;letter-spacing:.1em}h1{font-size:34px;margin:10px 0}header p{max-width:850px;margin:0;color:#ebfaf4}
+section{margin:16px 0;padding:24px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{margin:0 0 14px;font-size:22px}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafafa;color:var(--muted)}
+code{font-family:var(--mono);background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{padding:15px;overflow:auto;border-radius:11px;background:#141820;color:#edfff7;font:12px/1.6 var(--mono)}
+.rule{padding:12px 14px;border-left:3px solid var(--accent);background:#edf8f3;border-radius:0 9px 9px 0}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafafa}
+</style>
+</head>
+<body><div class="wrap">
+<header><small>TINYAI / TEST DESIGN / UI CONTRACT</small><h1>Settings 组件与视觉契约测试</h1><p>验证组件拥有正确结构、页面迁移没有行为回归、计算样式稳定，并证明约束在没有 AGENTS 规则时仍然可执行。</p></header>
+
+<section id="strategy"><h2>1. 测试策略</h2><div class="grid"><div class="card"><h3>Static</h3><p><code>check:ui</code> 扫描 canonical import、raw settings primitive 和 Contract 链接。</p></div><div class="card"><h3>Unit</h3><p>验证组件输出、转义、action、class 与 header/body 组合。</p></div><div class="card"><h3>Chrome E2E</h3><p>验证真实按钮、表单、子页导航和响应式计算样式。</p></div><div class="card"><h3>Manual</h3><p>审阅 420x900 与 320x700 截图，判断视觉层级和干扰程度。</p></div></div></section>
+
+<section id="trace"><h2>2. Requirement trace matrix</h2><table><thead><tr><th>Case</th><th>Requirement</th><th>Expected</th><th>Level</th></tr></thead><tbody>
+<tr><td>UIC-001</td><td>Contract exists and linked</td><td>path, tokens, components and anti-patterns present</td><td>Static</td></tr>
+<tr><td>UIC-002</td><td>AGENTS untouched</td><td>no REQ-specific UI rules added</td><td>Review</td></tr>
+<tr><td>UIC-003</td><td>Canonical settings import</td><td>kernel-panel imports settings-components</td><td>Static</td></tr>
+<tr><td>UIC-004</td><td>No raw settings primitives</td><td>no raw wb-set-card/group/row in kernel-panel</td><td>Static</td></tr>
+<tr><td>UIC-005</td><td>Nav row</td><td>no native border/background and action present</td><td>Unit + E2E</td></tr>
+<tr><td>UIC-006</td><td>Form field</td><td>shared label/control layout and 9px input radius</td><td>Unit + E2E</td></tr>
+<tr><td>UIC-007</td><td>Subpage navigation</td><td>subpage → Settings → conversation</td><td>E2E</td></tr>
+<tr><td>UIC-008</td><td>Setting pages migrated</td><td>Settings/Connections/History/Capabilities/Remote Actions</td><td>Unit</td></tr>
+<tr><td>UIC-009</td><td>Responsive</td><td>420 and 320 widths have no horizontal overflow</td><td>E2E</td></tr>
+<tr><td>UIC-010</td><td>Template intake</td><td>requirement/design/test/architecture templates request UI evidence</td><td>Static</td></tr>
+</tbody></table></section>
+
+<section id="cases"><h2>3. Detailed cases</h2><h3>Component output</h3><ul><li><code>settingsNavRow</code> escapes label/value/action and emits one clickable row.</li><li><code>settingsForm</code> emits the canonical <code>wb-form</code> class and optional id.</li><li><code>settingsSubpage</code> emits the stage, title and back action.</li><li>Empty icon/control parts do not leave malformed wrappers.</li><li>Unknown custom control string remains explicitly owned by caller.</li></ul><h3>E2E interaction</h3><ul><li>Open Settings and compute nav row border/background.</li><li>Open Connections and verify text/password/textarea anatomy.</li><li>Open Remote Actions and verify URL/number radius and full width.</li><li>Open Capabilities and use <code>back-runtime</code>; then close Settings.</li><li>Repeat at 420x900 and 320x700; assert <code>scrollWidth &lt;= clientWidth + 1</code>.</li><li>Capture screenshots for manual review; screenshots are evidence, not the only oracle.</li></ul></section>
+
+<section id="architecture-completeness"><h2>4. Architecture completeness</h2><table><thead><tr><th>Surface</th><th>Proof</th><th>Case / command</th></tr></thead><tbody>
+<tr><td>UI Contract</td><td>canonical file and required sections</td><td><code>npm run check:ui</code></td></tr>
+<tr><td>Settings component owner</td><td>all primitive outputs and escaping</td><td><code>tests/sidepanel/settings-components.test.ts</code></td></tr>
+<tr><td>Settings consumers</td><td>no raw primitives; all pages render</td><td>static check + Chrome E2E</td></tr>
+<tr><td>Navigation</td><td>subpage returns through Settings</td><td>UI E2E + existing kernel E2E</td></tr>
+<tr><td>Responsive layout</td><td>420/320 no overflow</td><td>UI E2E</td></tr>
+<tr><td>Requirement intake</td><td>UI impact fields and evidence</td><td>template static assertions</td></tr>
+<tr><td>AGENTS boundary</td><td>unchanged</td><td>git diff review</td></tr>
+</tbody></table></section>
+
+<section id="failure"><h2>5. Failure cases</h2><ul><li>Raw card/row returns: static gate fails with Contract path.</li><li>Browser default button border: E2E computed style fails.</li><li>Remote page input loses shared radius: E2E fails.</li><li>Subpage back action closes whole page: navigation E2E fails.</li><li>Narrow screen overflow: responsive E2E fails.</li><li>New requirement omits UI impact: template review catches it before implementation.</li></ul></section>
+
+<section id="release"><h2>6. Evidence and release gates</h2><p><b>Observed 0.11.0 evidence:</b> <code>npm run check</code> 437 passed / 3 skipped；<code>npm run test:e2e</code> 7 passed；<code>npm run check:ui</code> passed；420x900 和 320x700 截图人工审阅通过。</p><pre>npm run check:ui
+npm run check
+npm run test:e2e
+manual screenshot review: 420x900, 320x700</pre><div class="rule">发布阻断：任何 raw settings primitive、原生导航边框、子页直接关闭、宽屏布局溢出或模板缺少 UI impact，均阻止 REQ-UI-001 标记 verified。</div><p>Target version: 0.11.0 · Design status: approved_unreviewed · Architecture impact: yes</p></section>
+</div></body></html>

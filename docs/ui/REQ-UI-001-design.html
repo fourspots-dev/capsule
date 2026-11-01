@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>REQ-UI-001 Side Panel UI Contract 详细设计</title>
+<style>
+:root{--bg:#f5f6f8;--paper:#fff;--text:#191a1e;--muted:#6d7078;--line:#e2e3e8;--accent:#4f44d8;--ok:#137a4b;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}
+.wrap{max-width:1120px;margin:auto;padding:36px 24px 90px}header{padding:34px;border-radius:24px;background:linear-gradient(135deg,#171825,#302a91 60%,#6859de);color:#fff}
+header small{opacity:.72;letter-spacing:.1em}h1{font-size:34px;line-height:1.2;margin:10px 0}header p{max-width:850px;margin:0;color:#e9e7ff}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}
+nav{position:sticky;top:0;z-index:2;display:flex;gap:14px;overflow:auto;margin:16px 0;padding:10px 14px;border:1px solid var(--line);border-radius:12px;background:#f5f6f8ed}
+nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}section{margin:16px 0;padding:24px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}
+h2{font-size:22px;margin:0 0 14px}h3{font-size:16px;margin:20px 0 8px}p{color:#44464e}code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;border-radius:4px}
+pre{overflow:auto;padding:15px;border-radius:11px;background:#141820;color:#edf0ff;font:12px/1.6 var(--mono)}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafafa;color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafafa}.card h3{margin:0 0 8px}.rule{padding:12px 14px;border-left:3px solid var(--accent);background:#f3f1ff;border-radius:0 9px 9px 0}
+@media(max-width:760px){.grid{grid-template-columns:1fr}.wrap{padding:18px 12px 60px}header h1{font-size:27px}}
+</style>
+</head>
+<body><div class="wrap">
+<header><small>TINYAI / SIDE PANEL / UI CONTRACT</small><h1>可执行 UI Contract 与设置组件</h1><p>让视觉一致性成为代码结构和自动门禁的结果，而不是依赖聊天记忆或项目专属 AGENTS 规则。</p><div class="chips"><span class="chip">REQ-UI-001</span><span class="chip">0.11.0 verified</span><span class="chip">ADR-016</span><span class="chip">No AGENTS changes</span></div></header>
+<nav><a href="#requirements">需求</a><a href="#architecture-impact">影响面</a><a href="#contract">UI Contract</a><a href="#components">组件</a><a href="#interaction">交互</a><a href="#state">生命周期</a><a href="#failures">失败行为</a><a href="#rollout">实施</a><a href="#acceptance">验收</a></nav>
+
+<section id="requirements"><h2>1. 问题与目标</h2><p>Side Panel 曾通过局部模板字符串新增视觉控件，导致原生边框、重复卡片、表单圆角不一致和子页返回路径不统一。用户明确要求不在 <code>AGENTS.md</code> 中直接添加项目 UI 约束。</p><div class="grid"><div class="card"><h3>目标</h3><ul><li>建立可版本化的 Side Panel UI Contract。</li><li>提供 Settings 专用组件原语。</li><li>用静态、单元和真实 Chrome E2E 检查构成与计算样式。</li><li>在需求和架构模板中加入 UI 影响面。</li><li>不修改 <code>AGENTS.md</code>。</li></ul></div><div class="card"><h3>非目标</h3><ul><li>重做整个 Side Panel。</li><li>改变会话、Action、Capsule 或 Runtime 协议。</li><li>引入新的 CSS 框架或构建链。</li><li>只依赖像素截图判断正确性。</li><li>让所有 UI 组件都进入通用设计系统；本需求只覆盖 Side Panel Settings。</li></ul></div></div></section>
+
+<section id="architecture-impact"><h2>2. Architecture impact map</h2><table><thead><tr><th>Surface</th><th>Action</th><th>Evidence</th></tr></thead><tbody>
+<tr><td>Core / Host / Runtime</td><td>none</td><td>没有协议、持久化或执行语义变化。</td></tr>
+<tr><td>Side Panel Settings</td><td>modify</td><td>Settings、Connections、History、Capabilities、Remote Actions 全部组合组件。</td></tr>
+<tr><td>CSS</td><td>modify</td><td>保留 token 和既有 class；只固化按钮与表单输入基础样式。</td></tr>
+<tr><td>Requirements / Architecture docs</td><td>modify</td><td>模板增加 UI impact、复用原语和证据字段。</td></tr>
+<tr><td>Deterministic checks</td><td>add</td><td><code>npm run check:ui</code> 阻止 raw settings primitives 回流。</td></tr>
+<tr><td>Chrome E2E</td><td>modify/add</td><td>计算样式、返回路径、420/320 宽度和关键页面旅程。</td></tr>
+<tr><td>Legacy settings templates</td><td>modify</td><td>直接字符串卡片迁移到组件；不保留双实现。</td></tr>
+</tbody></table><div class="rule"><b>禁止部分交付：</b>只给新增控件加样式但保留旧页面直接模板；只写文档但不提供组件；只做截图但不检查导航和 computed style；修改 AGENTS 代替工程门禁。</div></section>
+
+<section id="contract"><h2>3. UI Contract</h2><p><code>docs/ui/tinyai-sidepanel-ui-contract.md</code> 是视觉与组合的事实源，包含 token、设置行高度、卡片层级、表单、导航、响应式、反例和每类 UI 变更必需证据。</p><pre>Settings home
+  group label
+  card
+    settingsNavRow("Capabilities", summary)
+    settingsNavRow("Remote Actions", configured state)
+
+Settings subpage
+  settingsSubpage(title, backAction)
+    settingsGroup(...)
+    settingsForm(...)
+    settingsField(...)</pre><p>Contract 由需求模板、架构检查清单和测试失败信息链接，不通过 <code>AGENTS.md</code> 传播。</p></section>
+
+<section id="components"><h2>4. 核心对象</h2><pre>type SettingsIcon = { html: string };
+
+settingsSubpage({
+  title, backAction, body, theme, backIcon
+}): string
+
+settingsGroup({ label, content }): string
+settingsCard(content): string
+settingsRow({ label, icon, value, control, action, ariaLabel }): string
+settingsNavRow({ label, icon, value, action }): string
+settingsSelectRow({ label, icon, value, action, select }): string
+settingsField({ label, control }): string
+settingsForm({ id, content, className }): string
+settingsSeparator(): string</pre><table><thead><tr><th>对象</th><th>所有权</th><th>不变量</th></tr></thead><tbody><tr><td><code>settings-components.ts</code></td><td>Side Panel presentation layer</td><td>集中拥有 Settings class、转义、button/div 选择和 header 结构。</td></tr><tr><td><code>kernel-panel.ts</code></td><td>Page orchestration</td><td>只提供页面数据、action id、control markup 和状态，不直接拼粗粒度设置卡片。</td></tr><tr><td><code>check:ui</code></td><td>Engineering gate</td><td>发现 <code>kernel-panel.ts</code> 重新出现 raw settings primitives 时失败并指向 Contract。</td></tr><tr><td>Requirement templates</td><td>Engineering process</td><td>任何 UI 需求记录复用组件、新增原语、响应式和证据。</td></tr></tbody></table></section>
+
+<section id="interaction"><h2>5. 模块交互</h2><pre>Settings action
+  → kernel-panel computes view model/control markup
+  → settings-components emits canonical HTML
+  → settings CSS tokens determine interaction
+  → E2E checks structure + computed style + navigation
+
+New UI requirement
+  → requirement template asks for UI impact
+  → design links this Contract
+  → developer reuses components
+  → check:ui fails on raw primitives
+  → Chrome E2E fails on style/navigation drift</pre><p>组件接受已构造的 control HTML，用于 select、stepper、hidden file input 等现有控件；label、value、aria 等文本由组件转义。</p></section>
+
+<section id="state"><h2>6. 生命周期与导航状态</h2><table><tbody><tr><td>Home</td><td>Settings 首页，只显示分组和入口。</td></tr><tr><td>Connections / History / Capabilities / Remote Actions</td><td>设置子页；back 到 Settings。</td></tr><tr><td>Settings Back</td><td>关闭 page layer，返回会话。</td></tr><tr><td>Action failure</td><td>保持当前子页和已输入状态，显示 <code>wb-notice-error</code>。</td></tr><tr><td>Runtime reload</td><td>保留 pageView；完成后重绘当前页面。</td></tr></tbody></table></section>
+
+<section id="failures"><h2>7. 失败行为与兼容</h2><ul><li>缺少组件参数时 TypeScript 在构建期失败。</li><li>原始 settings class 出现在 <code>kernel-panel.ts</code> 时 <code>check:ui</code> 失败，并输出 Contract 路径。</li><li>E2E 计算样式偏差会指出具体 selector 和期望 token。</li><li>组件迁移不改变 action id、DOM 文本、页面状态和持久化 schema。</li><li>构建后只保留 canonical component 路径，不保留 feature flag 或旧页面模板。</li></ul></section>
+
+<section id="rollout"><h2>8. 实施顺序</h2><ol><li>登记 DEC-010、ADR-016、REQ-UI-001 和 Contract。</li><li>添加 Settings 组件与单元测试。</li><li>迁移全部 Settings 子页到组件。</li><li>添加 <code>check:ui</code> 和 Chrome UI Contract E2E。</li><li>更新需求/架构/测试模板。</li><li>执行全量检查、截图审阅、发布 0.11.0。</li></ol></section>
+
+<section id="acceptance"><h2>9. 验收</h2><ul><li><code>AGENTS.md</code> 无改动。</li><li>Settings 页面不存在 raw <code>wb-set-card/group/row</code> 拼接。</li><li>所有子页经过 Settings 返回。</li><li>导航按钮无原生边框，表单输入风格一致。</li><li>420px 和 320px 无横向溢出。</li><li><code>npm run check</code> 437 passed / 3 skipped，<code>npm run test:e2e</code> 7 passed，人工截图审阅通过。</li></ul><p class="foot">REQ-UI-001 · 0.11.0 verified · ADR-016 · approved_unreviewed authorization</p></section>
+</div></body></html>

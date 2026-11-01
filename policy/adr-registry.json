@@ -209,6 +209,18 @@
       "approvedBy": "user",
       "supersedes": [],
       "supersededBy": null
+    },
+    {
+      "id": "ADR-016",
+      "title": "Enforce UI consistency with contracts, components and executable gates",
+      "status": "accepted",
+      "file": "docs/adr/ADR-016-executable-ui-contract.md",
+      "requirements": ["REQ-UI-001"],
+      "originDecision": "DEC-010",
+      "decidedAt": "2026-11-01",
+      "approvedBy": "user",
+      "supersedes": [],
+      "supersededBy": null
     }
   ]
 }

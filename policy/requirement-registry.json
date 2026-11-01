@@ -469,6 +469,28 @@
         "reviewedAt": "2026-11-01"
       },
       "architectureImpact": true
+    },
+    {
+      "id": "REQ-UI-001",
+      "title": "Executable Side Panel settings UI contract",
+      "type": "feature",
+      "priority": "P1",
+      "status": "verified",
+      "designStatus": "approved_unreviewed",
+      "approvalNote": "User approved writing the design and proceeding directly to implementation.",
+      "implementationAuthorized": true,
+      "targetVersion": "0.11.0",
+      "design": "docs/ui/REQ-UI-001-design.html#architecture-impact",
+      "testDesign": "docs/ui/REQ-UI-001-testing.html#architecture-completeness",
+      "acceptance": "Side Panel settings pages compose canonical settings primitives, the UI contract is discoverable without AGENTS rules, static and Chrome E2E checks enforce structure and computed styles, and requirement templates request UI impact evidence.",
+      "legacyAliases": [],
+      "adrReview": {
+        "status": "existing",
+        "adrs": ["ADR-016"],
+        "rationale": "ADR-016 selects component contracts and executable checks as the durable UI consistency mechanism.",
+        "reviewedAt": "2026-11-01"
+      },
+      "architectureImpact": true
     }
   ]
 }

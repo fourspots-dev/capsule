@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.11.0
+
+### Features
+
+- `REQ-UI-001`: add a discoverable Side Panel UI Contract without adding
+  project-specific rules to `AGENTS.md`.
+- Add canonical Settings components for subpages, groups, cards, rows,
+  navigation, selects, fields and forms.
+- Migrate Settings, Connections, History, Capabilities and Remote Actions to the
+  shared component layer.
+- Add `npm run check:ui` to reject raw Settings primitives and missing UI-impact
+  intake, with a link back to the canonical contract.
+- Add real Chrome UI Contract coverage for computed styles, subpage navigation
+  and 420/320 responsive layouts.
+- Extend requirement, design, testing and architecture templates with UI impact,
+  canonical component reuse and screenshot/E2E evidence.
+
+### Verification
+
+- `npm run check`: 437 tests passed, 3 skipped.
+- `npm run test:e2e`: 7 Chrome E2E tests passed.
+- `npm run check:ui`: canonical components and UI-impact intake verified.
+- Manual screenshot review at 420x900 and 320x700.
+
 ## 0.10.1
 
 ### Fixes

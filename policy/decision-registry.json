@@ -171,6 +171,25 @@
       "supersedes": [],
       "supersededBy": null,
       "file": "docs/decisions/DEC-009-chrome-composition-authorization.md"
+    },
+    {
+      "id": "DEC-010",
+      "title": "Enforce Side Panel UI consistency without AGENTS constraints",
+      "statement": "不要把 UI 约束直接写进 AGENTS.md；使用 UI Contract、设置组件、自动检查和需求模板约束后续实现。",
+      "normalizedDecision": "Keep AGENTS free of project-specific UI rules, publish a Side Panel UI Contract, migrate settings markup to canonical primitives, add static and Chrome E2E gates, and require UI impact evidence in engineering templates.",
+      "capturedAt": "2026-11-01",
+      "source": "request",
+      "scope": ["sidepanel", "ui-contract", "settings-components", "testing"],
+      "status": "promoted",
+      "triage": {
+        "disposition": "adr_and_requirement",
+        "adrs": ["ADR-016"],
+        "requirements": ["REQ-UI-001"],
+        "rationale": "The decision creates a cross-cutting UI presentation contract and an executable enforcement layer without changing AGENTS."
+      },
+      "supersedes": [],
+      "supersededBy": null,
+      "file": "docs/decisions/DEC-010-ui-contract-without-agents.md"
     }
   ]
 }

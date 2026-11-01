@@ -11,6 +11,17 @@ import type { KernelApprovalEvent, KernelHandoffEvent } from './kernel-client';
 import { KernelClient, connectChromeKernelPort } from './kernel-client';
 import { icons } from './icons';
 import {
+  settingsCard,
+  settingsField,
+  settingsForm,
+  settingsGroup,
+  settingsNavRow,
+  settingsRow,
+  settingsSelectRow,
+  settingsSeparator,
+  settingsSubpage,
+} from './settings-components';
+import {
   buildTurnRenderUnits,
   toolFamily,
   workStateLabel,
@@ -911,23 +922,6 @@ export async function initKernelUi(): Promise<void> {
     return settingsPageMarkup();
   }
 
-  function stageMarkup(inner: string): string {
-    return `<div id="kernel-page-layer" class="kernel-page-layer">
-      <div class="wb-stage" data-wb-theme="${effectiveTheme()}" style="--wb-page-rgb: 83,177,255; --wb-dock-h: 160px;">
-        ${inner}
-        <div class="wb-fx-grain"></div>
-        <div class="wb-fx-scan"></div>
-      </div>
-    </div>`;
-  }
-
-  function settingsHead(title: string, action = 'back'): string {
-    return `<div class="wb-settings-head">
-      <button type="button" class="wb-icon-button wb-settings-back" data-page-action="${action}" aria-label="${pageConfig.language.startsWith('zh') ? '返回' : 'Back'}">${icons.back}</button>
-      <div class="wb-settings-title">${escapeHtml(title)}</div>
-    </div>`;
-  }
-
   function pageAlertMarkup(): string {
     return pageError
       ? `<div class="wb-notice wb-notice-error">${escapeHtml(pageError)}</div>`
@@ -943,22 +937,31 @@ export async function initKernelUi(): Promise<void> {
         label: `${model}`,
       }))
     );
-    return stageMarkup(`${settingsHead(zh ? '设置' : 'Settings')}
-      <div class="wb-settings-body">
-        <div class="wb-set-card wb-set-account">
+    const body = `
+      ${settingsCard(
+        `
           <div class="wb-account-row">
             <span class="wb-account-avatar wb-account-avatar--logo" aria-hidden="true"><img class="wb-account-avatar-img" alt="" src="icon/tinyai.svg"></span>
             <span class="wb-account-copy"><span class="wb-account-name-row"><span class="wb-account-name">tinyai</span></span><span class="wb-account-line">${zh ? '所有对话和模型 Key 都保存在本机。' : 'All chats and model keys stay on this machine.'}</span></span>
             <span class="wb-badge">${zh ? '本地 Agent' : 'Local agent'}</span>
           </div>
-        </div>
-        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? '通用' : 'General'}</div>
-          <div class="wb-set-card">
-            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.sun}</span>${zh ? '外观' : 'Appearance'}</span>
-              <button type="button" class="wb-set-select" data-page-action="theme"><span class="wb-set-select-value">${escapeHtml(themeLabel(pageConfig.theme, zh))}</span>${icons.chevronDown}</button></div>
-            <div class="wb-set-sepa"></div>
-            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.globe}</span>${zh ? '语言' : 'Language'}</span>
-              <select id="kernel-page-language" class="wb-native-select">${[
+        `,
+        'wb-set-account'
+      )}
+      ${settingsGroup({
+        label: zh ? '通用' : 'General',
+        content: [
+          settingsSelectRow({
+            label: zh ? '外观' : 'Appearance',
+            icon: icons.sun,
+            value: themeLabel(pageConfig.theme, zh),
+            action: 'theme',
+          }),
+          settingsSeparator(),
+          settingsSelectRow({
+            label: zh ? '语言' : 'Language',
+            icon: icons.globe,
+            control: `<select id="kernel-page-language" class="wb-native-select">${[
                 ['en', 'English'],
                 ['zh', '中文'],
                 ['zh-TW', '繁體中文'],
@@ -967,95 +970,155 @@ export async function initKernelUi(): Promise<void> {
                 ['es', 'Español'],
                 ['fr', 'Français'],
                 ['de', 'Deutsch'],
-              ].map(([value, label]) => `<option value="${value}" ${value === pageConfig.language ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
-            <div class="wb-set-sepa"></div>
-            <div class="wb-set-row"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.zoom}</span>${zh ? '缩放' : 'Zoom'}</span><span class="wb-input-grow"></span>
+              ].map(([value, label]) => `<option value="${value}" ${value === pageConfig.language ? 'selected' : ''}>${label}</option>`).join('')}</select>`,
+          }),
+          settingsSeparator(),
+          settingsRow({
+            label: zh ? '缩放' : 'Zoom',
+            icon: icons.zoom,
+            control: `
               <button type="button" class="wb-set-stepper-btn" data-page-action="zoom" data-delta="-10" aria-label="Zoom out">−</button>
               <button type="button" class="wb-set-stepper-value" data-page-action="zoom" data-delta="0">${pageConfig.zoom}%</button>
-              <button type="button" class="wb-set-stepper-btn" data-page-action="zoom" data-delta="10" aria-label="Zoom in">+</button></div>
-          </div>
-        </div>
-        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? '模型' : 'Models'}</div>
-          <div class="wb-set-card">
-            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.sparkle}</span>${zh ? '模型' : 'Model'}</span>
-              <select class="wb-native-select" id="kernel-page-model">${models.length ? models.map((item) => `<option value="${escapeHtml(item.connection + '|' + item.model)}" ${item.connection === pageConfig.connection && item.model === pageConfig.model ? 'selected' : ''}>${escapeHtml(item.label)}</option>`).join('') : `<option>${zh ? '未配置模型' : 'No model'}</option>`}</select></div>
-            <div class="wb-set-sepa"></div>
-            <div class="wb-set-row wb-set-navrow wb-clickable" data-page-action="connections"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.link}</span>${zh ? '模型连接' : 'Model connections'}</span><span class="wb-input-grow"></span><span class="wb-set-row-value">${pageConfig.connections.length}</span>${icons.chevronDown}</div>
-          </div>
-        </div>
-        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? '权限' : 'Permissions'}</div>
-          <div class="wb-set-card">
-            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.shield}</span>${zh ? '操作审批' : 'Action approval'}</span>
-              <button type="button" class="wb-set-select" data-page-action="approval"><span class="wb-set-select-value">${pageConfig.approval === 'auto' ? (zh ? '自动执行' : 'Auto-approve') : (zh ? '需要审批' : 'Requires approval')}</span>${icons.chevronDown}</button></div>
-            <div class="wb-set-sepa"></div>
-            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.sparkle}</span>${zh ? '显示推理过程' : 'Reasoning'}</span>
-              <button type="button" class="wb-set-select" data-page-action="reasoning"><span class="wb-set-select-value">${pageConfig.showReasoning ? (zh ? '显示' : 'Show') : (zh ? '隐藏' : 'Hidden')}</span>${icons.chevronDown}</button></div>
-          </div>
-        </div>
-        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? '运行时' : 'Runtime'}</div>
-          <div class="wb-set-card">
-            <button type="button" class="wb-set-row wb-set-navrow wb-clickable" data-page-action="capabilities">
-              <span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.sparkle}</span>${zh ? '能力' : 'Capabilities'}</span>
-              <span class="wb-input-grow"></span>
-              <span class="wb-set-row-value">${escapeHtml(runtimeCapabilitySummary(zh))}</span>
-              ${icons.chevronDown}
-            </button>
-            <div class="wb-set-sepa"></div>
-            <button type="button" class="wb-set-row wb-set-navrow wb-clickable" data-page-action="remote-actions">
-              <span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.link}</span>${zh ? '远程 Action' : 'Remote Actions'}</span>
-              <span class="wb-input-grow"></span>
-              <span class="wb-set-row-value">${remoteActionConfig ? (zh ? '已配置' : 'Configured') : (zh ? '未配置' : 'Not configured')}</span>
-              ${icons.chevronDown}
-            </button>
-          </div>
-        </div>
-        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? '数据' : 'Data'}</div>
-          <div class="wb-set-card">
-            <button type="button" class="wb-set-row wb-set-navrow wb-clickable" data-page-action="capsule-export">
-              <span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.download}</span>${zh ? '导出 Workspace Capsule' : 'Export Workspace Capsule'}</span>
-              <span class="wb-input-grow"></span>
-              ${icons.chevronDown}
-            </button>
-            <div class="wb-set-sepa"></div>
-            <button type="button" class="wb-set-row wb-set-navrow wb-clickable" data-page-action="capsule-import">
-              <span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.file}</span>${zh ? '导入 Workspace Capsule' : 'Import Workspace Capsule'}</span>
-              <span class="wb-input-grow"></span>
-              ${icons.chevronDown}
-            </button>
-            <input id="kernel-capsule-file" type="file" accept=".capsule,.tinyai,application/octet-stream" hidden>
-            <div class="wb-set-sepa"></div>
-            <button type="button" class="wb-set-row wb-set-navrow wb-clickable kernel-danger-row" data-page-action="clear-history">
-              <span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.info}</span>${zh ? '清除全部聊天历史' : 'Clear all chat history'}</span>
-              <span class="wb-input-grow"></span>
-              ${icons.chevronDown}
-            </button>
-          </div>
-        </div>
-        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? '关于' : 'About'}</div>
-          <div class="wb-set-card">
-            <div class="wb-set-row"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.info}</span>${zh ? '版本' : 'Version'}</span><span class="wb-input-grow"></span><span class="wb-set-row-value">${escapeHtml(chrome.runtime.getManifest().version)}</span></div>
-          </div>
-        </div>
-        ${pageAlertMarkup()}
-      </div>`);
+              <button type="button" class="wb-set-stepper-btn" data-page-action="zoom" data-delta="10" aria-label="Zoom in">+</button>`,
+          }),
+        ].join(''),
+      })}
+      ${settingsGroup({
+        label: zh ? '模型' : 'Models',
+        content: [
+          settingsSelectRow({
+            label: zh ? '模型' : 'Model',
+            icon: icons.sparkle,
+            control: `<select class="wb-native-select" id="kernel-page-model">${models.length ? models.map((item) => `<option value="${escapeHtml(item.connection + '|' + item.model)}" ${item.connection === pageConfig.connection && item.model === pageConfig.model ? 'selected' : ''}>${escapeHtml(item.label)}</option>`).join('') : `<option>${zh ? '未配置模型' : 'No model'}</option>`}</select>`,
+          }),
+          settingsSeparator(),
+          settingsNavRow({
+            label: zh ? '模型连接' : 'Model connections',
+            icon: icons.link,
+            value: String(pageConfig.connections.length),
+            action: 'connections',
+          }),
+        ].join(''),
+      })}
+      ${settingsGroup({
+        label: zh ? '权限' : 'Permissions',
+        content: [
+          settingsSelectRow({
+            label: zh ? '操作审批' : 'Action approval',
+            icon: icons.shield,
+            value:
+              pageConfig.approval === 'auto'
+                ? zh
+                  ? '自动执行'
+                  : 'Auto-approve'
+                : zh
+                  ? '需要审批'
+                  : 'Requires approval',
+            action: 'approval',
+          }),
+          settingsSeparator(),
+          settingsSelectRow({
+            label: zh ? '显示推理过程' : 'Reasoning',
+            icon: icons.sparkle,
+            value: pageConfig.showReasoning
+              ? zh
+                ? '显示'
+                : 'Show'
+              : zh
+                ? '隐藏'
+                : 'Hidden',
+            action: 'reasoning',
+          }),
+        ].join(''),
+      })}
+      ${settingsGroup({
+        label: zh ? '运行时' : 'Runtime',
+        content: [
+          settingsNavRow({
+            label: zh ? '能力' : 'Capabilities',
+            icon: icons.sparkle,
+            value: runtimeCapabilitySummary(zh),
+            action: 'capabilities',
+          }),
+          settingsSeparator(),
+          settingsNavRow({
+            label: zh ? '远程 Action' : 'Remote Actions',
+            icon: icons.link,
+            value: remoteActionConfig
+              ? zh
+                ? '已配置'
+                : 'Configured'
+              : zh
+                ? '未配置'
+                : 'Not configured',
+            action: 'remote-actions',
+          }),
+        ].join(''),
+      })}
+      ${settingsGroup({
+        label: zh ? '数据' : 'Data',
+        content: [
+          settingsNavRow({
+            label: zh ? '导出 Workspace Capsule' : 'Export Workspace Capsule',
+            icon: icons.download,
+            action: 'capsule-export',
+          }),
+          settingsSeparator(),
+          settingsNavRow({
+            label: zh ? '导入 Workspace Capsule' : 'Import Workspace Capsule',
+            icon: icons.file,
+            action: 'capsule-import',
+          }),
+          '<input id="kernel-capsule-file" type="file" accept=".capsule,.tinyai,application/octet-stream" hidden>',
+          settingsSeparator(),
+          settingsNavRow({
+            label: zh ? '清除全部聊天历史' : 'Clear all chat history',
+            icon: icons.info,
+            action: 'clear-history',
+            destructive: true,
+          }),
+        ].join(''),
+      })}
+      ${settingsGroup({
+        label: zh ? '关于' : 'About',
+        content: settingsRow({
+          label: zh ? '版本' : 'Version',
+          icon: icons.info,
+          value: chrome.runtime.getManifest().version,
+        }),
+      })}
+      ${pageAlertMarkup()}`;
+    return settingsSubpage({
+      title: zh ? '设置' : 'Settings',
+      backLabel: zh ? '返回' : 'Back',
+      backIcon: icons.back,
+      theme: effectiveTheme(),
+      body,
+    });
   }
 
   function capabilitiesPageMarkup(): string {
     const zh = pageConfig.language.startsWith('zh');
-    return stageMarkup(`${settingsHead(zh ? '能力与证据' : 'Capabilities & evidence', 'back-runtime')}
-      <div class="wb-settings-body">
-        ${capabilityBoardMarkup(zh)}
-        ${pageAlertMarkup()}
-      </div>`);
+    return settingsSubpage({
+      title: zh ? '能力与证据' : 'Capabilities & evidence',
+      backAction: 'back-runtime',
+      backLabel: zh ? '返回' : 'Back',
+      backIcon: icons.back,
+      theme: effectiveTheme(),
+      body: `${capabilityBoardMarkup(zh)}${pageAlertMarkup()}`,
+    });
   }
 
   function remoteActionsPageMarkup(): string {
     const zh = pageConfig.language.startsWith('zh');
-    return stageMarkup(`${settingsHead(zh ? '远程 Action' : 'Remote Actions', 'back-runtime')}
-      <div class="wb-settings-body">
-        ${remoteActionFormMarkup(zh)}
-        ${pageAlertMarkup()}
-      </div>`);
+    return settingsSubpage({
+      title: zh ? '远程 Action' : 'Remote Actions',
+      backAction: 'back-runtime',
+      backLabel: zh ? '返回' : 'Back',
+      backIcon: icons.back,
+      theme: effectiveTheme(),
+      body: `${remoteActionFormMarkup(zh)}${pageAlertMarkup()}`,
+    });
   }
 
   function runtimeCapabilitySummary(zh: boolean): string {
@@ -1092,15 +1155,17 @@ export async function initKernelUi(): Promise<void> {
 
   function capabilityBoardMarkup(zh: boolean): string {
     if (capabilityStatusError) {
-      return `<div class="wb-set-card kernel-capability-card">
-        <div class="kernel-capability-empty">${escapeHtml(capabilityStatusError)}</div>
-        <button type="button" class="wb-ghost-btn" data-page-action="capability-refresh">${zh ? '重试' : 'Retry'}</button>
-      </div>`;
+      return settingsCard(
+        `<div class="kernel-capability-empty">${escapeHtml(capabilityStatusError)}</div>
+        <button type="button" class="wb-ghost-btn" data-page-action="capability-refresh">${zh ? '重试' : 'Retry'}</button>`,
+        'kernel-capability-card'
+      );
     }
     if (!capabilityStatus) {
-      return `<div class="wb-set-card kernel-capability-card">
-        <div class="kernel-capability-empty">${zh ? '运行时尚未启动。' : 'Runtime is not available yet.'}</div>
-      </div>`;
+      return settingsCard(
+        `<div class="kernel-capability-empty">${zh ? '运行时尚未启动。' : 'Runtime is not available yet.'}</div>`,
+        'kernel-capability-card'
+      );
     }
     const {
       available,
@@ -1123,7 +1188,7 @@ export async function initKernelUi(): Promise<void> {
     const diagnostics = capabilityStatus.diagnostics.slice(0, 4).map(
       (item) => `<div class="kernel-capability-diagnostic">${escapeHtml(item.code)} · ${escapeHtml(item.message)}</div>`
     );
-    return `<div class="wb-set-card kernel-capability-card">
+    return settingsCard(`
       <div class="kernel-capability-summary">
         <span><b>${available}</b> ${zh ? '可用' : 'available'}</span>
         <span><b>${degraded}</b> ${zh ? '降级' : 'degraded'}</span>
@@ -1133,28 +1198,42 @@ export async function initKernelUi(): Promise<void> {
       </div>
       ${actionRows.join('') || `<div class="kernel-capability-empty">${zh ? '没有已注册的远程 Action。' : 'No remote Actions registered.'}</div>`}
       ${diagnostics.join('')}
-    </div>`;
+    `, 'kernel-capability-card');
   }
 
   function remoteActionFormMarkup(zh: boolean): string {
-    return `<form id="kernel-remote-action-form" class="wb-form kernel-remote-action-form">
-      <label>${zh ? 'Action 端点' : 'Action endpoint'}<input id="kernel-remote-endpoint" type="url" value="${escapeHtml(remoteActionConfig?.endpoint ?? '')}" placeholder="https://actions.example.com/rpc"></label>
-      <label>Bearer Token<input id="kernel-remote-token" type="password" value="" placeholder="${remoteActionConfig?.token ? (zh ? '已保存，留空保持不变' : 'Saved — leave blank to keep') : 'optional'}" autocomplete="off"></label>
-      <label>${zh ? '允许的 Action ID（每行一个）' : 'Allowed Action IDs (one per line)'}<textarea id="kernel-remote-allowlist">${escapeHtml(remoteActionConfig?.allowedActionIds?.join('\n') ?? '')}</textarea></label>
-      <label>${zh ? '超时（毫秒）' : 'Timeout (ms)'}<input id="kernel-remote-timeout" type="number" min="1" value="${remoteActionConfig?.timeoutMs ?? 300000}"></label>
+    return settingsForm({
+      id: 'kernel-remote-action-form',
+      className: 'kernel-remote-action-form',
+      content: `${settingsField({
+        label: zh ? 'Action 端点' : 'Action endpoint',
+        control: `<input id="kernel-remote-endpoint" type="url" value="${escapeHtml(remoteActionConfig?.endpoint ?? '')}" placeholder="https://actions.example.com/rpc">`,
+      })}
+      ${settingsField({
+        label: 'Bearer Token',
+        control: `<input id="kernel-remote-token" type="password" value="" placeholder="${remoteActionConfig?.token ? (zh ? '已保存，留空保持不变' : 'Saved — leave blank to keep') : 'optional'}" autocomplete="off">`,
+      })}
+      ${settingsField({
+        label: zh ? '允许的 Action ID（每行一个）' : 'Allowed Action IDs (one per line)',
+        control: `<textarea id="kernel-remote-allowlist">${escapeHtml(remoteActionConfig?.allowedActionIds?.join('\n') ?? '')}</textarea>`,
+      })}
+      ${settingsField({
+        label: zh ? '超时（毫秒）' : 'Timeout (ms)',
+        control: `<input id="kernel-remote-timeout" type="number" min="1" value="${remoteActionConfig?.timeoutMs ?? 300000}">`,
+      })}
       <div class="wb-form-actions">
         <button type="button" class="wb-btn wb-btn--primary" data-page-action="remote-save">${zh ? '保存并探测' : 'Save and probe'}</button>
         <button type="button" class="wb-ghost-btn" data-page-action="remote-clear">${zh ? '停用远程 Action' : 'Disable remote Actions'}</button>
       </div>
-      <div class="wb-conn-url">${zh ? '只接受具名 Action；端点不会获得通用 Shell。' : 'Only named Actions are exposed; the endpoint never receives a generic shell.'}</div>
-    </form>`;
+      <div class="wb-conn-url">${zh ? '只接受具名 Action；端点不会获得通用 Shell。' : 'Only named Actions are exposed; the endpoint never receives a generic shell.'}</div>`,
+    });
   }
 
   function connectionsPageMarkup(): string {
     const zh = pageConfig.language.startsWith('zh');
     const cards = pageConfig.connections
       .map(
-        (connection) => `<div class="wb-conn-card">
+        (connection) => settingsCard(`<div class="wb-conn-card">
           <div class="wb-conn-head"><span class="wb-conn-name">${escapeHtml(connection.label)}</span>${connection.vision ? '<span class="wb-badge">vision</span>' : ''}</div>
           <div class="wb-conn-url">${escapeHtml(connection.baseUrl)}</div>
           <div class="wb-conn-models">${connection.models.length ? escapeHtml(connection.models.join(', ')) : '—'} · ${connection.apiKey ? 'key ✓' : 'no key'}</div>
@@ -1162,7 +1241,7 @@ export async function initKernelUi(): Promise<void> {
             <button type="button" class="wb-ghost-btn" data-page-action="conn-edit" data-id="${escapeHtml(connection.id)}">${zh ? '编辑' : 'Edit'}</button>
             <button type="button" class="wb-ghost-btn" data-page-action="conn-delete" data-id="${escapeHtml(connection.id)}">${zh ? '删除' : 'Delete'}</button>
           </div>
-        </div>`
+        </div>`)
       )
       .join('');
     const form =
@@ -1173,44 +1252,71 @@ export async function initKernelUi(): Promise<void> {
               : pageConfig.connections.find((item) => item.id === editingConnectionId) ?? null
           )
         : '';
-    return stageMarkup(`${settingsHead(zh ? '模型连接' : 'Connections', 'back-connections')}
-      <div class="wb-settings-body">
+    return settingsSubpage({
+      title: zh ? '模型连接' : 'Connections',
+      backAction: 'back-connections',
+      backLabel: zh ? '返回' : 'Back',
+      backIcon: icons.back,
+      theme: effectiveTheme(),
+      body: `
         ${cards || `<div class="wb-menu-empty">${zh ? '还没有模型连接。' : 'No model connections yet.'}</div>`}
         ${form || `<button type="button" class="wb-btn wb-btn--primary" data-page-action="conn-add">${zh ? '添加连接' : 'Add connection'}</button>`}
-        ${pageAlertMarkup()}
-      </div>`);
+        ${pageAlertMarkup()}`,
+    });
   }
 
   function connectionFormMarkup(connection: KernelConnectionConfig | null): string {
     const zh = pageConfig.language.startsWith('zh');
-    return `<form id="kernel-connection-form" class="wb-form">
-      <label>${zh ? '名称' : 'Label'}<input id="kernel-page-conn-label" type="text" value="${escapeHtml(connection?.label ?? '')}"></label>
-      <label>${zh ? '接口地址' : 'Base URL'}<input id="kernel-page-conn-base" type="text" value="${escapeHtml(connection?.baseUrl ?? '')}" placeholder="https://api.deepseek.com/v1"></label>
-      <label>API Key<input id="kernel-page-conn-key" type="password" value="" placeholder="${connection?.apiKey ? (zh ? '已保存，留空保持不变' : 'Saved — leave blank to keep') : 'sk-...'}" autocomplete="off"></label>
-      <label>${zh ? '模型（每行一个）' : 'Models (one per line)'}<textarea id="kernel-page-conn-models">${escapeHtml(connection?.models.join('\n') ?? '')}</textarea></label>
-      <label class="wb-row"><input id="kernel-page-conn-vision" type="checkbox" ${connection?.vision ? 'checked' : ''}> ${zh ? '支持图片输入' : 'Supports image input'}</label>
+    return settingsForm({
+      id: 'kernel-connection-form',
+      content: `${settingsField({
+        label: zh ? '名称' : 'Label',
+        control: `<input id="kernel-page-conn-label" type="text" value="${escapeHtml(connection?.label ?? '')}">`,
+      })}
+      ${settingsField({
+        label: zh ? '接口地址' : 'Base URL',
+        control: `<input id="kernel-page-conn-base" type="text" value="${escapeHtml(connection?.baseUrl ?? '')}" placeholder="https://api.deepseek.com/v1">`,
+      })}
+      ${settingsField({
+        label: 'API Key',
+        control: `<input id="kernel-page-conn-key" type="password" value="" placeholder="${connection?.apiKey ? (zh ? '已保存，留空保持不变' : 'Saved — leave blank to keep') : 'sk-...'}" autocomplete="off">`,
+      })}
+      ${settingsField({
+        label: zh ? '模型（每行一个）' : 'Models (one per line)',
+        control: `<textarea id="kernel-page-conn-models">${escapeHtml(connection?.models.join('\n') ?? '')}</textarea>`,
+      })}
+      ${settingsField({
+        label: zh ? '支持图片输入' : 'Supports image input',
+        className: 'wb-row',
+        control: `<input id="kernel-page-conn-vision" type="checkbox" ${connection?.vision ? 'checked' : ''}>`,
+        controlFirst: true,
+      })}
       <div class="wb-form-actions">
         <button type="button" class="wb-btn wb-btn--primary" data-page-action="conn-save">${zh ? '保存' : 'Save'}</button>
         <button type="button" class="wb-ghost-btn" data-page-action="conn-test">${zh ? '测试连接' : 'Test connection'}</button>
         <button type="button" class="wb-ghost-btn" data-page-action="conn-cancel">${zh ? '取消' : 'Cancel'}</button>
         ${connectionTestMessage ? `<span class="wb-form-ok">${escapeHtml(connectionTestMessage)}</span>` : ''}
       </div>
-      <div class="wb-conn-url">${zh ? '支持任何 OpenAI 兼容端点。' : 'Any OpenAI-compatible endpoint works.'}</div>
-    </form>`;
+      <div class="wb-conn-url">${zh ? '支持任何 OpenAI 兼容端点。' : 'Any OpenAI-compatible endpoint works.'}</div>`,
+    });
   }
 
   function historyPageMarkup(): string {
     const zh = pageConfig.language.startsWith('zh');
-    return stageMarkup(`${settingsHead(zh ? '聊天记录' : 'Chat history')}
-      <div class="wb-settings-body">
-        ${pageSessions.length ? pageSessions.map((session) => `<div class="wb-history-item ${session.sessionId === sessionId ? 'is-current' : ''}">
+    return settingsSubpage({
+      title: zh ? '聊天记录' : 'Chat history',
+      backLabel: zh ? '返回' : 'Back',
+      backIcon: icons.back,
+      theme: effectiveTheme(),
+      body: `
+        ${pageSessions.length ? pageSessions.map((session) => settingsCard(`<div class="wb-history-item ${session.sessionId === sessionId ? 'is-current' : ''}">
           <div class="wb-history-main" data-page-action="history-open" data-id="${escapeHtml(session.sessionId)}"><div class="wb-history-title">${escapeHtml(session.title)}</div><div class="wb-history-meta">${escapeHtml(statusLabel(session.taskStatus, pageConfig.language))} · ${session.rowCount} ${zh ? '条' : 'messages'}</div></div>
           ${session.sessionId === sessionId ? `<span class="wb-badge">${zh ? '当前' : 'Current'}</span>` : ''}
           <button type="button" class="wb-ghost-btn" data-page-action="history-delete" data-id="${escapeHtml(session.sessionId)}" aria-label="delete">×</button>
-        </div>`).join('') : `<div class="wb-menu-empty">${zh ? '还没有历史会话。' : 'No history yet.'}</div>`}
+        </div>`)).join('') : `<div class="wb-menu-empty">${zh ? '还没有历史会话。' : 'No history yet.'}</div>`}
         <div class="wb-history-foot">${zh ? '最多保留最近 10 条会话' : 'Keeps your 10 most recent chats'}</div>
-        ${pageAlertMarkup()}
-      </div>`);
+        ${pageAlertMarkup()}`,
+    });
   }
 
   async function readPageConfig(): Promise<KernelStoredConfig> {

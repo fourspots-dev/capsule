@@ -642,6 +642,109 @@
     download: "<svg viewBox='0 0 20 20' fill='none' aria-hidden='true'><path d='M10 3v9m0 0 3.2-3.2M10 12 6.8 8.8M4 13.8v2.4h12v-2.4' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>"
   };
 
+  // src/sidepanel/settings-components.ts
+  function settingsSubpage({
+    title,
+    body,
+    theme,
+    backAction = "back",
+    backLabel = "Back",
+    backIcon
+  }) {
+    return `<div id="kernel-page-layer" class="kernel-page-layer">
+    <div class="wb-stage" data-wb-theme="${theme}" style="--wb-page-rgb: 83,177,255; --wb-dock-h: 160px;">
+      ${settingsHeader(title, backAction, backLabel, backIcon)}
+      <div class="wb-settings-body">${body}</div>
+      <div class="wb-fx-grain"></div>
+      <div class="wb-fx-scan"></div>
+    </div>
+  </div>`;
+  }
+  function settingsGroup({
+    label,
+    content,
+    cardClassName
+  }) {
+    return `<div class="wb-set-group">
+    <div class="wb-set-group-label">${escapeHtml(label)}</div>
+    ${settingsCard(content, cardClassName)}
+  </div>`;
+  }
+  function settingsCard(content, className = "") {
+    return `<div class="${joinClasses("wb-set-card", className)}">${content}</div>`;
+  }
+  function settingsRow({
+    label,
+    icon,
+    value,
+    control,
+    action,
+    ariaLabel,
+    className,
+    destructive
+  }) {
+    const tag = action ? "button" : "div";
+    const attributes = [
+      action ? 'type="button"' : "",
+      action ? `data-page-action="${escapeHtml(action)}"` : "",
+      ariaLabel ? `aria-label="${escapeHtml(ariaLabel)}"` : ""
+    ].filter(Boolean).join(" ");
+    const classes = joinClasses(
+      "wb-set-row",
+      action ? "wb-set-navrow wb-clickable" : "",
+      destructive ? "kernel-danger-row" : "",
+      className
+    );
+    const trailing = control ? `<span class="wb-input-grow"></span>${control}` : value !== void 0 ? `<span class="wb-input-grow"></span><span class="wb-set-row-value">${escapeHtml(value)}</span>${action ? chevron() : ""}` : action ? `<span class="wb-input-grow"></span>${chevron()}` : "";
+    return `<${tag}${attributes ? ` ${attributes}` : ""} class="${classes}">${settingsRowLabel(label, icon)}${trailing}</${tag}>`;
+  }
+  function settingsNavRow(options) {
+    return settingsRow(options);
+  }
+  function settingsSelectRow({
+    label,
+    icon,
+    value,
+    action,
+    control
+  }) {
+    const trailing = control ?? (action ? `<button type="button" class="wb-set-select" data-page-action="${escapeHtml(action)}"><span class="wb-set-select-value">${escapeHtml(value ?? "")}</span>${chevron()}</button>` : `<span class="wb-set-select-value">${escapeHtml(value ?? "")}</span>`);
+    return `<div class="wb-set-row wb-set-selectrow">${settingsRowLabel(label, icon)}${trailing}</div>`;
+  }
+  function settingsField({
+    label,
+    control,
+    className,
+    controlFirst = false
+  }) {
+    return `<label${className ? ` class="${escapeHtml(className)}"` : ""}>${controlFirst ? control : ""}${escapeHtml(label)}${controlFirst ? "" : control}</label>`;
+  }
+  function settingsForm({
+    id,
+    content,
+    className
+  }) {
+    return `<form${id ? ` id="${escapeHtml(id)}"` : ""} class="${joinClasses("wb-form", className)}">${content}</form>`;
+  }
+  function settingsSeparator() {
+    return '<div class="wb-set-sepa"></div>';
+  }
+  function settingsHeader(title, action, backLabel, backIcon) {
+    return `<div class="wb-settings-head">
+    <button type="button" class="wb-icon-button wb-settings-back" data-page-action="${escapeHtml(action)}" aria-label="${escapeHtml(backLabel)}">${backIcon}</button>
+    <div class="wb-settings-title">${escapeHtml(title)}</div>
+  </div>`;
+  }
+  function settingsRowLabel(label, icon) {
+    return `<span class="wb-set-row-label">${icon ? `<span class="wb-set-row-icon">${icon}</span>` : ""}${escapeHtml(label)}</span>`;
+  }
+  function chevron() {
+    return "<svg viewBox='0 0 18 18' fill='none' aria-hidden='true' class='wb-set-select-chevron'><path fill-rule='evenodd' clip-rule='evenodd' d='M8.54 12.54a.7.7 0 0 0 .96 0l5.23-5.24a.7.7 0 1 0-.96-.96L9.02 11.1 4.23 6.35a.7.7 0 0 0-.96.96z' fill='currentColor'/></svg>";
+  }
+  function joinClasses(...values) {
+    return values.filter(Boolean).join(" ");
+  }
+
   // src/sidepanel/turn-render-model.ts
   var EXPLORE_TOOLS = /* @__PURE__ */ new Set([
     "list_tabs",
@@ -1542,21 +1645,6 @@
       if (pageView === "remote-actions") return remoteActionsPageMarkup();
       return settingsPageMarkup();
     }
-    function stageMarkup(inner) {
-      return `<div id="kernel-page-layer" class="kernel-page-layer">
-      <div class="wb-stage" data-wb-theme="${effectiveTheme()}" style="--wb-page-rgb: 83,177,255; --wb-dock-h: 160px;">
-        ${inner}
-        <div class="wb-fx-grain"></div>
-        <div class="wb-fx-scan"></div>
-      </div>
-    </div>`;
-    }
-    function settingsHead(title, action = "back") {
-      return `<div class="wb-settings-head">
-      <button type="button" class="wb-icon-button wb-settings-back" data-page-action="${action}" aria-label="${pageConfig.language.startsWith("zh") ? "\u8FD4\u56DE" : "Back"}">${icons.back}</button>
-      <div class="wb-settings-title">${escapeHtml(title)}</div>
-    </div>`;
-    }
     function pageAlertMarkup() {
       return pageError ? `<div class="wb-notice wb-notice-error">${escapeHtml(pageError)}</div>` : "";
     }
@@ -1569,117 +1657,167 @@
           label: `${model}`
         }))
       );
-      return stageMarkup(`${settingsHead(zh ? "\u8BBE\u7F6E" : "Settings")}
-      <div class="wb-settings-body">
-        <div class="wb-set-card wb-set-account">
+      const body = `
+      ${settingsCard(
+        `
           <div class="wb-account-row">
             <span class="wb-account-avatar wb-account-avatar--logo" aria-hidden="true"><img class="wb-account-avatar-img" alt="" src="icon/tinyai.svg"></span>
             <span class="wb-account-copy"><span class="wb-account-name-row"><span class="wb-account-name">tinyai</span></span><span class="wb-account-line">${zh ? "\u6240\u6709\u5BF9\u8BDD\u548C\u6A21\u578B Key \u90FD\u4FDD\u5B58\u5728\u672C\u673A\u3002" : "All chats and model keys stay on this machine."}</span></span>
             <span class="wb-badge">${zh ? "\u672C\u5730 Agent" : "Local agent"}</span>
           </div>
-        </div>
-        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? "\u901A\u7528" : "General"}</div>
-          <div class="wb-set-card">
-            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.sun}</span>${zh ? "\u5916\u89C2" : "Appearance"}</span>
-              <button type="button" class="wb-set-select" data-page-action="theme"><span class="wb-set-select-value">${escapeHtml(themeLabel(pageConfig.theme, zh))}</span>${icons.chevronDown}</button></div>
-            <div class="wb-set-sepa"></div>
-            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.globe}</span>${zh ? "\u8BED\u8A00" : "Language"}</span>
-              <select id="kernel-page-language" class="wb-native-select">${[
-        ["en", "English"],
-        ["zh", "\u4E2D\u6587"],
-        ["zh-TW", "\u7E41\u9AD4\u4E2D\u6587"],
-        ["ja", "\u65E5\u672C\u8A9E"],
-        ["ko", "\uD55C\uAD6D\uC5B4"],
-        ["es", "Espa\xF1ol"],
-        ["fr", "Fran\xE7ais"],
-        ["de", "Deutsch"]
-      ].map(([value, label]) => `<option value="${value}" ${value === pageConfig.language ? "selected" : ""}>${label}</option>`).join("")}</select></div>
-            <div class="wb-set-sepa"></div>
-            <div class="wb-set-row"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.zoom}</span>${zh ? "\u7F29\u653E" : "Zoom"}</span><span class="wb-input-grow"></span>
+        `,
+        "wb-set-account"
+      )}
+      ${settingsGroup({
+        label: zh ? "\u901A\u7528" : "General",
+        content: [
+          settingsSelectRow({
+            label: zh ? "\u5916\u89C2" : "Appearance",
+            icon: icons.sun,
+            value: themeLabel(pageConfig.theme, zh),
+            action: "theme"
+          }),
+          settingsSeparator(),
+          settingsSelectRow({
+            label: zh ? "\u8BED\u8A00" : "Language",
+            icon: icons.globe,
+            control: `<select id="kernel-page-language" class="wb-native-select">${[
+              ["en", "English"],
+              ["zh", "\u4E2D\u6587"],
+              ["zh-TW", "\u7E41\u9AD4\u4E2D\u6587"],
+              ["ja", "\u65E5\u672C\u8A9E"],
+              ["ko", "\uD55C\uAD6D\uC5B4"],
+              ["es", "Espa\xF1ol"],
+              ["fr", "Fran\xE7ais"],
+              ["de", "Deutsch"]
+            ].map(([value, label]) => `<option value="${value}" ${value === pageConfig.language ? "selected" : ""}>${label}</option>`).join("")}</select>`
+          }),
+          settingsSeparator(),
+          settingsRow({
+            label: zh ? "\u7F29\u653E" : "Zoom",
+            icon: icons.zoom,
+            control: `
               <button type="button" class="wb-set-stepper-btn" data-page-action="zoom" data-delta="-10" aria-label="Zoom out">\u2212</button>
               <button type="button" class="wb-set-stepper-value" data-page-action="zoom" data-delta="0">${pageConfig.zoom}%</button>
-              <button type="button" class="wb-set-stepper-btn" data-page-action="zoom" data-delta="10" aria-label="Zoom in">+</button></div>
-          </div>
-        </div>
-        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? "\u6A21\u578B" : "Models"}</div>
-          <div class="wb-set-card">
-            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.sparkle}</span>${zh ? "\u6A21\u578B" : "Model"}</span>
-              <select class="wb-native-select" id="kernel-page-model">${models.length ? models.map((item) => `<option value="${escapeHtml(item.connection + "|" + item.model)}" ${item.connection === pageConfig.connection && item.model === pageConfig.model ? "selected" : ""}>${escapeHtml(item.label)}</option>`).join("") : `<option>${zh ? "\u672A\u914D\u7F6E\u6A21\u578B" : "No model"}</option>`}</select></div>
-            <div class="wb-set-sepa"></div>
-            <div class="wb-set-row wb-set-navrow wb-clickable" data-page-action="connections"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.link}</span>${zh ? "\u6A21\u578B\u8FDE\u63A5" : "Model connections"}</span><span class="wb-input-grow"></span><span class="wb-set-row-value">${pageConfig.connections.length}</span>${icons.chevronDown}</div>
-          </div>
-        </div>
-        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? "\u6743\u9650" : "Permissions"}</div>
-          <div class="wb-set-card">
-            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.shield}</span>${zh ? "\u64CD\u4F5C\u5BA1\u6279" : "Action approval"}</span>
-              <button type="button" class="wb-set-select" data-page-action="approval"><span class="wb-set-select-value">${pageConfig.approval === "auto" ? zh ? "\u81EA\u52A8\u6267\u884C" : "Auto-approve" : zh ? "\u9700\u8981\u5BA1\u6279" : "Requires approval"}</span>${icons.chevronDown}</button></div>
-            <div class="wb-set-sepa"></div>
-            <div class="wb-set-row wb-set-selectrow"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.sparkle}</span>${zh ? "\u663E\u793A\u63A8\u7406\u8FC7\u7A0B" : "Reasoning"}</span>
-              <button type="button" class="wb-set-select" data-page-action="reasoning"><span class="wb-set-select-value">${pageConfig.showReasoning ? zh ? "\u663E\u793A" : "Show" : zh ? "\u9690\u85CF" : "Hidden"}</span>${icons.chevronDown}</button></div>
-          </div>
-        </div>
-        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? "\u8FD0\u884C\u65F6" : "Runtime"}</div>
-          <div class="wb-set-card">
-            <button type="button" class="wb-set-row wb-set-navrow wb-clickable" data-page-action="capabilities">
-              <span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.sparkle}</span>${zh ? "\u80FD\u529B" : "Capabilities"}</span>
-              <span class="wb-input-grow"></span>
-              <span class="wb-set-row-value">${escapeHtml(runtimeCapabilitySummary(zh))}</span>
-              ${icons.chevronDown}
-            </button>
-            <div class="wb-set-sepa"></div>
-            <button type="button" class="wb-set-row wb-set-navrow wb-clickable" data-page-action="remote-actions">
-              <span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.link}</span>${zh ? "\u8FDC\u7A0B Action" : "Remote Actions"}</span>
-              <span class="wb-input-grow"></span>
-              <span class="wb-set-row-value">${remoteActionConfig ? zh ? "\u5DF2\u914D\u7F6E" : "Configured" : zh ? "\u672A\u914D\u7F6E" : "Not configured"}</span>
-              ${icons.chevronDown}
-            </button>
-          </div>
-        </div>
-        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? "\u6570\u636E" : "Data"}</div>
-          <div class="wb-set-card">
-            <button type="button" class="wb-set-row wb-set-navrow wb-clickable" data-page-action="capsule-export">
-              <span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.download}</span>${zh ? "\u5BFC\u51FA Workspace Capsule" : "Export Workspace Capsule"}</span>
-              <span class="wb-input-grow"></span>
-              ${icons.chevronDown}
-            </button>
-            <div class="wb-set-sepa"></div>
-            <button type="button" class="wb-set-row wb-set-navrow wb-clickable" data-page-action="capsule-import">
-              <span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.file}</span>${zh ? "\u5BFC\u5165 Workspace Capsule" : "Import Workspace Capsule"}</span>
-              <span class="wb-input-grow"></span>
-              ${icons.chevronDown}
-            </button>
-            <input id="kernel-capsule-file" type="file" accept=".capsule,.tinyai,application/octet-stream" hidden>
-            <div class="wb-set-sepa"></div>
-            <button type="button" class="wb-set-row wb-set-navrow wb-clickable kernel-danger-row" data-page-action="clear-history">
-              <span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.info}</span>${zh ? "\u6E05\u9664\u5168\u90E8\u804A\u5929\u5386\u53F2" : "Clear all chat history"}</span>
-              <span class="wb-input-grow"></span>
-              ${icons.chevronDown}
-            </button>
-          </div>
-        </div>
-        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? "\u5173\u4E8E" : "About"}</div>
-          <div class="wb-set-card">
-            <div class="wb-set-row"><span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.info}</span>${zh ? "\u7248\u672C" : "Version"}</span><span class="wb-input-grow"></span><span class="wb-set-row-value">${escapeHtml(chrome.runtime.getManifest().version)}</span></div>
-          </div>
-        </div>
-        ${pageAlertMarkup()}
-      </div>`);
+              <button type="button" class="wb-set-stepper-btn" data-page-action="zoom" data-delta="10" aria-label="Zoom in">+</button>`
+          })
+        ].join("")
+      })}
+      ${settingsGroup({
+        label: zh ? "\u6A21\u578B" : "Models",
+        content: [
+          settingsSelectRow({
+            label: zh ? "\u6A21\u578B" : "Model",
+            icon: icons.sparkle,
+            control: `<select class="wb-native-select" id="kernel-page-model">${models.length ? models.map((item) => `<option value="${escapeHtml(item.connection + "|" + item.model)}" ${item.connection === pageConfig.connection && item.model === pageConfig.model ? "selected" : ""}>${escapeHtml(item.label)}</option>`).join("") : `<option>${zh ? "\u672A\u914D\u7F6E\u6A21\u578B" : "No model"}</option>`}</select>`
+          }),
+          settingsSeparator(),
+          settingsNavRow({
+            label: zh ? "\u6A21\u578B\u8FDE\u63A5" : "Model connections",
+            icon: icons.link,
+            value: String(pageConfig.connections.length),
+            action: "connections"
+          })
+        ].join("")
+      })}
+      ${settingsGroup({
+        label: zh ? "\u6743\u9650" : "Permissions",
+        content: [
+          settingsSelectRow({
+            label: zh ? "\u64CD\u4F5C\u5BA1\u6279" : "Action approval",
+            icon: icons.shield,
+            value: pageConfig.approval === "auto" ? zh ? "\u81EA\u52A8\u6267\u884C" : "Auto-approve" : zh ? "\u9700\u8981\u5BA1\u6279" : "Requires approval",
+            action: "approval"
+          }),
+          settingsSeparator(),
+          settingsSelectRow({
+            label: zh ? "\u663E\u793A\u63A8\u7406\u8FC7\u7A0B" : "Reasoning",
+            icon: icons.sparkle,
+            value: pageConfig.showReasoning ? zh ? "\u663E\u793A" : "Show" : zh ? "\u9690\u85CF" : "Hidden",
+            action: "reasoning"
+          })
+        ].join("")
+      })}
+      ${settingsGroup({
+        label: zh ? "\u8FD0\u884C\u65F6" : "Runtime",
+        content: [
+          settingsNavRow({
+            label: zh ? "\u80FD\u529B" : "Capabilities",
+            icon: icons.sparkle,
+            value: runtimeCapabilitySummary(zh),
+            action: "capabilities"
+          }),
+          settingsSeparator(),
+          settingsNavRow({
+            label: zh ? "\u8FDC\u7A0B Action" : "Remote Actions",
+            icon: icons.link,
+            value: remoteActionConfig ? zh ? "\u5DF2\u914D\u7F6E" : "Configured" : zh ? "\u672A\u914D\u7F6E" : "Not configured",
+            action: "remote-actions"
+          })
+        ].join("")
+      })}
+      ${settingsGroup({
+        label: zh ? "\u6570\u636E" : "Data",
+        content: [
+          settingsNavRow({
+            label: zh ? "\u5BFC\u51FA Workspace Capsule" : "Export Workspace Capsule",
+            icon: icons.download,
+            action: "capsule-export"
+          }),
+          settingsSeparator(),
+          settingsNavRow({
+            label: zh ? "\u5BFC\u5165 Workspace Capsule" : "Import Workspace Capsule",
+            icon: icons.file,
+            action: "capsule-import"
+          }),
+          '<input id="kernel-capsule-file" type="file" accept=".capsule,.tinyai,application/octet-stream" hidden>',
+          settingsSeparator(),
+          settingsNavRow({
+            label: zh ? "\u6E05\u9664\u5168\u90E8\u804A\u5929\u5386\u53F2" : "Clear all chat history",
+            icon: icons.info,
+            action: "clear-history",
+            destructive: true
+          })
+        ].join("")
+      })}
+      ${settingsGroup({
+        label: zh ? "\u5173\u4E8E" : "About",
+        content: settingsRow({
+          label: zh ? "\u7248\u672C" : "Version",
+          icon: icons.info,
+          value: chrome.runtime.getManifest().version
+        })
+      })}
+      ${pageAlertMarkup()}`;
+      return settingsSubpage({
+        title: zh ? "\u8BBE\u7F6E" : "Settings",
+        backLabel: zh ? "\u8FD4\u56DE" : "Back",
+        backIcon: icons.back,
+        theme: effectiveTheme(),
+        body
+      });
     }
     function capabilitiesPageMarkup() {
       const zh = pageConfig.language.startsWith("zh");
-      return stageMarkup(`${settingsHead(zh ? "\u80FD\u529B\u4E0E\u8BC1\u636E" : "Capabilities & evidence", "back-runtime")}
-      <div class="wb-settings-body">
-        ${capabilityBoardMarkup(zh)}
-        ${pageAlertMarkup()}
-      </div>`);
+      return settingsSubpage({
+        title: zh ? "\u80FD\u529B\u4E0E\u8BC1\u636E" : "Capabilities & evidence",
+        backAction: "back-runtime",
+        backLabel: zh ? "\u8FD4\u56DE" : "Back",
+        backIcon: icons.back,
+        theme: effectiveTheme(),
+        body: `${capabilityBoardMarkup(zh)}${pageAlertMarkup()}`
+      });
     }
     function remoteActionsPageMarkup() {
       const zh = pageConfig.language.startsWith("zh");
-      return stageMarkup(`${settingsHead(zh ? "\u8FDC\u7A0B Action" : "Remote Actions", "back-runtime")}
-      <div class="wb-settings-body">
-        ${remoteActionFormMarkup(zh)}
-        ${pageAlertMarkup()}
-      </div>`);
+      return settingsSubpage({
+        title: zh ? "\u8FDC\u7A0B Action" : "Remote Actions",
+        backAction: "back-runtime",
+        backLabel: zh ? "\u8FD4\u56DE" : "Back",
+        backIcon: icons.back,
+        theme: effectiveTheme(),
+        body: `${remoteActionFormMarkup(zh)}${pageAlertMarkup()}`
+      });
     }
     function runtimeCapabilitySummary(zh) {
       if (capabilityStatusError) return zh ? "\u4E0D\u53EF\u7528" : "Unavailable";
@@ -1706,15 +1844,17 @@
     }
     function capabilityBoardMarkup(zh) {
       if (capabilityStatusError) {
-        return `<div class="wb-set-card kernel-capability-card">
-        <div class="kernel-capability-empty">${escapeHtml(capabilityStatusError)}</div>
-        <button type="button" class="wb-ghost-btn" data-page-action="capability-refresh">${zh ? "\u91CD\u8BD5" : "Retry"}</button>
-      </div>`;
+        return settingsCard(
+          `<div class="kernel-capability-empty">${escapeHtml(capabilityStatusError)}</div>
+        <button type="button" class="wb-ghost-btn" data-page-action="capability-refresh">${zh ? "\u91CD\u8BD5" : "Retry"}</button>`,
+          "kernel-capability-card"
+        );
       }
       if (!capabilityStatus) {
-        return `<div class="wb-set-card kernel-capability-card">
-        <div class="kernel-capability-empty">${zh ? "\u8FD0\u884C\u65F6\u5C1A\u672A\u542F\u52A8\u3002" : "Runtime is not available yet."}</div>
-      </div>`;
+        return settingsCard(
+          `<div class="kernel-capability-empty">${zh ? "\u8FD0\u884C\u65F6\u5C1A\u672A\u542F\u52A8\u3002" : "Runtime is not available yet."}</div>`,
+          "kernel-capability-card"
+        );
       }
       const {
         available,
@@ -1737,7 +1877,7 @@
       const diagnostics = capabilityStatus.diagnostics.slice(0, 4).map(
         (item) => `<div class="kernel-capability-diagnostic">${escapeHtml(item.code)} \xB7 ${escapeHtml(item.message)}</div>`
       );
-      return `<div class="wb-set-card kernel-capability-card">
+      return settingsCard(`
       <div class="kernel-capability-summary">
         <span><b>${available}</b> ${zh ? "\u53EF\u7528" : "available"}</span>
         <span><b>${degraded}</b> ${zh ? "\u964D\u7EA7" : "degraded"}</span>
@@ -1747,25 +1887,39 @@
       </div>
       ${actionRows.join("") || `<div class="kernel-capability-empty">${zh ? "\u6CA1\u6709\u5DF2\u6CE8\u518C\u7684\u8FDC\u7A0B Action\u3002" : "No remote Actions registered."}</div>`}
       ${diagnostics.join("")}
-    </div>`;
+    `, "kernel-capability-card");
     }
     function remoteActionFormMarkup(zh) {
-      return `<form id="kernel-remote-action-form" class="wb-form kernel-remote-action-form">
-      <label>${zh ? "Action \u7AEF\u70B9" : "Action endpoint"}<input id="kernel-remote-endpoint" type="url" value="${escapeHtml(remoteActionConfig?.endpoint ?? "")}" placeholder="https://actions.example.com/rpc"></label>
-      <label>Bearer Token<input id="kernel-remote-token" type="password" value="" placeholder="${remoteActionConfig?.token ? zh ? "\u5DF2\u4FDD\u5B58\uFF0C\u7559\u7A7A\u4FDD\u6301\u4E0D\u53D8" : "Saved \u2014 leave blank to keep" : "optional"}" autocomplete="off"></label>
-      <label>${zh ? "\u5141\u8BB8\u7684 Action ID\uFF08\u6BCF\u884C\u4E00\u4E2A\uFF09" : "Allowed Action IDs (one per line)"}<textarea id="kernel-remote-allowlist">${escapeHtml(remoteActionConfig?.allowedActionIds?.join("\n") ?? "")}</textarea></label>
-      <label>${zh ? "\u8D85\u65F6\uFF08\u6BEB\u79D2\uFF09" : "Timeout (ms)"}<input id="kernel-remote-timeout" type="number" min="1" value="${remoteActionConfig?.timeoutMs ?? 3e5}"></label>
+      return settingsForm({
+        id: "kernel-remote-action-form",
+        className: "kernel-remote-action-form",
+        content: `${settingsField({
+          label: zh ? "Action \u7AEF\u70B9" : "Action endpoint",
+          control: `<input id="kernel-remote-endpoint" type="url" value="${escapeHtml(remoteActionConfig?.endpoint ?? "")}" placeholder="https://actions.example.com/rpc">`
+        })}
+      ${settingsField({
+          label: "Bearer Token",
+          control: `<input id="kernel-remote-token" type="password" value="" placeholder="${remoteActionConfig?.token ? zh ? "\u5DF2\u4FDD\u5B58\uFF0C\u7559\u7A7A\u4FDD\u6301\u4E0D\u53D8" : "Saved \u2014 leave blank to keep" : "optional"}" autocomplete="off">`
+        })}
+      ${settingsField({
+          label: zh ? "\u5141\u8BB8\u7684 Action ID\uFF08\u6BCF\u884C\u4E00\u4E2A\uFF09" : "Allowed Action IDs (one per line)",
+          control: `<textarea id="kernel-remote-allowlist">${escapeHtml(remoteActionConfig?.allowedActionIds?.join("\n") ?? "")}</textarea>`
+        })}
+      ${settingsField({
+          label: zh ? "\u8D85\u65F6\uFF08\u6BEB\u79D2\uFF09" : "Timeout (ms)",
+          control: `<input id="kernel-remote-timeout" type="number" min="1" value="${remoteActionConfig?.timeoutMs ?? 3e5}">`
+        })}
       <div class="wb-form-actions">
         <button type="button" class="wb-btn wb-btn--primary" data-page-action="remote-save">${zh ? "\u4FDD\u5B58\u5E76\u63A2\u6D4B" : "Save and probe"}</button>
         <button type="button" class="wb-ghost-btn" data-page-action="remote-clear">${zh ? "\u505C\u7528\u8FDC\u7A0B Action" : "Disable remote Actions"}</button>
       </div>
-      <div class="wb-conn-url">${zh ? "\u53EA\u63A5\u53D7\u5177\u540D Action\uFF1B\u7AEF\u70B9\u4E0D\u4F1A\u83B7\u5F97\u901A\u7528 Shell\u3002" : "Only named Actions are exposed; the endpoint never receives a generic shell."}</div>
-    </form>`;
+      <div class="wb-conn-url">${zh ? "\u53EA\u63A5\u53D7\u5177\u540D Action\uFF1B\u7AEF\u70B9\u4E0D\u4F1A\u83B7\u5F97\u901A\u7528 Shell\u3002" : "Only named Actions are exposed; the endpoint never receives a generic shell."}</div>`
+      });
     }
     function connectionsPageMarkup() {
       const zh = pageConfig.language.startsWith("zh");
       const cards = pageConfig.connections.map(
-        (connection) => `<div class="wb-conn-card">
+        (connection) => settingsCard(`<div class="wb-conn-card">
           <div class="wb-conn-head"><span class="wb-conn-name">${escapeHtml(connection.label)}</span>${connection.vision ? '<span class="wb-badge">vision</span>' : ""}</div>
           <div class="wb-conn-url">${escapeHtml(connection.baseUrl)}</div>
           <div class="wb-conn-models">${connection.models.length ? escapeHtml(connection.models.join(", ")) : "\u2014"} \xB7 ${connection.apiKey ? "key \u2713" : "no key"}</div>
@@ -1773,47 +1927,74 @@
             <button type="button" class="wb-ghost-btn" data-page-action="conn-edit" data-id="${escapeHtml(connection.id)}">${zh ? "\u7F16\u8F91" : "Edit"}</button>
             <button type="button" class="wb-ghost-btn" data-page-action="conn-delete" data-id="${escapeHtml(connection.id)}">${zh ? "\u5220\u9664" : "Delete"}</button>
           </div>
-        </div>`
+        </div>`)
       ).join("");
       const form = editingConnectionId !== void 0 ? connectionFormMarkup(
         editingConnectionId === null ? null : pageConfig.connections.find((item) => item.id === editingConnectionId) ?? null
       ) : "";
-      return stageMarkup(`${settingsHead(zh ? "\u6A21\u578B\u8FDE\u63A5" : "Connections", "back-connections")}
-      <div class="wb-settings-body">
+      return settingsSubpage({
+        title: zh ? "\u6A21\u578B\u8FDE\u63A5" : "Connections",
+        backAction: "back-connections",
+        backLabel: zh ? "\u8FD4\u56DE" : "Back",
+        backIcon: icons.back,
+        theme: effectiveTheme(),
+        body: `
         ${cards || `<div class="wb-menu-empty">${zh ? "\u8FD8\u6CA1\u6709\u6A21\u578B\u8FDE\u63A5\u3002" : "No model connections yet."}</div>`}
         ${form || `<button type="button" class="wb-btn wb-btn--primary" data-page-action="conn-add">${zh ? "\u6DFB\u52A0\u8FDE\u63A5" : "Add connection"}</button>`}
-        ${pageAlertMarkup()}
-      </div>`);
+        ${pageAlertMarkup()}`
+      });
     }
     function connectionFormMarkup(connection) {
       const zh = pageConfig.language.startsWith("zh");
-      return `<form id="kernel-connection-form" class="wb-form">
-      <label>${zh ? "\u540D\u79F0" : "Label"}<input id="kernel-page-conn-label" type="text" value="${escapeHtml(connection?.label ?? "")}"></label>
-      <label>${zh ? "\u63A5\u53E3\u5730\u5740" : "Base URL"}<input id="kernel-page-conn-base" type="text" value="${escapeHtml(connection?.baseUrl ?? "")}" placeholder="https://api.deepseek.com/v1"></label>
-      <label>API Key<input id="kernel-page-conn-key" type="password" value="" placeholder="${connection?.apiKey ? zh ? "\u5DF2\u4FDD\u5B58\uFF0C\u7559\u7A7A\u4FDD\u6301\u4E0D\u53D8" : "Saved \u2014 leave blank to keep" : "sk-..."}" autocomplete="off"></label>
-      <label>${zh ? "\u6A21\u578B\uFF08\u6BCF\u884C\u4E00\u4E2A\uFF09" : "Models (one per line)"}<textarea id="kernel-page-conn-models">${escapeHtml(connection?.models.join("\n") ?? "")}</textarea></label>
-      <label class="wb-row"><input id="kernel-page-conn-vision" type="checkbox" ${connection?.vision ? "checked" : ""}> ${zh ? "\u652F\u6301\u56FE\u7247\u8F93\u5165" : "Supports image input"}</label>
+      return settingsForm({
+        id: "kernel-connection-form",
+        content: `${settingsField({
+          label: zh ? "\u540D\u79F0" : "Label",
+          control: `<input id="kernel-page-conn-label" type="text" value="${escapeHtml(connection?.label ?? "")}">`
+        })}
+      ${settingsField({
+          label: zh ? "\u63A5\u53E3\u5730\u5740" : "Base URL",
+          control: `<input id="kernel-page-conn-base" type="text" value="${escapeHtml(connection?.baseUrl ?? "")}" placeholder="https://api.deepseek.com/v1">`
+        })}
+      ${settingsField({
+          label: "API Key",
+          control: `<input id="kernel-page-conn-key" type="password" value="" placeholder="${connection?.apiKey ? zh ? "\u5DF2\u4FDD\u5B58\uFF0C\u7559\u7A7A\u4FDD\u6301\u4E0D\u53D8" : "Saved \u2014 leave blank to keep" : "sk-..."}" autocomplete="off">`
+        })}
+      ${settingsField({
+          label: zh ? "\u6A21\u578B\uFF08\u6BCF\u884C\u4E00\u4E2A\uFF09" : "Models (one per line)",
+          control: `<textarea id="kernel-page-conn-models">${escapeHtml(connection?.models.join("\n") ?? "")}</textarea>`
+        })}
+      ${settingsField({
+          label: zh ? "\u652F\u6301\u56FE\u7247\u8F93\u5165" : "Supports image input",
+          className: "wb-row",
+          control: `<input id="kernel-page-conn-vision" type="checkbox" ${connection?.vision ? "checked" : ""}>`,
+          controlFirst: true
+        })}
       <div class="wb-form-actions">
         <button type="button" class="wb-btn wb-btn--primary" data-page-action="conn-save">${zh ? "\u4FDD\u5B58" : "Save"}</button>
         <button type="button" class="wb-ghost-btn" data-page-action="conn-test">${zh ? "\u6D4B\u8BD5\u8FDE\u63A5" : "Test connection"}</button>
         <button type="button" class="wb-ghost-btn" data-page-action="conn-cancel">${zh ? "\u53D6\u6D88" : "Cancel"}</button>
         ${connectionTestMessage ? `<span class="wb-form-ok">${escapeHtml(connectionTestMessage)}</span>` : ""}
       </div>
-      <div class="wb-conn-url">${zh ? "\u652F\u6301\u4EFB\u4F55 OpenAI \u517C\u5BB9\u7AEF\u70B9\u3002" : "Any OpenAI-compatible endpoint works."}</div>
-    </form>`;
+      <div class="wb-conn-url">${zh ? "\u652F\u6301\u4EFB\u4F55 OpenAI \u517C\u5BB9\u7AEF\u70B9\u3002" : "Any OpenAI-compatible endpoint works."}</div>`
+      });
     }
     function historyPageMarkup() {
       const zh = pageConfig.language.startsWith("zh");
-      return stageMarkup(`${settingsHead(zh ? "\u804A\u5929\u8BB0\u5F55" : "Chat history")}
-      <div class="wb-settings-body">
-        ${pageSessions.length ? pageSessions.map((session) => `<div class="wb-history-item ${session.sessionId === sessionId ? "is-current" : ""}">
+      return settingsSubpage({
+        title: zh ? "\u804A\u5929\u8BB0\u5F55" : "Chat history",
+        backLabel: zh ? "\u8FD4\u56DE" : "Back",
+        backIcon: icons.back,
+        theme: effectiveTheme(),
+        body: `
+        ${pageSessions.length ? pageSessions.map((session) => settingsCard(`<div class="wb-history-item ${session.sessionId === sessionId ? "is-current" : ""}">
           <div class="wb-history-main" data-page-action="history-open" data-id="${escapeHtml(session.sessionId)}"><div class="wb-history-title">${escapeHtml(session.title)}</div><div class="wb-history-meta">${escapeHtml(statusLabel(session.taskStatus, pageConfig.language))} \xB7 ${session.rowCount} ${zh ? "\u6761" : "messages"}</div></div>
           ${session.sessionId === sessionId ? `<span class="wb-badge">${zh ? "\u5F53\u524D" : "Current"}</span>` : ""}
           <button type="button" class="wb-ghost-btn" data-page-action="history-delete" data-id="${escapeHtml(session.sessionId)}" aria-label="delete">\xD7</button>
-        </div>`).join("") : `<div class="wb-menu-empty">${zh ? "\u8FD8\u6CA1\u6709\u5386\u53F2\u4F1A\u8BDD\u3002" : "No history yet."}</div>`}
+        </div>`)).join("") : `<div class="wb-menu-empty">${zh ? "\u8FD8\u6CA1\u6709\u5386\u53F2\u4F1A\u8BDD\u3002" : "No history yet."}</div>`}
         <div class="wb-history-foot">${zh ? "\u6700\u591A\u4FDD\u7559\u6700\u8FD1 10 \u6761\u4F1A\u8BDD" : "Keeps your 10 most recent chats"}</div>
-        ${pageAlertMarkup()}
-      </div>`);
+        ${pageAlertMarkup()}`
+      });
     }
     async function readPageConfig() {
       const stored = await chrome.storage.local.get(CONFIG_KEY);

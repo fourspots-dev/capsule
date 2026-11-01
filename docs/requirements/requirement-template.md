@@ -42,6 +42,26 @@ List explicitly excluded behavior.
 Mark every required consumer as `modify` with an evidence target, or `none`
 with a technical reason. List forbidden partial-delivery shortcuts.
 
+## UI impact
+
+Applies when the requirement changes any client layout, control, navigation or
+visible state. Read the
+[Side Panel UI Contract](../ui/tinyai-sidepanel-ui-contract.md) before designing.
+
+| Item | Value |
+|---|---|
+| UI impact | yes / no |
+| Reused canonical components | |
+| New visual primitives | none / list |
+| Entry point and subpage navigation | |
+| Responsive widths | |
+| Screenshot evidence | |
+| E2E / computed-style evidence | |
+
+Raw settings cards, rows or forms must not be introduced where a canonical
+component exists. A new primitive requires a Contract update and reviewable
+reason.
+
 ## Acceptance
 
 1. Observable result.

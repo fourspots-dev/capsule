@@ -15,6 +15,8 @@
     <dt>Design status</dt><dd>review | approved_unreviewed | approved</dd>
     <dt>Implementation authorized</dt><dd>false</dd>
     <dt>Architecture impact</dt><dd>yes/no</dd>
+    <dt>UI impact</dt><dd>yes/no</dd>
+    <dt>UI Contract</dt><dd>docs/ui/tinyai-sidepanel-ui-contract.md (when applicable)</dd>
     <dt>ADR review</dt><dd>pending | existing | proposed | not_required</dd>
   </dl>
   <section id="trace">
@@ -25,6 +27,13 @@
   </section>
   <section id="cases">
     <h2>3. Cases</h2>
+    <ul>
+      <li>Canonical component composition and escaping.</li>
+      <li>Settings row computed border/background.</li>
+      <li>Form control radius, focus and responsive width.</li>
+      <li>Subpage returns through Settings.</li>
+      <li>420x900 and 320x700 have no horizontal overflow.</li>
+    </ul>
   </section>
   <section id="architecture-completeness">
     <h2>4. Architecture completeness</h2>
@@ -35,6 +44,7 @@
         <tr><td>Providers</td><td>success / unavailable / fault</td><td></td></tr>
         <tr><td>Consumers</td><td>each required client/profile</td><td></td></tr>
         <tr><td>Prompt + Registry + UI</td><td>same capability set</td><td></td></tr>
+        <tr><td>UI Contract</td><td>canonical components and computed style</td><td>npm run check:ui + UI E2E</td></tr>
         <tr><td>Persistence + migration</td><td>resume and round trip</td><td></td></tr>
         <tr><td>Legacy cleanup</td><td>old path absent or explicitly preserved</td><td></td></tr>
       </tbody>

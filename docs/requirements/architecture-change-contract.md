@@ -19,7 +19,23 @@ List every provider and consumer:
 Every item must be marked `modify` with an evidence target or `none` with a
 technical reason.
 
-## 2. Required Invariants
+## 2. UI Impact
+
+For any client UI change, read
+[`docs/ui/tinyai-sidepanel-ui-contract.md`](../ui/tinyai-sidepanel-ui-contract.md)
+and map:
+
+- canonical components reused;
+- new visual primitives and why the existing ones are insufficient;
+- Settings home entries and subpage navigation;
+- responsive widths;
+- screenshot, computed-style and E2E evidence.
+
+The preferred implementation is composition through
+`src/sidepanel/settings-components.ts`. This rule is not duplicated in
+`AGENTS.md`; executable checks and tests enforce it.
+
+## 3. Required Invariants
 
 State the properties that must remain true. Typical examples:
 
@@ -30,13 +46,13 @@ State the properties that must remain true. Typical examples:
 - completion requires current host evidence;
 - unavailable capabilities remain visible as unavailable.
 
-## 3. Forbidden Partial Delivery
+## 4. Forbidden Partial Delivery
 
 List forbidden shortcuts, such as duplicating logic in TUI, silently retaining
 `exec`, hard-coding capability lists, or declaring completion from historical
 evidence.
 
-## 4. End-to-End Evidence
+## 5. End-to-End Evidence
 
 Provide:
 
@@ -46,7 +62,7 @@ Provide:
 - persistence, import/export, session resume, and version migration tests;
 - explicit evidence for legacy cleanup.
 
-## 5. Completion Audit
+## 6. Completion Audit
 
 Re-open the impact map after implementation. A requirement is not complete
 while any required consumer has no implementation or evidence.
