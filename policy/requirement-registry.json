@@ -97,6 +97,19 @@
       "testDesign": "docs/git-portable-backend-testing-v1.html#trace",
       "acceptance": "PortableGitBackend is the default host-independent Git implementation and supports the common local Git subset over a workspace filesystem without a git binary; its objects, refs, HEAD and index interoperate with standard Git, while the CLI backend remains optional for advanced operations and conformance testing.",
       "legacyAliases": ["FR-GIT-001", "FR-GIT-002", "FR-GIT-003", "FR-GIT-004", "FR-GIT-005", "FR-GIT-006", "FR-GIT-007", "FR-GIT-008", "FR-GIT-009", "FR-GIT-010"]
+    },
+    {
+      "id": "REQ-ENG-003",
+      "title": "Architecture impact map and completeness evidence",
+      "type": "infrastructure",
+      "priority": "P0",
+      "status": "verified",
+      "targetVersion": "0.3.1",
+      "design": "docs/engineering-versioning-and-traceability.html#architecture-impact",
+      "testDesign": "docs/engineering-versioning-and-traceability.html#architecture-completeness",
+      "acceptance": "Architecture-impacting requirements enumerate providers, consumers, lifecycle, persistence, migration, observability and cleanup before coding, and cannot be verified without per-surface contract, integration and end-to-end evidence.",
+      "legacyAliases": [],
+      "architectureImpact": true
     }
   ]
 }

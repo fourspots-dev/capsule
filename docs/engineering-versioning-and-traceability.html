@@ -30,7 +30,7 @@ code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;
 <p>把“需求、设计、测试、实现、提交、发布”变成可执行、可自动检查的完整链路。版本使用三段式；每个新需求有唯一编号；每个功能提交关联需求、目标版本、设计文档、测试文档和验证证据。</p>
 <div class="chips"><span class="chip">SemVer A.B.C</span><span class="chip">REQ-ID</span><span class="chip">Design + Test Trace</span><span class="chip">Commit Hook</span><span class="chip">Release Tag</span><span class="chip">Auditable</span></div>
 </header>
-<nav><a href="#version">版本</a><a href="#requirements">需求编号</a><a href="#documents">设计/测试</a><a href="#commits">提交协议</a><a href="#workflow">工作流</a><a href="#release">发布</a><a href="#automation">自动检查</a><a href="#baseline">当前基线</a><a href="#verification">验收</a></nav>
+<nav><a href="#version">版本</a><a href="#requirements">需求编号</a><a href="#documents">设计/测试</a><a href="#architecture-impact">架构影响面</a><a href="#architecture-completeness">架构完整性</a><a href="#commits">提交协议</a><a href="#workflow">工作流</a><a href="#release">发布</a><a href="#automation">自动检查</a><a href="#baseline">当前基线</a><a href="#verification">验收</a></nav>
 
 <section id="version">
 <h2>1. 版本规则</h2>
@@ -97,8 +97,33 @@ docs/&lt;area&gt;/vX.Y-testing.html#&lt;requirement-anchor&gt;
 <p>注册表保存的是稳定锚点，不保存“看某文档大概某处”。无设计或测试链接的需求不得进入 <code>in_progress</code>。</p>
 </section>
 
+<section id="architecture-impact">
+<h2>4. 架构变更影响面</h2>
+<p>共享能力、协议、持久化模型、工具、客户端接口或跨宿主契约变更时，不能把“某个模块已实现”当作需求完成。设计文档必须提供影响面矩阵，逐项覆盖 Provider、Consumer、生命周期、持久化与迁移、UI/Prompt/ToolRegistry、降级与清理。</p>
+<div class="grid">
+<div class="card"><h3>编码前</h3><ul><li>列出所有会提供、组合、消费或持久化该能力的模块。</li><li>每个 Consumer 标记 modify 及证据，或标记 none 及技术原因。</li><li>说明旧路径和隐式 fallback 的删除或保留策略。</li><li>列出端到端用户旅程，不只列类或接口。</li></ul></div>
+<div class="card"><h3>禁止</h3><ul><li>Headless 已支持，但 TUI/Prompt/Verifier 仍走旧模型。</li><li>为单个客户端复制 ToolPack 或 Schema。</li><li>能力缺失时静默回退到通用 shell。</li><li>把历史测试证据当成当前宿主证据。</li></ul></div>
+</div>
+<p>标记为 <code>architectureImpact: true</code> 的需求，其 Design 必须包含 <code>#architecture-impact</code>。模板与检查清单位于 <code>docs/requirements/architecture-change-contract.md</code>。</p>
+</section>
+
+<section id="architecture-completeness">
+<h2>5. 架构完整性与完成证据</h2>
+<p>测试设计必须把影响面矩阵转换成可执行证据，并为每个必需 Consumer 提供端到端验收。</p>
+<table><thead><tr><th>层次</th><th>必须证明</th></tr></thead><tbody>
+<tr><td>唯一实现</td><td>共享 ToolPack/Schema/Composer，不存在平行业务实现</td></tr>
+<tr><td>Provider</td><td>成功、不可用、拒绝、故障、取消和版本不兼容</td></tr>
+<tr><td>Consumer</td><td>Headless/TUI/CLI/Chrome/Sandbox 等规定入口全部接通</td></tr>
+<tr><td>一致性</td><td>CapabilityReport、ToolRegistry、Prompt、UI 和 Verifier 使用同一能力事实</td></tr>
+<tr><td>持久化</td><td>Session、Artifact 和 Capsule 可恢复；环境变化使旧证据失效</td></tr>
+<tr><td>迁移</td><td>至少一条跨宿主用户旅程，导出、导入、运行和续跑有证据</td></tr>
+<tr><td>清理</td><td>Legacy 路径被删除，或保留原因与兼容测试明确</td></tr>
+</tbody></table>
+<p>标记为 <code>architectureImpact: true</code> 的需求，其 Test Design 必须包含 <code>#architecture-completeness</code>。</p>
+</section>
+
 <section id="commits">
-<h2>4. 提交协议</h2>
+<h2>6. 提交协议</h2>
 <p>提交标题使用 Conventional Commit 风格，并必须包含一个或多个 REQ-ID。</p>
 <pre>feat(REQ-PATCH-001): implement contextual patch protocol
 
@@ -127,7 +152,7 @@ git log --format='%h %(trailers:key=Version,valueonly) %s'</pre>
 </section>
 
 <section id="workflow">
-<h2>5. 需求交付工作流</h2>
+<h2>7. 需求交付工作流</h2>
 <div class="flow">
 <div class="step"><b>1. Intake</b>建立 REQ，写验收和非目标</div>
 <div class="step"><b>2. Design</b>完成设计文档与对象接口</div>
@@ -149,7 +174,7 @@ git log --format='%h %(trailers:key=Version,valueonly) %s'</pre>
 </section>
 
 <section id="release">
-<h2>6. 发布与提交记录</h2>
+<h2>8. 发布与提交记录</h2>
 <ol><li>确定本次发布最高影响：major / minor / patch。</li><li>更新 <code>package.json</code> 与 lockfile 的版本。</li><li>生成或更新 <code>CHANGELOG.md</code>，按 REQ 分组。</li><li>确认所有纳入的 REQ 状态为 <code>verified</code>。</li><li>创建 annotated tag：<code>git tag -a vA.B.C -m "Release A.B.C"</code>。</li><li>发布后将 REQ 状态改为 <code>released</code>。</li></ol>
 <pre># v0.2.0
 
@@ -166,13 +191,14 @@ git log --format='%h %(trailers:key=Version,valueonly) %s'</pre>
 </section>
 
 <section id="automation">
-<h2>7. 自动化与仓库结构</h2>
+<h2>9. 自动化与仓库结构</h2>
 <pre>AGENTS.md                     所有 coding agent 的强制入口
 policy/
   requirement-registry.json     机器可读需求注册表
   requirement-template.md       新需求模板
   design-template.html          设计文档模板
   testing-template.html         测试文档模板
+  architecture-change-contract.md 架构影响面审查清单
 .githooks/
   commit-msg                    提交信息强制检查
 .gitmessage                     提交模板
@@ -193,7 +219,7 @@ scripts/
 </section>
 
 <section id="baseline">
-<h2>8. 当前采用基线</h2>
+<h2>10. 当前采用基线</h2>
 <table><thead><tr><th>项目</th><th>值</th></tr></thead><tbody>
 <tr><td>历史基线提交</td><td><code>e48b5b1</code></td></tr>
 <tr><td>当前目标版本</td><td><code>0.2.0</code></td></tr>
@@ -204,8 +230,8 @@ scripts/
 </section>
 
 <section id="verification">
-<h2>9. 本规范验收</h2>
-<ul><li>注册表中每个 REQ 都有唯一 ID、目标版本、Design 和 Tests 路径。</li><li>需求/设计/测试模板可以直接复制使用。</li><li>commit hook 拒绝缺少 REQ、Version、Design、Tests 或 Test-Evidence 的提交。</li><li>hook 拒绝不存在的 REQ、文档路径和版本不一致。</li><li><code>npm run requirements:check</code> 在正常检查链中执行。</li><li>从一个需求请求到发布 tag 的完整流程可以按本文执行并复核。</li></ul>
+<h2>11. 本规范验收</h2>
+<ul><li>注册表中每个 REQ 都有唯一 ID、目标版本、Design 和 Tests 路径。</li><li>需求/设计/测试模板可以直接复制使用。</li><li>标记 <code>architectureImpact: true</code> 的需求必须包含架构影响面和完整性证据锚点。</li><li>commit hook 拒绝缺少 REQ、Version、Design、Tests 或 Test-Evidence 的提交。</li><li>hook 拒绝不存在的 REQ、文档路径和版本不一致。</li><li><code>npm run requirements:check</code> 在正常检查链中执行。</li><li>从一个需求请求到发布 tag 的完整流程可以按本文执行并复核。</li></ul>
 <p>机器可读注册表：<code>policy/requirement-registry.json</code>。需求状态以注册表为准，设计事实以设计文档为准，验收事实以测试文档和 CI 证据为准。</p>
 <p class="foot">规范版本：1.0 · 产品目标版本：0.2.0 · 生效基线：e48b5b1 之后</p>
 </section>

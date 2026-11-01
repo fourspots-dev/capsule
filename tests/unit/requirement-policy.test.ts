@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { checkRequirementTraceability } from '../../scripts/check-requirement-traceability.mjs';
 import { inspectCommitMessage } from '../../scripts/check-commit-message.mjs';
 
@@ -18,8 +21,57 @@ describe('engineering requirement policy', () => {
         'REQ-PATCH-001',
         'REQ-ENG-001',
         'REQ-ENG-002',
+        'REQ-ENG-003',
       ])
     );
+  });
+
+  it('requires architecture impact and completeness anchors for marked requirements', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tinyai-requirements-'));
+    try {
+      await mkdir(join(root, 'policy'), { recursive: true });
+      await mkdir(join(root, 'docs'), { recursive: true });
+      await writeFile(join(root, 'package.json'), '{"version":"0.3.1"}');
+      await writeFile(
+        join(root, 'docs/design.html'),
+        '<section id="requirements"></section>'
+      );
+      await writeFile(
+        join(root, 'docs/testing.html'),
+        '<section id="trace"></section>'
+      );
+      await writeFile(
+        join(root, 'policy/requirement-registry.json'),
+        JSON.stringify({
+          schemaVersion: 1,
+          baselineCommit: 'abcdef1',
+          requirements: [
+            {
+              id: 'REQ-ENG-999',
+              title: 'Architecture contract test',
+              type: 'infrastructure',
+              priority: 'P0',
+              status: 'verified',
+              targetVersion: '0.3.1',
+              design: 'docs/design.html#requirements',
+              testDesign: 'docs/testing.html#trace',
+              acceptance: 'Proves architecture anchors are required.',
+              legacyAliases: [],
+              architectureImpact: true,
+            },
+          ],
+        })
+      );
+      const result = checkRequirementTraceability(root);
+      expect(result.errors).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('architecture-impact design anchor'),
+          expect.stringContaining('architecture-completeness test anchor'),
+        ])
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('accepts a commit with requirement, version, design, tests and evidence', () => {

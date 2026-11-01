@@ -84,6 +84,28 @@ export function checkRequirementTraceability(root = resolve(dirname(scriptPath),
       requireDocument(requirement.design, `${label}: design`, root, errors);
       requireDocument(requirement.testDesign, `${label}: testDesign`, root, errors);
     }
+    if (
+      requirement.architectureImpact !== undefined &&
+      typeof requirement.architectureImpact !== 'boolean'
+    ) {
+      errors.push(`${label}: architectureImpact must be a boolean`);
+    }
+    if (requirement.architectureImpact === true) {
+      requireAnchor(
+        requirement.design,
+        'architecture-impact',
+        `${label}: architecture-impact design anchor`,
+        root,
+        errors
+      );
+      requireAnchor(
+        requirement.testDesign,
+        'architecture-completeness',
+        `${label}: architecture-completeness test anchor`,
+        root,
+        errors
+      );
+    }
   }
 
   return { errors, requirements, version: packageJson.version };
@@ -118,6 +140,32 @@ export function isSemver(value) {
   return /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(
     String(value)
   );
+}
+
+export function requireAnchor(value, anchor, label, projectRoot, target = []) {
+  if (typeof value !== 'string' || !value.trim()) {
+    target.push(`${label} is required`);
+    return;
+  }
+  const [pathname] = value.split('#');
+  const absolute = resolve(projectRoot, pathname);
+  const fromRoot = relative(projectRoot, absolute);
+  if (
+    fromRoot.startsWith('..') ||
+    isAbsolute(fromRoot) ||
+    !existsSync(absolute)
+  ) {
+    target.push(`${label}: document does not exist: ${pathname}`);
+    return;
+  }
+  const escaped = anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (
+    !new RegExp(`id=["']${escaped}["']`).test(
+      readFileSync(absolute, 'utf8')
+    )
+  ) {
+    target.push(`${label}: section #${anchor} does not exist`);
+  }
 }
 
 if (resolve(process.argv[1] ?? '') === scriptPath) {

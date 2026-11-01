@@ -23,8 +23,10 @@ change follows this order:
 1. Identify or create a requirement id.
 2. Add or update its entry in `policy/requirement-registry.json`.
 3. Ensure a design document and test-design document exist and are linked with
-   precise anchors.
-4. Implement code and tests.
+   precise anchors. For architecture-impacting changes, complete the
+   architecture impact map before implementation.
+4. Implement code and tests across every affected surface listed by the impact
+   map.
 5. Update the requirement status and `CHANGELOG.md` when appropriate.
 6. Run `npm run check` and relevant live/E2E tests.
 7. Commit using the required requirement-linked message.
@@ -67,6 +69,8 @@ Allowed requirement fields:
 - `type`: `feature | bugfix | security | refactor | infrastructure | documentation`
 - `priority`: `P0 | P1 | P2 | P3`
 - `status`: `proposed | accepted | in_progress | implemented | verified | released`
+- `architectureImpact`: optional boolean; `true` requires the architecture
+  impact and completeness anchors.
 
 A requirement cannot enter `in_progress` until its design and test-design links
 exist. It cannot enter `verified` without observed test evidence.
@@ -93,6 +97,45 @@ section anchor exists.
 
 Tests should include the requirement id in the `describe` or case name whenever
 practical. Test evidence must be an observed command or artifact, not a claim.
+
+## Architecture Change Contract
+
+An implementation is not complete merely because one module or one entrypoint
+supports the new behavior. Every shared capability, protocol, persistence model,
+tool, client surface, or cross-host contract requires an architecture impact
+map.
+
+Before implementation, define and review:
+
+1. Provider: Core, Host, Adapter, runtime service, or plugin that owns the
+   implementation.
+2. Consumers: every affected surface, including Headless, TUI, CLI, Chrome,
+   Sandbox, Session persistence, Capsule, Prompt, ToolRegistry, Verification,
+   telemetry, and future clients.
+3. Lifecycle: discovery, activation, invocation, cancellation, failure,
+   recovery, disposal, and version changes.
+4. Persistence and migration: what is stored, exported, imported, invalidated,
+   or intentionally treated as ephemeral.
+5. Observable behavior: UI, Prompt, diagnostics, evidence, and degraded states.
+6. Cleanup: legacy paths, duplicate implementations, hard-coded capability
+   lists, and implicit fallbacks that must be removed.
+7. Evidence: static fitness tests, contract tests, integration tests, real-host
+   E2E, migration tests, and user-journey acceptance.
+
+Every affected consumer must either:
+
+- implement the change and cite its evidence; or
+- document why it is out of scope and prove the platform remains correct.
+
+Partial delivery is forbidden. Do not claim a cross-cutting capability complete
+when only Headless works but TUI, Prompt, Verification, persistence, or migration
+still uses the old model.
+
+For a requirement with `architectureImpact: true`, its design link must include
+`#architecture-impact` and its test link must include
+`#architecture-completeness`. `npm run requirements:check` enforces both.
+
+Use `docs/requirements/architecture-change-contract.md` as the review checklist.
 
 ## Semantic Versioning
 
@@ -188,6 +231,14 @@ Additional evidence is required when the requirement touches:
 
 A feature is not complete because the code compiles or because the model says
 it is complete. Completion requires acceptance evidence.
+
+Architecture-impacting changes additionally require:
+
+- a completed provider/consumer impact map;
+- golden or contract evidence for every shared tool/schema/Prompt surface;
+- an end-to-end user journey through each required client profile;
+- degradation, denied, unavailable, and migration behavior;
+- explicit disposition of every legacy path and fallback.
 
 ## Release Contract
 

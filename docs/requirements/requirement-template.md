@@ -4,6 +4,7 @@
 - Priority: P0 | P1 | P2 | P3
 - Status: proposed
 - Target version: A.B.C
+- Architecture impact: yes | no
 - Design: docs/<path>#<anchor>
 - Test design: docs/<path>#<anchor>
 - Legacy aliases:
@@ -20,12 +21,28 @@ Describe the observable outcome.
 
 List explicitly excluded behavior.
 
+## Architecture impact map
+
+| Surface | Action | Evidence / reason |
+|---|---|---|
+| Core / Host / Adapter | modify / none | |
+| Headless / TUI / CLI / Chrome / Sandbox | modify / none | |
+| Prompt / ToolRegistry / UI | modify / none | |
+| Session / Artifact / Capsule | modify / none | |
+| Lifecycle / cancellation / recovery | modify / none | |
+| Legacy cleanup / fallback | modify / none | |
+
+Mark every required consumer as `modify` with an evidence target, or `none`
+with a technical reason. List forbidden partial-delivery shortcuts.
+
 ## Acceptance
 
 1. Observable result.
 2. Failure behavior.
 3. Compatibility requirement.
-4. Verification evidence.
+4. Every required consumer is reachable through the shared architecture.
+5. Verification evidence, including at least one end-to-end journey when the
+   requirement spans clients or hosts.
 
 ## Risks
 

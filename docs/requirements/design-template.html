@@ -12,6 +12,7 @@
     <dt>Requirement</dt><dd>REQ-AREA-NNN</dd>
     <dt>Target version</dt><dd>A.B.C</dd>
     <dt>Status</dt><dd>draft</dd>
+    <dt>Architecture impact</dt><dd>yes/no</dd>
     <dt>Test design</dt><dd>docs/.../testing.html#...</dd>
   </dl>
   <section id="scope">
@@ -20,14 +21,31 @@
   <section id="architecture">
     <h2>2. Architecture and objects</h2>
   </section>
+  <section id="architecture-impact">
+    <h2>3. Architecture impact map</h2>
+    <table>
+      <thead><tr><th>Surface</th><th>Action</th><th>Evidence / reason</th></tr></thead>
+      <tbody>
+        <tr><td>Core / Host / Adapter</td><td>modify / none</td><td></td></tr>
+        <tr><td>Headless / TUI / CLI / Chrome / Sandbox</td><td>modify / none</td><td></td></tr>
+        <tr><td>Prompt / ToolRegistry / UI</td><td>modify / none</td><td></td></tr>
+        <tr><td>Session / Artifact / Capsule</td><td>modify / none</td><td></td></tr>
+        <tr><td>Lifecycle / cancellation / recovery</td><td>modify / none</td><td></td></tr>
+        <tr><td>Legacy cleanup / fallback</td><td>modify / none</td><td></td></tr>
+      </tbody>
+    </table>
+  </section>
+  <section id="invariants">
+    <h2>4. Architecture invariants and forbidden states</h2>
+  </section>
   <section id="interaction">
-    <h2>3. Interactions and state transitions</h2>
+    <h2>5. Interactions and state transitions</h2>
   </section>
   <section id="failure">
-    <h2>4. Failure, recovery and compatibility</h2>
+    <h2>6. Failure, recovery and compatibility</h2>
   </section>
   <section id="acceptance">
-    <h2>5. Acceptance</h2>
+    <h2>7. Acceptance</h2>
   </section>
 </main>
 </body>

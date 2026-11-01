@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1
+
+### Infrastructure
+
+- `REQ-ENG-003`: require an architecture impact map and per-surface
+  completeness evidence for shared capabilities, protocols, clients,
+  persistence, migration and legacy cleanup.
+
 ## 0.3.0
 
 ### Features

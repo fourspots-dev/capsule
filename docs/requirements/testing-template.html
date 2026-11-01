@@ -12,6 +12,7 @@
     <dt>Requirement</dt><dd>REQ-AREA-NNN</dd>
     <dt>Design</dt><dd>docs/.../design.html#...</dd>
     <dt>Target version</dt><dd>A.B.C</dd>
+    <dt>Architecture impact</dt><dd>yes/no</dd>
   </dl>
   <section id="trace">
     <h2>1. Requirement trace matrix</h2>
@@ -22,11 +23,25 @@
   <section id="cases">
     <h2>3. Cases</h2>
   </section>
+  <section id="architecture-completeness">
+    <h2>4. Architecture completeness</h2>
+    <table>
+      <thead><tr><th>Surface</th><th>Required proof</th><th>Case / command</th></tr></thead>
+      <tbody>
+        <tr><td>Shared contract</td><td>single implementation / schema golden</td><td></td></tr>
+        <tr><td>Providers</td><td>success / unavailable / fault</td><td></td></tr>
+        <tr><td>Consumers</td><td>each required client/profile</td><td></td></tr>
+        <tr><td>Prompt + Registry + UI</td><td>same capability set</td><td></td></tr>
+        <tr><td>Persistence + migration</td><td>resume and round trip</td><td></td></tr>
+        <tr><td>Legacy cleanup</td><td>old path absent or explicitly preserved</td><td></td></tr>
+      </tbody>
+    </table>
+  </section>
   <section id="failure">
-    <h2>4. Failure and security cases</h2>
+    <h2>5. Failure and security cases</h2>
   </section>
   <section id="release">
-    <h2>5. Evidence and release gates</h2>
+    <h2>6. Evidence and release gates</h2>
   </section>
 </main>
 </body>
