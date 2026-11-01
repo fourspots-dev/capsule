@@ -530,6 +530,14 @@ button:disabled, select:disabled { cursor: not-allowed; opacity: .45; }
 .wb-set-selectrow { justify-content: space-between; }
 .wb-set-navrow { cursor: pointer; }
 .wb-set-navrow:hover { background: var(--surface-2); }
+button.wb-set-navrow {
+  width: 100%;
+  border: 0;
+  text-align: left;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
 .wb-set-row-label { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: var(--fg); font-size: 14px; font-weight: 600; }
 .wb-set-row-icon { display: inline-flex; flex: none; width: 16px; height: 16px; color: var(--muted); }
 .wb-set-row-icon svg { width: 16px; height: 16px; }
@@ -576,7 +584,7 @@ button:disabled, select:disabled { cursor: not-allowed; opacity: .45; }
 .wb-form-loading .wb-run-spinner { width: 11px; height: 11px; }
 .wb-conn-form-title { color: var(--fg); font-size: 13px; font-weight: 600; }
 .wb-form label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 11px; }
-.wb-form input[type="text"], .wb-form input[type="password"], .wb-form textarea {
+.wb-form input[type="text"], .wb-form input[type="password"], .wb-form input[type="url"], .wb-form input[type="number"], .wb-form textarea {
   width: 100%;
   padding: 8px 9px;
   border: 1px solid var(--line);

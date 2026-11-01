@@ -92,7 +92,13 @@ export async function initKernelUi(): Promise<void> {
     dataBase64?: string;
   }> = [];
   let modelLabel = pageConfig.language.startsWith('zh') ? '选择模型' : 'Choose model';
-  let pageView: 'settings' | 'connections' | 'history' | null = null;
+  let pageView:
+    | 'settings'
+    | 'connections'
+    | 'history'
+    | 'capabilities'
+    | 'remote-actions'
+    | null = null;
   let pageSessions: Awaited<ReturnType<KernelClient['listSessions']>> = [];
   let editingConnectionId: string | null | undefined;
   let connectionTestMessage = '';
@@ -859,13 +865,20 @@ export async function initKernelUi(): Promise<void> {
     render();
   }
 
-  async function showPage(view: 'settings' | 'connections' | 'history'): Promise<void> {
+  async function showPage(
+    view: 'settings' | 'connections' | 'history' | 'capabilities' | 'remote-actions'
+  ): Promise<void> {
     pageConfig = await readPageConfig();
     remoteActionConfig = await readRemoteActionConfig();
     if (view === 'history') pageSessions = await client.listSessions();
     capabilityStatus = undefined;
     capabilityStatusError = '';
-    if (view === 'settings' && sessionActivated) {
+    if (
+      (view === 'settings' ||
+        view === 'capabilities' ||
+        view === 'remote-actions') &&
+      sessionActivated
+    ) {
       try {
         capabilityStatus = await client.capabilityStatus(sessionId);
       } catch (cause) {
@@ -893,6 +906,8 @@ export async function initKernelUi(): Promise<void> {
   function pageMarkup(): string {
     if (pageView === 'connections') return connectionsPageMarkup();
     if (pageView === 'history') return historyPageMarkup();
+    if (pageView === 'capabilities') return capabilitiesPageMarkup();
+    if (pageView === 'remote-actions') return remoteActionsPageMarkup();
     return settingsPageMarkup();
   }
 
@@ -977,29 +992,40 @@ export async function initKernelUi(): Promise<void> {
               <button type="button" class="wb-set-select" data-page-action="reasoning"><span class="wb-set-select-value">${pageConfig.showReasoning ? (zh ? '显示' : 'Show') : (zh ? '隐藏' : 'Hidden')}</span>${icons.chevronDown}</button></div>
           </div>
         </div>
-        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? '运行时能力' : 'Runtime capabilities'}</div>
-          ${capabilityBoardMarkup(zh)}
-        </div>
-        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? '远程 Action' : 'Remote Actions'}</div>
-          ${remoteActionFormMarkup(zh)}
+        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? '运行时' : 'Runtime'}</div>
+          <div class="wb-set-card">
+            <button type="button" class="wb-set-row wb-set-navrow wb-clickable" data-page-action="capabilities">
+              <span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.sparkle}</span>${zh ? '能力' : 'Capabilities'}</span>
+              <span class="wb-input-grow"></span>
+              <span class="wb-set-row-value">${escapeHtml(runtimeCapabilitySummary(zh))}</span>
+              ${icons.chevronDown}
+            </button>
+            <div class="wb-set-sepa"></div>
+            <button type="button" class="wb-set-row wb-set-navrow wb-clickable" data-page-action="remote-actions">
+              <span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.link}</span>${zh ? '远程 Action' : 'Remote Actions'}</span>
+              <span class="wb-input-grow"></span>
+              <span class="wb-set-row-value">${remoteActionConfig ? (zh ? '已配置' : 'Configured') : (zh ? '未配置' : 'Not configured')}</span>
+              ${icons.chevronDown}
+            </button>
+          </div>
         </div>
         <div class="wb-set-group"><div class="wb-set-group-label">${zh ? '数据' : 'Data'}</div>
           <div class="wb-set-card">
             <button type="button" class="wb-set-row wb-set-navrow wb-clickable" data-page-action="capsule-export">
-              <span class="wb-set-row-label">${icons.download}${zh ? '导出 Workspace Capsule' : 'Export Workspace Capsule'}</span>
+              <span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.download}</span>${zh ? '导出 Workspace Capsule' : 'Export Workspace Capsule'}</span>
               <span class="wb-input-grow"></span>
               ${icons.chevronDown}
             </button>
             <div class="wb-set-sepa"></div>
             <button type="button" class="wb-set-row wb-set-navrow wb-clickable" data-page-action="capsule-import">
-              <span class="wb-set-row-label">${icons.file}${zh ? '导入 Workspace Capsule' : 'Import Workspace Capsule'}</span>
+              <span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.file}</span>${zh ? '导入 Workspace Capsule' : 'Import Workspace Capsule'}</span>
               <span class="wb-input-grow"></span>
               ${icons.chevronDown}
             </button>
             <input id="kernel-capsule-file" type="file" accept=".capsule,.tinyai,application/octet-stream" hidden>
             <div class="wb-set-sepa"></div>
             <button type="button" class="wb-set-row wb-set-navrow wb-clickable kernel-danger-row" data-page-action="clear-history">
-              <span class="wb-set-row-label">${icons.info}${zh ? '清除全部聊天历史' : 'Clear all chat history'}</span>
+              <span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.info}</span>${zh ? '清除全部聊天历史' : 'Clear all chat history'}</span>
               <span class="wb-input-grow"></span>
               ${icons.chevronDown}
             </button>
@@ -1014,6 +1040,56 @@ export async function initKernelUi(): Promise<void> {
       </div>`);
   }
 
+  function capabilitiesPageMarkup(): string {
+    const zh = pageConfig.language.startsWith('zh');
+    return stageMarkup(`${settingsHead(zh ? '能力与证据' : 'Capabilities & evidence', 'back-runtime')}
+      <div class="wb-settings-body">
+        ${capabilityBoardMarkup(zh)}
+        ${pageAlertMarkup()}
+      </div>`);
+  }
+
+  function remoteActionsPageMarkup(): string {
+    const zh = pageConfig.language.startsWith('zh');
+    return stageMarkup(`${settingsHead(zh ? '远程 Action' : 'Remote Actions', 'back-runtime')}
+      <div class="wb-settings-body">
+        ${remoteActionFormMarkup(zh)}
+        ${pageAlertMarkup()}
+      </div>`);
+  }
+
+  function runtimeCapabilitySummary(zh: boolean): string {
+    if (capabilityStatusError) return zh ? '不可用' : 'Unavailable';
+    if (!capabilityStatus) return zh ? '等待运行' : 'Not available';
+    const counts = capabilityCounts();
+    return zh
+      ? `${counts.available} 可用 · ${counts.currentEvidence} 证据`
+      : `${counts.available} available · ${counts.currentEvidence} evidence`;
+  }
+
+  function capabilityCounts(): {
+    available: number;
+    degraded: number;
+    currentEvidence: number;
+    staleEvidence: number;
+  } {
+    const actions = capabilityStatus?.actions ?? [];
+    const evidence = capabilityStatus?.evidence ?? [];
+    const available = actions.filter(
+      (action) => action.state === 'available'
+    ).length;
+    return {
+      available,
+      degraded: actions.length - available,
+      currentEvidence: evidence.filter(
+        (record) => record.status === 'current'
+      ).length,
+      staleEvidence: evidence.filter(
+        (record) => record.status === 'stale'
+      ).length,
+    };
+  }
+
   function capabilityBoardMarkup(zh: boolean): string {
     if (capabilityStatusError) {
       return `<div class="wb-set-card kernel-capability-card">
@@ -1026,16 +1102,12 @@ export async function initKernelUi(): Promise<void> {
         <div class="kernel-capability-empty">${zh ? '运行时尚未启动。' : 'Runtime is not available yet.'}</div>
       </div>`;
     }
-    const available = capabilityStatus.actions.filter(
-      (action) => action.state === 'available'
-    ).length;
-    const degraded = capabilityStatus.actions.length - available;
-    const currentEvidence = capabilityStatus.evidence.filter(
-      (record) => record.status === 'current'
-    ).length;
-    const staleEvidence = capabilityStatus.evidence.filter(
-      (record) => record.status === 'stale'
-    ).length;
+    const {
+      available,
+      degraded,
+      currentEvidence,
+      staleEvidence,
+    } = capabilityCounts();
     const actionRows = capabilityStatus.actions.slice(0, 8).map(
       (action) => `<div class="kernel-capability-row">
         <span class="kernel-capability-dot" data-state="${escapeHtml(action.state)}" aria-hidden="true"></span>
@@ -1057,7 +1129,7 @@ export async function initKernelUi(): Promise<void> {
         <span><b>${degraded}</b> ${zh ? '降级' : 'degraded'}</span>
         <span><b>${currentEvidence}</b> ${zh ? '当前证据' : 'current evidence'}</span>
         ${staleEvidence ? `<span><b>${staleEvidence}</b> ${zh ? '过期证据' : 'stale evidence'}</span>` : ''}
-        <button type="button" class="wb-ghost-btn kernel-capability-refresh" data-page-action="capability-refresh">${zh ? '重新探测' : 'Re-probe'}</button>
+        <button type="button" class="wb-set-select kernel-capability-refresh" data-page-action="capability-refresh">${zh ? '重新探测' : 'Re-probe'}</button>
       </div>
       ${actionRows.join('') || `<div class="kernel-capability-empty">${zh ? '没有已注册的远程 Action。' : 'No remote Actions registered.'}</div>`}
       ${diagnostics.join('')}
@@ -1261,6 +1333,11 @@ export async function initKernelUi(): Promise<void> {
       renderPage();
       return;
     }
+    if (action === 'back-runtime') {
+      pageView = 'settings';
+      renderPage();
+      return;
+    }
     if (action === 'theme') {
       pageConfig.theme =
         pageConfig.theme === 'light'
@@ -1298,6 +1375,18 @@ export async function initKernelUi(): Promise<void> {
       } catch (cause) {
         capabilityStatusError = errorMessage(cause);
       }
+      renderPage();
+      return;
+    }
+    if (action === 'capabilities') {
+      pageView = 'capabilities';
+      pageError = '';
+      renderPage();
+      return;
+    }
+    if (action === 'remote-actions') {
+      pageView = 'remote-actions';
+      pageError = '';
       renderPage();
       return;
     }

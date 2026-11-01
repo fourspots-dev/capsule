@@ -256,6 +256,7 @@ No Action:
   exec unavailable
   TestEvidence unavailable</pre>
 <p>Remote provider 接受允许的 action IDs，workspace ID/generation，requestId，deadline；流事件和取消协议与 Action Runtime 保持一致。Browser DOM 工具不混入通用 Coding ToolPack。</p>
+<h3>Settings interaction</h3><p>设置首页只展示“Capabilities”和“Remote Actions”紧凑入口，并沿用现有设置行的无边框、分组卡片和行高。能力详情进入独立子页展示探测状态、证据与最近调用结果；Remote Action 配置进入独立表单子页，复用模型连接编辑页的字段、按钮和焦点样式。两个子页均先返回 Settings，再由 Settings 返回会话，避免新增页面形成独立的视觉与导航体系。</p>
 <h3>验收</h3><ul><li>TUI/Headless/Chrome Tool Golden 一致。</li><li>Chrome 不出现 exec/job。</li><li>Remote disconnect 不假完成。</li><li>Capsule UI 恢复 Session。</li></ul>
 <h3>实现证据</h3><p><code>chrome-runtime.ts</code> 先探测 Host 与 Remote Action，再以 <code>profile=portable</code> 构建共享 Coding ToolPack；Browser ToolPack、主 Runtime 与子 Agent Runtime 保持分离。Runtime Gateway 只暴露可序列化的能力快照、当前 Session 最近 Action 结果、Capsule 字节和导入结果，Side Panel 不读取 Workspace 或 Provider 内部状态。证据：<code>tests/integration/runtime-gateway.test.ts</code>、<code>tests/runtime/workspace-capability-composition.test.ts</code>、<code>tests/action/remote-provider.test.ts</code>、<code>tests/e2e/kernel-extension.e2e.ts</code>。</p>
 </section>

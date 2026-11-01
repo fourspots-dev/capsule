@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.10.1
+
+### Fixes
+
+- `REQ-CHROME-001`: align the new Settings controls with the existing visual
+  language instead of embedding a second card and form style on the home page.
+- Keep only compact Capabilities and Remote Actions entry rows in Settings;
+  move detailed capability state and Remote Action configuration into matching
+  settings subpages.
+- Normalize URL and numeric form controls to the existing connection editor
+  styling and remove native button borders from clickable settings rows.
+
+### Verification
+
+- `npm run check`.
+- `npm run test:e2e`: navigation, rendered row styling and all six Chrome
+  extension journeys pass.
+
 ## 0.10.0
 
 ### Features

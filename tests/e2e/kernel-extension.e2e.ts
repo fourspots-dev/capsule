@@ -483,6 +483,32 @@ describe('kernel extension E2E', () => {
       document.querySelector('[data-page-action="reasoning"]')?.textContent?.includes('Show')
     );
     await page.screenshot({ path: resolve('docs/settings.png'), fullPage: false });
+    expect(
+      await page
+        .locator('[data-page-action="capabilities"]')
+        .evaluate((element) => ({
+          border: getComputedStyle(element).borderTopWidth,
+          background: getComputedStyle(element).backgroundColor,
+        }))
+    ).toEqual({
+      border: '0px',
+      background: 'rgba(0, 0, 0, 0)',
+    });
+    await page.click('[data-page-action="capabilities"]');
+    await page.waitForFunction(
+      () =>
+        document.querySelector('.wb-settings-title')?.textContent ===
+        'Capabilities & evidence'
+    );
+    await page.click('[data-page-action="back-runtime"]');
+    await page.click('[data-page-action="remote-actions"]');
+    await page.waitForSelector('#kernel-remote-endpoint');
+    expect(
+      await page
+        .locator('#kernel-remote-endpoint')
+        .evaluate((element) => getComputedStyle(element).borderRadius)
+    ).toBe('9px');
+    await page.click('[data-page-action="back-runtime"]');
     await page.click('[data-page-action="connections"]');
     await page.waitForSelector('.wb-conn-card');
     expect(await page.locator('.wb-settings-title').textContent()).toBe('Connections');
@@ -1265,6 +1291,7 @@ describe('kernel extension E2E', () => {
       );
 
       const page = await remoteContext.newPage();
+      await page.setViewportSize({ width: 420, height: 900 });
       const pageErrors: string[] = [];
       page.on('pageerror', (error) => pageErrors.push(error.message));
       await page.goto(`chrome-extension://${extensionId}/sidepanel.html`);
@@ -1288,6 +1315,7 @@ describe('kernel extension E2E', () => {
       );
 
       await page.click('#kernel-settings');
+      await page.click('[data-page-action="remote-actions"]');
       await page.waitForSelector('#kernel-remote-endpoint');
       await page.fill(
         '#kernel-remote-endpoint',
@@ -1295,6 +1323,11 @@ describe('kernel extension E2E', () => {
       );
       await page.fill('#kernel-remote-allowlist', 'app.e2e.remote-check');
       await page.click('[data-page-action="remote-save"]');
+      await expect
+        .poll(() => remoteActionCalls, { timeout: 30_000 })
+        .toBeGreaterThanOrEqual(1);
+      await page.click('[data-page-action="back-runtime"]');
+      await page.click('[data-page-action="capabilities"]');
       try {
         await page.waitForFunction(
           () =>
@@ -1317,6 +1350,7 @@ describe('kernel extension E2E', () => {
       expect(boardText).toContain('available');
       expect(boardText).toContain('current evidence');
 
+      await page.click('[data-page-action="back-runtime"]');
       await page.click('[data-page-action="back"]');
       await page.fill('#kernel-input', 'remote action smoke');
       await page.click('#kernel-send');
@@ -1345,6 +1379,7 @@ describe('kernel extension E2E', () => {
       expect(requestedTools).not.toContain('job_start');
 
       await page.click('#kernel-settings');
+      await page.click('[data-page-action="capabilities"]');
       await page.waitForFunction(
         () =>
           document
@@ -1353,6 +1388,7 @@ describe('kernel extension E2E', () => {
         undefined,
         { timeout: 30_000 }
       );
+      await page.click('[data-page-action="back-runtime"]');
       await page.waitForSelector('[data-page-action="capsule-export"]');
       const downloadPromise = page.waitForEvent('download');
       await page.click('[data-page-action="capsule-export"]');

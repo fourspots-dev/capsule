@@ -577,7 +577,7 @@ textarea.wb-editor {
 }
 
 .kernel-capability-card {
-  padding: 12px;
+  padding: 0;
 }
 
 .kernel-capability-summary {
@@ -585,13 +585,15 @@ textarea.wb-editor {
   flex-wrap: wrap;
   align-items: center;
   gap: 7px 12px;
+  min-height: 48px;
+  padding: 10px 14px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .kernel-capability-summary b {
   color: var(--fg);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .kernel-capability-refresh {
@@ -602,8 +604,8 @@ textarea.wb-editor {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  margin-top: 10px;
-  padding-top: 10px;
+  min-height: 48px;
+  padding: 10px 14px;
   border-top: 1px solid var(--line);
 }
 
@@ -638,15 +640,15 @@ textarea.wb-editor {
 
 .kernel-capability-title {
   color: var(--fg);
-  font-size: 12px;
-  font-weight: 650;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .kernel-capability-meta,
 .kernel-capability-reason {
   overflow: hidden;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.45;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -658,7 +660,7 @@ textarea.wb-editor {
   border-radius: 999px;
   color: var(--muted);
   background: var(--bg);
-  font-size: 9px;
+  font-size: 10px;
   text-transform: uppercase;
 }
 
@@ -672,21 +674,14 @@ textarea.wb-editor {
 
 .kernel-capability-diagnostic,
 .kernel-capability-empty {
-  margin-top: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.45;
   word-break: break-word;
 }
 
 .kernel-remote-action-form {
   margin: 0;
-  padding: 12px;
-  border-radius: 14px;
-  background: var(--surface);
-}
-
-.kernel-remote-action-form input,
-.kernel-remote-action-form textarea {
-  font-size: 12px;
 }

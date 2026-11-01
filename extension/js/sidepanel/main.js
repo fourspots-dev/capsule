@@ -1513,7 +1513,7 @@
       if (view === "history") pageSessions = await client.listSessions();
       capabilityStatus = void 0;
       capabilityStatusError = "";
-      if (view === "settings" && sessionActivated) {
+      if ((view === "settings" || view === "capabilities" || view === "remote-actions") && sessionActivated) {
         try {
           capabilityStatus = await client.capabilityStatus(sessionId);
         } catch (cause) {
@@ -1538,6 +1538,8 @@
     function pageMarkup() {
       if (pageView === "connections") return connectionsPageMarkup();
       if (pageView === "history") return historyPageMarkup();
+      if (pageView === "capabilities") return capabilitiesPageMarkup();
+      if (pageView === "remote-actions") return remoteActionsPageMarkup();
       return settingsPageMarkup();
     }
     function stageMarkup(inner) {
@@ -1616,29 +1618,40 @@
               <button type="button" class="wb-set-select" data-page-action="reasoning"><span class="wb-set-select-value">${pageConfig.showReasoning ? zh ? "\u663E\u793A" : "Show" : zh ? "\u9690\u85CF" : "Hidden"}</span>${icons.chevronDown}</button></div>
           </div>
         </div>
-        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? "\u8FD0\u884C\u65F6\u80FD\u529B" : "Runtime capabilities"}</div>
-          ${capabilityBoardMarkup(zh)}
-        </div>
-        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? "\u8FDC\u7A0B Action" : "Remote Actions"}</div>
-          ${remoteActionFormMarkup(zh)}
+        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? "\u8FD0\u884C\u65F6" : "Runtime"}</div>
+          <div class="wb-set-card">
+            <button type="button" class="wb-set-row wb-set-navrow wb-clickable" data-page-action="capabilities">
+              <span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.sparkle}</span>${zh ? "\u80FD\u529B" : "Capabilities"}</span>
+              <span class="wb-input-grow"></span>
+              <span class="wb-set-row-value">${escapeHtml(runtimeCapabilitySummary(zh))}</span>
+              ${icons.chevronDown}
+            </button>
+            <div class="wb-set-sepa"></div>
+            <button type="button" class="wb-set-row wb-set-navrow wb-clickable" data-page-action="remote-actions">
+              <span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.link}</span>${zh ? "\u8FDC\u7A0B Action" : "Remote Actions"}</span>
+              <span class="wb-input-grow"></span>
+              <span class="wb-set-row-value">${remoteActionConfig ? zh ? "\u5DF2\u914D\u7F6E" : "Configured" : zh ? "\u672A\u914D\u7F6E" : "Not configured"}</span>
+              ${icons.chevronDown}
+            </button>
+          </div>
         </div>
         <div class="wb-set-group"><div class="wb-set-group-label">${zh ? "\u6570\u636E" : "Data"}</div>
           <div class="wb-set-card">
             <button type="button" class="wb-set-row wb-set-navrow wb-clickable" data-page-action="capsule-export">
-              <span class="wb-set-row-label">${icons.download}${zh ? "\u5BFC\u51FA Workspace Capsule" : "Export Workspace Capsule"}</span>
+              <span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.download}</span>${zh ? "\u5BFC\u51FA Workspace Capsule" : "Export Workspace Capsule"}</span>
               <span class="wb-input-grow"></span>
               ${icons.chevronDown}
             </button>
             <div class="wb-set-sepa"></div>
             <button type="button" class="wb-set-row wb-set-navrow wb-clickable" data-page-action="capsule-import">
-              <span class="wb-set-row-label">${icons.file}${zh ? "\u5BFC\u5165 Workspace Capsule" : "Import Workspace Capsule"}</span>
+              <span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.file}</span>${zh ? "\u5BFC\u5165 Workspace Capsule" : "Import Workspace Capsule"}</span>
               <span class="wb-input-grow"></span>
               ${icons.chevronDown}
             </button>
             <input id="kernel-capsule-file" type="file" accept=".capsule,.tinyai,application/octet-stream" hidden>
             <div class="wb-set-sepa"></div>
             <button type="button" class="wb-set-row wb-set-navrow wb-clickable kernel-danger-row" data-page-action="clear-history">
-              <span class="wb-set-row-label">${icons.info}${zh ? "\u6E05\u9664\u5168\u90E8\u804A\u5929\u5386\u53F2" : "Clear all chat history"}</span>
+              <span class="wb-set-row-label"><span class="wb-set-row-icon">${icons.info}</span>${zh ? "\u6E05\u9664\u5168\u90E8\u804A\u5929\u5386\u53F2" : "Clear all chat history"}</span>
               <span class="wb-input-grow"></span>
               ${icons.chevronDown}
             </button>
@@ -1652,6 +1665,45 @@
         ${pageAlertMarkup()}
       </div>`);
     }
+    function capabilitiesPageMarkup() {
+      const zh = pageConfig.language.startsWith("zh");
+      return stageMarkup(`${settingsHead(zh ? "\u80FD\u529B\u4E0E\u8BC1\u636E" : "Capabilities & evidence", "back-runtime")}
+      <div class="wb-settings-body">
+        ${capabilityBoardMarkup(zh)}
+        ${pageAlertMarkup()}
+      </div>`);
+    }
+    function remoteActionsPageMarkup() {
+      const zh = pageConfig.language.startsWith("zh");
+      return stageMarkup(`${settingsHead(zh ? "\u8FDC\u7A0B Action" : "Remote Actions", "back-runtime")}
+      <div class="wb-settings-body">
+        ${remoteActionFormMarkup(zh)}
+        ${pageAlertMarkup()}
+      </div>`);
+    }
+    function runtimeCapabilitySummary(zh) {
+      if (capabilityStatusError) return zh ? "\u4E0D\u53EF\u7528" : "Unavailable";
+      if (!capabilityStatus) return zh ? "\u7B49\u5F85\u8FD0\u884C" : "Not available";
+      const counts = capabilityCounts();
+      return zh ? `${counts.available} \u53EF\u7528 \xB7 ${counts.currentEvidence} \u8BC1\u636E` : `${counts.available} available \xB7 ${counts.currentEvidence} evidence`;
+    }
+    function capabilityCounts() {
+      const actions = capabilityStatus?.actions ?? [];
+      const evidence = capabilityStatus?.evidence ?? [];
+      const available = actions.filter(
+        (action) => action.state === "available"
+      ).length;
+      return {
+        available,
+        degraded: actions.length - available,
+        currentEvidence: evidence.filter(
+          (record) => record.status === "current"
+        ).length,
+        staleEvidence: evidence.filter(
+          (record) => record.status === "stale"
+        ).length
+      };
+    }
     function capabilityBoardMarkup(zh) {
       if (capabilityStatusError) {
         return `<div class="wb-set-card kernel-capability-card">
@@ -1664,16 +1716,12 @@
         <div class="kernel-capability-empty">${zh ? "\u8FD0\u884C\u65F6\u5C1A\u672A\u542F\u52A8\u3002" : "Runtime is not available yet."}</div>
       </div>`;
       }
-      const available = capabilityStatus.actions.filter(
-        (action) => action.state === "available"
-      ).length;
-      const degraded = capabilityStatus.actions.length - available;
-      const currentEvidence = capabilityStatus.evidence.filter(
-        (record) => record.status === "current"
-      ).length;
-      const staleEvidence = capabilityStatus.evidence.filter(
-        (record) => record.status === "stale"
-      ).length;
+      const {
+        available,
+        degraded,
+        currentEvidence,
+        staleEvidence
+      } = capabilityCounts();
       const actionRows = capabilityStatus.actions.slice(0, 8).map(
         (action) => `<div class="kernel-capability-row">
         <span class="kernel-capability-dot" data-state="${escapeHtml(action.state)}" aria-hidden="true"></span>
@@ -1695,7 +1743,7 @@
         <span><b>${degraded}</b> ${zh ? "\u964D\u7EA7" : "degraded"}</span>
         <span><b>${currentEvidence}</b> ${zh ? "\u5F53\u524D\u8BC1\u636E" : "current evidence"}</span>
         ${staleEvidence ? `<span><b>${staleEvidence}</b> ${zh ? "\u8FC7\u671F\u8BC1\u636E" : "stale evidence"}</span>` : ""}
-        <button type="button" class="wb-ghost-btn kernel-capability-refresh" data-page-action="capability-refresh">${zh ? "\u91CD\u65B0\u63A2\u6D4B" : "Re-probe"}</button>
+        <button type="button" class="wb-set-select kernel-capability-refresh" data-page-action="capability-refresh">${zh ? "\u91CD\u65B0\u63A2\u6D4B" : "Re-probe"}</button>
       </div>
       ${actionRows.join("") || `<div class="kernel-capability-empty">${zh ? "\u6CA1\u6709\u5DF2\u6CE8\u518C\u7684\u8FDC\u7A0B Action\u3002" : "No remote Actions registered."}</div>`}
       ${diagnostics.join("")}
@@ -1864,6 +1912,11 @@
         renderPage();
         return;
       }
+      if (action === "back-runtime") {
+        pageView = "settings";
+        renderPage();
+        return;
+      }
       if (action === "theme") {
         pageConfig.theme = pageConfig.theme === "light" ? "dark" : pageConfig.theme === "dark" ? "system" : "light";
         await writePageConfig();
@@ -1896,6 +1949,18 @@
         } catch (cause) {
           capabilityStatusError = errorMessage(cause);
         }
+        renderPage();
+        return;
+      }
+      if (action === "capabilities") {
+        pageView = "capabilities";
+        pageError = "";
+        renderPage();
+        return;
+      }
+      if (action === "remote-actions") {
+        pageView = "remote-actions";
+        pageError = "";
         renderPage();
         return;
       }
