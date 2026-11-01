@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.1
+
+### Infrastructure
+
+- `REQ-ENG-007`: add `approved_unreviewed` design status. It permits explicit
+  implementation authorization without representing the design as reviewed and
+  requires an audit note.
+- Approve and move `REQ-HOST-002` and `REQ-ACTION-001` into the first `0.6.0`
+  implementation wave; subsequent capability requirements retain review-only
+  status.
+
+### Verification
+
+- `tests/unit/requirement-policy.test.ts`
+- `npm run requirements:check`
+
 ## 0.5.0
 
 ### Infrastructure

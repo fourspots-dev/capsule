@@ -10,7 +10,7 @@
 </style>
 </head>
 <body><div class="wrap">
-<header class="hero"><small>DETAILED DESIGN V3 / IMPLEMENTATION-READY SPECIFICATION</small><h1>Capability Completion<br>详细设计</h1><p>将 REQ-HOST-002、REQ-ACTION-001、REQ-TEST-001、REQ-WORKSPACE-002、REQ-LSP-001、REQ-SUBAGENT-001、REQ-CHROME-001、REQ-PLATFORM-001 和 REQ-EVAL-001 展开到模块、接口、状态机、交互、错误、持久化和分阶段验收。</p><div class="chips"><span class="chip">Status: Review</span><span class="chip">No implementation authorized</span><span class="chip">Architecture Impact</span><span class="chip">Implementation-level</span></div></header>
+<header class="hero"><small>DETAILED DESIGN V3 / IMPLEMENTATION-READY SPECIFICATION</small><h1>Capability Completion<br>详细设计</h1><p>将 REQ-HOST-002、REQ-ACTION-001、REQ-TEST-001、REQ-WORKSPACE-002、REQ-LSP-001、REQ-SUBAGENT-001、REQ-CHROME-001、REQ-PLATFORM-001 和 REQ-EVAL-001 展开到模块、接口、状态机、交互、错误、持久化和分阶段验收。</p><div class="chips"><span class="chip">First wave: approved unreviewed</span><span class="chip">Remaining: review</span><span class="chip">Architecture Impact</span><span class="chip">Implementation-level</span></div></header>
 <nav><a href="#principles">四层架构</a><a href="#architecture-impact">影响面</a><a href="#req-host-002">Host基线</a><a href="#req-action-001">Action</a><a href="#req-test-001">Evidence</a><a href="#req-workspace-002">Capsule v2</a><a href="#req-lsp-001">LSP</a><a href="#req-subagent-001">子Agent</a><a href="#req-chrome-001">Chrome</a><a href="#req-platform-001">平台</a><a href="#req-eval-001">评测</a><a href="#review">确认门禁</a></nav>
 
 <section id="principles"><h2>1. 四层架构与总边界</h2>
@@ -44,7 +44,7 @@
 <tr><td>EVAL-001</td><td>benchmarks, evidence reports, CI fault/soak</td><td>Product runtime branches</td></tr>
 </tbody></table></section>
 
-<section id="req-host-002"><h2>3. REQ-HOST-002：Host Baseline Matrix</h2><p><span class="chip">Target 0.5.0</span> <span class="chip">Review</span></p>
+<section id="req-host-002"><h2>3. REQ-HOST-002：Host Baseline Matrix</h2><p><span class="chip">Target 0.6.0</span> <span class="chip">Approved unreviewed</span></p>
 <h3>模块</h3><table><tbody><tr><td>修改</td><td><code>src/host/types.ts</code>、<code>src/host/capabilities.ts</code>、<code>src/host/probe.ts</code>、<code>src/runtime/workspace-capability-composition.ts</code>、<code>src/cli/tui-agent.ts</code>、<code>src/cli/workspace-agent.ts</code></td></tr><tr><td>新增</td><td><code>src/host/baseline.ts</code>、<code>src/host/profile-matrix.ts</code></td></tr><tr><td>不得修改</td><td>Git/Patch/VFS/Search 实现、Chrome UI、Sandbox 内部 API</td></tr></tbody></table>
 <h3>接口</h3><pre>type BaselineTier = 'core' | 'workspace' | 'portable-coding' | 'real-execution';
 type CapabilityState = 'available' | 'degraded' | 'unavailable';
@@ -74,7 +74,7 @@ interface BaselineProbeReport {
 <h3>验收</h3><ul><li>FileSystem 正式进入 capability/probe。</li><li>无 Action 时 Portable Coding 仍可用。</li><li>无 Process/Action 不会被误判为 Core 失败。</li><li>Action 不能提供 Storage/FS/Clock/Session。</li></ul>
 </section>
 
-<section id="req-action-001"><h2>4. REQ-ACTION-001：Application Action Runtime</h2><p><span class="chip">Target 0.5.0</span> <span class="chip">Review</span></p>
+<section id="req-action-001"><h2>4. REQ-ACTION-001：Application Action Runtime</h2><p><span class="chip">Target 0.6.0</span> <span class="chip">Approved unreviewed</span></p>
 <h3>模块</h3><table><tbody><tr><td>新 platform</td><td><code>src/platform/action-contracts.ts</code>、<code>action-result.ts</code>、<code>action-approval.ts</code></td></tr><tr><td>Runtime</td><td><code>src/runtime/action-registry.ts</code>、<code>action-invoker.ts</code>、<code>action-approval-broker.ts</code>、<code>workspace-capability-composition.ts</code></td></tr><tr><td>Node Local</td><td><code>src/node/actions/trusted-module-loader.ts</code>、<code>local-action-executor.ts</code>、<code>npm-script-provider.ts</code>、<code>local-action-bootstrap.ts</code></td></tr><tr><td>TUI</td><td><code>src/tui/action-board.ts</code>、<code>approval-overlay.ts</code>、<code>app.ts</code>、<code>render.ts</code></td></tr><tr><td>不得感知</td><td>Git/Patch/VFS、Chrome/Sandbox 内部、AgentLoop</td></tr></tbody></table>
 <h3>核心接口</h3><pre>interface ActionProviderModule {
   apiVersion: 1;
@@ -122,7 +122,7 @@ host/generation/version change → rediscover</pre>
 <h3>验收</h3><ul><li>Provider 生命周期幂等。</li><li>Local/Remote/Native 同 Schema。</li><li>ask/auto/deny 生效。</li><li>没有 Action 或 denied 时无 exec 回退。</li><li>进程树和输出资源可回收。</li></ul>
 </section>
 
-<section id="req-test-001"><h2>5. REQ-TEST-001：TestEvidence</h2><p><span class="chip">Target 0.6.0</span> <span class="chip">Review</span></p>
+<section id="req-test-001"><h2>5. REQ-TEST-001：TestEvidence</h2><p><span class="chip">Target 0.7.0</span> <span class="chip">Review</span></p>
 <h3>模块</h3><table><tbody><tr><td>新增</td><td><code>src/core/test-report.ts</code>、<code>src/core/evidence-store.ts</code>、<code>src/adapters/host-evidence-store.ts</code>、<code>src/adapters/test-report-parser.ts</code></td></tr><tr><td>修改</td><td>Action result conversion、Verifier、TUI review、Capsule evidence partition</td></tr><tr><td>不得感知</td><td>具体测试 runner 内部、Node进程 API、UI布局</td></tr></tbody></table>
 <h3>接口</h3><pre>interface TestReport {
   runner: string;
@@ -157,7 +157,7 @@ interface EvidenceRecord {
 <h3>验收</h3><ul><li>0 tests 不通过。</li><li>报告计数闭合。</li><li>环境/文件/版本变化产生 stale。</li><li>TUI 显示失败用例 Artifact。</li><li>Capsule 导入环境变化旧证据失效。</li></ul>
 </section>
 
-<section id="req-workspace-002"><h2>6. REQ-WORKSPACE-002：Capsule v2</h2><p><span class="chip">Target 0.6.0</span> <span class="chip">Review</span></p>
+<section id="req-workspace-002"><h2>6. REQ-WORKSPACE-002：Capsule v2</h2><p><span class="chip">Target 0.7.0</span> <span class="chip">Review</span></p>
 <h3>模块</h3><table><tbody><tr><td>新增</td><td><code>src/workspace/capsule-v2-codec.ts</code>、<code>capsule-journal.ts</code>、<code>streaming-importer.ts</code></td></tr><tr><td>修改</td><td><code>workspace/codec.ts</code>、<code>continuity.ts</code>、TUI import route、CLI transfer</td></tr><tr><td>不得感知</td><td>Provider代码、Node/tui类型、具体Git backend</td></tr></tbody></table>
 <h3>格式</h3><pre>manifest.json
 project.manifest + content-addressed blobs
@@ -183,7 +183,7 @@ interrupted staging → resume or discard</pre>
 <h3>约束</h3><ul><li>target active Workspace 在 commit 前不变。</li><li>running source rejected/quiesced.</li><li>Action requirements 不丢失，重新 probe。</li><li>Evidence 依环境 rebind 或 stale。</li><li>大 blob 流式 hash/read，不整个 base64。</li></ul>
 </section>
 
-<section id="req-lsp-001"><h2>7. REQ-LSP-001：Code Intelligence</h2><p><span class="chip">Target 0.7.0</span> <span class="chip">Review</span></p>
+<section id="req-lsp-001"><h2>7. REQ-LSP-001：Code Intelligence</h2><p><span class="chip">Target 0.8.0</span> <span class="chip">Review</span></p>
 <h3>模块</h3><table><tbody><tr><td>新增</td><td><code>src/platform/code-intelligence.ts</code>、<code>src/runtime/code-intelligence-toolpack.ts</code>、<code>src/intelligence/text-index.ts</code>、<code>src/adapters/lsp-action-provider.ts</code></td></tr><tr><td>不得修改</td><td>Git/Patch/VFS、Chrome UI</td></tr></tbody></table>
 <pre>interface CodeIntelligencePort {
   diagnostics(paths: WorkspacePath[], signal): Promise&lt;Diagnostic[]&gt;;
@@ -208,7 +208,7 @@ interface SymbolLocation {
 <h3>验收</h3><ul><li>definition/references 跨文件准确。</li><li>diagnostics 修改后刷新。</li><li>fallback 不冒充完整 LSP。</li><li>恶意路径/超大响应被拒绝。</li></ul>
 </section>
 
-<section id="req-subagent-001"><h2>8. REQ-SUBAGENT-001：Action Isolation</h2><p><span class="chip">Target 0.8.0</span> <span class="chip">Review</span></p>
+<section id="req-subagent-001"><h2>8. REQ-SUBAGENT-001：Action Isolation</h2><p><span class="chip">Target 0.9.0</span> <span class="chip">Review</span></p>
 <h3>模块</h3><table><tbody><tr><td>修改</td><td><code>core/subagent-coordinator.ts</code>、runtime workspace-subagent-driver、workspace generation、action context、TUI agent board</td></tr><tr><td>不得感知</td><td>Provider内部执行机制、Chrome UI</td></tr></tbody></table>
 <pre>interface ForkWorkspaceRef {
   workspaceId: string;
@@ -233,7 +233,7 @@ Action call allowed if:
 <h3>验收</h3><ul><li>并行 child 不串文件、Action、证据。</li><li>父修改导致冲突。</li><li>merge 只接受 child 最终 diff 证据。</li><li>取消后无资源残留。</li></ul>
 </section>
 
-<section id="req-chrome-001"><h2>9. REQ-CHROME-001：Chrome Composition</h2><p><span class="chip">Target 0.9.0</span> <span class="chip">Review</span></p>
+<section id="req-chrome-001"><h2>9. REQ-CHROME-001：Chrome Composition</h2><p><span class="chip">Target 0.10.0</span> <span class="chip">Review</span></p>
 <h3>模块</h3><table><tbody><tr><td>修改</td><td><code>runtime/chrome-runtime.ts</code>、Chrome Browser Provider registration、Capsule UI、RemoteActionProvider</td></tr><tr><td>不得感知</td><td><code>src/node/actions/*</code>、本地绝对路径、Node child_process</td></tr></tbody></table>
 <pre>Chrome composition:
   ChromeHostBridge
@@ -251,7 +251,7 @@ No Action:
 <h3>验收</h3><ul><li>TUI/Headless/Chrome Tool Golden 一致。</li><li>Chrome 不出现 exec/job。</li><li>Remote disconnect 不假完成。</li><li>Capsule UI 恢复 Session。</li></ul>
 </section>
 
-<section id="req-platform-001"><h2>10. REQ-PLATFORM-001：Platform Adapters</h2><p><span class="chip">Target 0.9.0</span> <span class="chip">Review</span></p>
+<section id="req-platform-001"><h2>10. REQ-PLATFORM-001：Platform Adapters</h2><p><span class="chip">Target 0.10.0</span> <span class="chip">Review</span></p>
 <h3>模块</h3><table><tbody><tr><td>新增</td><td><code>src/node/win32/*</code>、<code>src/node/linux/*</code>、<code>src/adapters/ios-host/*</code></td></tr><tr><td>复用</td><td>HostBaseline、Action contracts、Platform PathPolicy</td></tr><tr><td>不得修改</td><td>Core业务、Tool schemas、TUI布局</td></tr></tbody></table>
 <h3>Platform rules</h3><table><tbody><tr><td>Windows</td><td>盘符/UNC 拒绝、大小写折叠碰撞、保留名、junction realpath、`.cmd` Action 映射</td></tr><tr><td>Linux</td><td>POSIX symlink/lstat、case-sensitive、权限错误映射</td></tr><tr><td>iOS</td><td>Native File/Blob Bridge、Keychain、Native Action requestId/stream/cancel；无 Process 默认</td></tr></tbody></table>
 <p>所有 Adapter 只实现 Host Port、Baseline、Action Provider 和 Transport；业务工具继续由 Package ToolPack 提供。跨平台测试以同一 Capsule 和 Action Schema Golden 为基线。</p>
@@ -276,8 +276,8 @@ No Action:
 </section>
 
 <section id="review"><h2>12. 确认门禁</h2><div class="grid"><div class="card"><h3>DESIGN-01</h3><p>是否接受 Host Baseline A/B/C/D 以及“底座不由 Action 提供”。</p></div><div class="card"><h3>DESIGN-02</h3><p>是否接受 Action Runtime 的可信 Provider、审批和 Local/Native/Remote 统一协议。</p></div><div class="card"><h3>DESIGN-03</h3><p>是否接受 TestEvidence 与 Capsule/Verifier 的状态规则。</p></div><div class="card"><h3>DESIGN-04</h3><p>是否接受后续 LSP、子 Agent、Chrome、平台与评测的模块边界。</p></div></div>
-<div class="warn rule">当前全部章节为 <code>designStatus: review</code>、<code>implementationAuthorized: false</code>。用户确认前不得修改产品代码。</div>
+<div class="warn rule"><code>REQ-HOST-002</code> 与 <code>REQ-ACTION-001</code> 为 <code>approved_unreviewed</code> 且已授权进入 0.6.0 实现；其余章节保持 <code>designStatus: review</code>、<code>implementationAuthorized: false</code>。</div>
 <p><a href="capability-completion-detailed-testing-v3.html#architecture-completeness">查看实现级测试设计 →</a></p>
-<p class="foot">Detailed Design V3 · 9 accepted requirements · Status: Review · No implementation authorized</p>
+<p class="foot">Detailed Design V3 · 2 approved-unreviewed · 7 review-only · 0.6.0 first wave authorized</p>
 </section>
 </div></body></html>

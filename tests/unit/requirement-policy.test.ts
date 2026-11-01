@@ -25,6 +25,7 @@ describe('engineering requirement policy', () => {
         'REQ-ENG-004',
         'REQ-ENG-005',
         'REQ-ENG-006',
+        'REQ-ENG-007',
       ])
     );
   });
@@ -128,10 +129,73 @@ describe('engineering requirement policy', () => {
       const result = checkRequirementTraceability(root);
       expect(result.errors).toEqual(
         expect.arrayContaining([
-          expect.stringContaining('designStatus must be approved'),
+          expect.stringContaining(
+            'designStatus must be approved or approved_unreviewed'
+          ),
           expect.stringContaining('implementationAuthorized must be true'),
         ])
       );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('requires an audit note for approved_unreviewed but preserves the state', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tinyai-unreviewed-'));
+    try {
+      await mkdir(join(root, 'policy'), { recursive: true });
+      await mkdir(join(root, 'docs'), { recursive: true });
+      await writeFile(join(root, 'package.json'), '{"version":"0.5.1"}');
+      await writeFile(
+        join(root, 'policy/adr-registry.json'),
+        '{"schemaVersion":1,"decisions":[]}'
+      );
+      await writeFile(
+        join(root, 'docs/design.html'),
+        '<section id="architecture-impact"></section>'
+      );
+      await writeFile(
+        join(root, 'docs/testing.html'),
+        '<section id="architecture-completeness"></section>'
+      );
+      const requirement = {
+        id: 'REQ-ENG-995',
+        title: 'Unreviewed approval',
+        type: 'infrastructure',
+        priority: 'P0',
+        status: 'in_progress',
+        designStatus: 'approved_unreviewed',
+        implementationAuthorized: true,
+        targetVersion: '0.4.0',
+        design: 'docs/design.html#architecture-impact',
+        testDesign: 'docs/testing.html#architecture-completeness',
+        acceptance: 'Unreviewed approval remains explicit.',
+        legacyAliases: [],
+      };
+      const registryPath = join(root, 'policy/requirement-registry.json');
+      const writeRegistry = async (value: Record<string, unknown>) =>
+        writeFile(
+          registryPath,
+          JSON.stringify({
+            schemaVersion: 1,
+            baselineCommit: 'abcdef1',
+            requirements: [value],
+          })
+        );
+
+      await writeRegistry(requirement);
+      expect(checkRequirementTraceability(root).errors).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('approved_unreviewed requires an approvalNote'),
+        ])
+      );
+
+      await writeRegistry({
+        ...requirement,
+        approvalNote:
+          'User explicitly authorized without claiming detailed review.',
+      });
+      expect(checkRequirementTraceability(root).errors).toEqual([]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

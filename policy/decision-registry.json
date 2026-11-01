@@ -19,6 +19,25 @@
       "supersedes": [],
       "supersededBy": null,
       "file": "docs/decisions/DEC-001-agent-decision-intake.md"
+    },
+    {
+      "id": "DEC-002",
+      "title": "Explicit unreviewed approval and 0.6.0 first-wave authorization",
+      "statement": "增加“批准，但未仔细查阅”的状态，并据此批准版本重排和第一批开发。",
+      "normalizedDecision": "Add approved_unreviewed design status with a mandatory approval note; authorize REQ-HOST-002 and REQ-ACTION-001 for the first 0.6.0 implementation wave while leaving later requirements frozen.",
+      "capturedAt": "2026-11-01",
+      "source": "request",
+      "scope": ["approval", "adr", "requirements", "release-plan"],
+      "status": "promoted",
+      "triage": {
+        "disposition": "adr_and_requirement",
+        "adrs": ["ADR-014"],
+        "requirements": ["REQ-ENG-007"],
+        "rationale": "The approval state changes the cross-cutting governance contract and requires implementation and tests."
+      },
+      "supersedes": [],
+      "supersededBy": null,
+      "file": "docs/decisions/DEC-002-unreviewed-approval.md"
     }
   ]
 }

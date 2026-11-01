@@ -170,7 +170,7 @@ Allowed requirement fields:
 - `type`: `feature | bugfix | security | refactor | infrastructure | documentation`
 - `priority`: `P0 | P1 | P2 | P3`
 - `status`: `proposed | accepted | in_progress | implemented | verified | released`
-- `designStatus`: `draft | review | approved`
+- `designStatus`: `draft | review | approved_unreviewed | approved`
 - `implementationAuthorized`: boolean
 - `adrReview`: required from `targetVersion` 0.5.0; records ADR triage and
   cites Accepted/Proposed ADRs or explains why no ADR is required.
@@ -178,7 +178,10 @@ Allowed requirement fields:
   impact and completeness anchors.
 
 A requirement cannot enter `in_progress` until its design and test-design links
-exist, `designStatus` is `approved`, and `implementationAuthorized` is `true`.
+exist, `designStatus` is `approved` or `approved_unreviewed`, and
+`implementationAuthorized` is `true`. Use `approved_unreviewed` only when the
+user explicitly accepts implementation without claiming detailed review; record
+a non-empty `approvalNote`.
 It cannot enter `verified` without observed test evidence.
 
 ## Design and Test Documents

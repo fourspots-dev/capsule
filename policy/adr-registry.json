@@ -185,6 +185,18 @@
       "approvedBy": "user",
       "supersedes": [],
       "supersededBy": null
+    },
+    {
+      "id": "ADR-014",
+      "title": "Explicit unreviewed design approval",
+      "status": "accepted",
+      "file": "docs/adr/ADR-014-explicit-unreviewed-approval.md",
+      "requirements": ["REQ-ENG-007"],
+      "originDecision": "DEC-002",
+      "decidedAt": "2026-11-01",
+      "approvedBy": "user",
+      "supersedes": [],
+      "supersededBy": null
     }
   ]
 }

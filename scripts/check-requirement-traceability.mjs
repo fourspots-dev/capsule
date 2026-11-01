@@ -38,7 +38,12 @@ export function checkRequirementTraceability(root = resolve(dirname(scriptPath),
     'verified',
     'released',
   ]);
-  const designStatuses = new Set(['draft', 'review', 'approved']);
+  const designStatuses = new Set([
+    'draft',
+    'review',
+    'approved_unreviewed',
+    'approved',
+  ]);
   const adrReviewStatuses = new Set([
     'pending',
     'existing',
@@ -131,9 +136,12 @@ export function checkRequirementTraceability(root = resolve(dirname(scriptPath),
         requirement.status
       )
     ) {
-      if (requirement.designStatus !== 'approved') {
+      if (
+        requirement.designStatus !== 'approved' &&
+        requirement.designStatus !== 'approved_unreviewed'
+      ) {
         errors.push(
-          `${label}: designStatus must be approved before ${requirement.status}`
+          `${label}: designStatus must be approved or approved_unreviewed before ${requirement.status}`
         );
       }
       if (requirement.implementationAuthorized !== true) {
@@ -141,6 +149,15 @@ export function checkRequirementTraceability(root = resolve(dirname(scriptPath),
           `${label}: implementationAuthorized must be true before ${requirement.status}`
         );
       }
+    }
+    if (
+      requirement.designStatus === 'approved_unreviewed' &&
+      (typeof requirement.approvalNote !== 'string' ||
+        !requirement.approvalNote.trim())
+    ) {
+      errors.push(
+        `${label}: approved_unreviewed requires an approvalNote`
+      );
     }
   }
 
