@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.6.0
+
+### Features
+
+- `REQ-HOST-002`: add the shared Host Baseline Matrix for TUI, Chrome, iOS,
+  sandbox and memory profiles; startup fails only when Core or Workspace
+  baselines are missing and explicitly degrades Real Execution when no Action is
+  available.
+- `REQ-ACTION-001`: add trusted absolute Action module loading with hash checks,
+  a shell-free local argv executor, Remote Action protocol, provider
+  cancellation/disposal, registry input validation and lifecycle re-probing.
+- Add blocking TUI ask/allow/deny approval for dangerous Actions and bind
+  approvals to Action/input/workspace/environment context.
+- Integrate Host Baseline state into shared CapabilityGraph, Prompt and startup
+  fingerprints across TUI and Headless; Chrome startup now applies the same
+  baseline without making Actions mandatory.
+
+### Verification
+
+- `npm run check`: 391 deterministic tests passed, 3 skipped.
+- `npm run test:e2e`: 5 Chrome extension tests passed.
+- `npm run verify:tui`: real pseudo-terminal Action execution and Capsule export.
+
 ## 0.5.1
 
 ### Infrastructure

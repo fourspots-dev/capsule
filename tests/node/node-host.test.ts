@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { inspectHostCapabilities } from '../../src/host';
 import { NodeHostBridge, NodeHostStorage } from '../../src/node/node-host';
+import { NodeHostFileSystem } from '../../src/node/host-fs';
 import { parseWorkspaceBundle } from '../../src/virtual';
 
 describe('NodeHostBridge', () => {
@@ -40,6 +41,24 @@ describe('NodeHostBridge', () => {
       expect(await second.get('a')).toBeUndefined();
       expect(await second.get('b')).toEqual(['two']);
       expect(await second.list()).toEqual(['b']);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('exposes an explicitly configured host filesystem baseline port', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tinyai-node-fs-baseline-'));
+    try {
+      const host = new NodeHostBridge({
+        projectRoot: root,
+        stateRoot: join(root, '.tinyai'),
+        filesystem: new NodeHostFileSystem(root),
+      });
+      expect(inspectHostCapabilities(host)).toMatchObject({
+        healthy: true,
+      });
+      expect(host.filesystem).toBeInstanceOf(NodeHostFileSystem);
+      expect(inspectHostCapabilities(host).available).toContain('filesystem');
     } finally {
       await rm(root, { recursive: true, force: true });
     }

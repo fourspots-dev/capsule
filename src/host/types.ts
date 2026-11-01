@@ -5,6 +5,7 @@ import type {
 
 export type HostCapability =
   | 'storage'
+  | 'filesystem'
   | 'actions'
   | 'interactiveActions'
   | 'workspace.import'
@@ -30,6 +31,17 @@ export interface HostStorage {
   set(key: string, value: unknown): Promise<void>;
   remove(key: string): Promise<void>;
   list?(prefix?: string): Promise<string[]>;
+}
+
+/**
+ * Narrow host file port used for baseline and workspace capability probing.
+ * Portable VFS remains the authorization and path-normalization boundary.
+ */
+export interface HostFileSystemBridge {
+  read(path: string): Promise<Uint8Array>;
+  write(path: string, data: Uint8Array): Promise<unknown>;
+  list(path?: string): Promise<unknown[]>;
+  stat(path: string): Promise<unknown | undefined>;
 }
 
 export interface HostClock {
@@ -113,6 +125,7 @@ export interface HostWorkspaceBridge {
 export interface HostBridge {
   descriptor: HostDescriptor;
   storage?: HostStorage;
+  filesystem?: HostFileSystemBridge;
   clock?: HostClock;
   scheduler?: HostScheduler;
   crypto?: HostCrypto;

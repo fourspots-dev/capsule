@@ -6,6 +6,7 @@ import { ChromeSkillStore } from '../adapters/chrome-skill-store';
 import { OpenAIModelTransport } from '../adapters/openai-model';
 import { createSubagentTools } from '../adapters/subagent-tools';
 import { ChromeHostBridge, type ChromeStorageArea } from '../adapters/chrome-host';
+import { assertHostBaseline } from '../host';
 import { createVirtualWorkspaceTools } from '../adapters/virtual-workspace-tools';
 import { VirtualWorkspace } from '../virtual';
 import { createSkillTools } from '../adapters/skill-tools';
@@ -118,6 +119,10 @@ export async function createChromeRuntimeBundle(
     host: chromeHost,
     storageKey: 'tinyai:virtual-workspace:v1',
   });
+  assertHostBaseline(chromeHost, 'chrome', {
+    workspaceStorage: 'storage-backed',
+    availableActions: [],
+  });
   const storage = options.storage ?? chromeLocalStorage();
   const sessionStore = new ChromeSessionStore({
     storage: chromeStorageForSessions(storage),
@@ -160,7 +165,7 @@ export async function createChromeRuntimeBundle(
     artifacts: artifactStore,
     environmentId: 'chrome-extension-v1',
     hostProfile: 'browser-agent',
-    agentVersion: '0.3.0',
+    agentVersion: '0.6.0',
     newId: () => `capsule_${crypto.randomUUID()}`,
     beforeExport: async () => {
       if (!activeRuntime) return;

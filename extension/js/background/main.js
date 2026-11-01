@@ -1749,6 +1749,7 @@
   var ChromeHostBridge = class {
     descriptor;
     storage;
+    filesystem;
     clock;
     scheduler;
     crypto;
@@ -1756,6 +1757,7 @@
     actions;
     constructor(options) {
       this.storage = new ChromeHostStorage(options.storage);
+      this.filesystem = options.filesystem;
       const now = options.now ?? (() => Date.now());
       this.clock = {
         now,
@@ -1772,6 +1774,7 @@
       this.actions = options.actions;
       const capabilities = [
         "storage",
+        ...this.filesystem ? ["filesystem"] : [],
         "clock",
         "scheduler",
         "crypto",
@@ -1806,6 +1809,517 @@
     }
   };
 
+  // src/host/capabilities.ts
+  var capabilityOrder = [
+    "storage",
+    "filesystem",
+    "actions",
+    "interactiveActions",
+    "workspace.import",
+    "workspace.export",
+    "workspace.picker",
+    "terminal",
+    "process",
+    "pty",
+    "network",
+    "clock",
+    "scheduler",
+    "crypto",
+    "clone"
+  ];
+  function inspectHostCapabilities(host) {
+    const rawDeclared = host.descriptor?.capabilities;
+    const declarations = Array.isArray(rawDeclared) ? rawDeclared : [];
+    const declared = [
+      ...new Set(declarations.filter(isKnownCapability))
+    ];
+    const available = capabilityOrder.filter(
+      (capability) => isCapabilityImplemented(host, capability)
+    );
+    const diagnostics = [];
+    if (!host.descriptor?.id?.trim()) {
+      diagnostics.push({
+        capability: "storage",
+        severity: "error",
+        code: "HOST_DESCRIPTOR_INVALID",
+        message: "Host descriptor must include a non-empty id"
+      });
+    }
+    if (!Array.isArray(rawDeclared)) {
+      diagnostics.push({
+        capability: "storage",
+        severity: "error",
+        code: "HOST_DESCRIPTOR_INVALID",
+        message: "Host capabilities must be an array"
+      });
+    }
+    const seen = /* @__PURE__ */ new Set();
+    for (const capability of declarations) {
+      if (!isKnownCapability(capability)) {
+        diagnostics.push({
+          capability: String(capability),
+          severity: "error",
+          code: "HOST_CAPABILITY_UNKNOWN",
+          message: `Host declared an unknown capability: ${String(capability)}`
+        });
+        continue;
+      }
+      if (seen.has(capability)) {
+        diagnostics.push({
+          capability,
+          severity: "error",
+          code: "HOST_CAPABILITY_DUPLICATE",
+          message: `Host declared capability more than once: ${capability}`
+        });
+      }
+      seen.add(capability);
+    }
+    for (const capability of declared) {
+      if (!available.includes(capability)) {
+        diagnostics.push({
+          capability,
+          severity: "error",
+          code: "HOST_CAPABILITY_MISSING",
+          message: `Host declared ${capability} but did not provide its bridge`
+        });
+      }
+    }
+    for (const capability of available) {
+      if (!declared.includes(capability)) {
+        diagnostics.push({
+          capability,
+          severity: "warning",
+          code: "HOST_CAPABILITY_UNDECLARED",
+          message: `Host provides ${capability} but did not declare it`
+        });
+      }
+    }
+    return {
+      declared,
+      available,
+      diagnostics,
+      healthy: diagnostics.every((item) => item.severity !== "error")
+    };
+  }
+  function assertHostCapabilities(host, required) {
+    const report = inspectHostCapabilities(host);
+    const invalid4 = report.diagnostics.find(
+      (diagnostic) => diagnostic.severity === "error"
+    );
+    if (invalid4) {
+      throw new AgentError(invalid4.code, invalid4.message, {
+        details: { capability: invalid4.capability }
+      });
+    }
+    const missing = required.filter(
+      (capability) => !report.declared.includes(capability)
+    );
+    if (missing.length) {
+      throw new AgentError(
+        "HOST_CAPABILITY_MISSING",
+        `Host ${host.descriptor.id} is missing required capabilities: ${missing.join(", ")}`,
+        { details: { missing } }
+      );
+    }
+    return report;
+  }
+  function hasHostCapability(host, capability) {
+    return host.descriptor.capabilities.includes(capability) && isCapabilityImplemented(host, capability);
+  }
+  function isCapabilityImplemented(host, capability) {
+    switch (capability) {
+      case "storage":
+        return Boolean(host.storage);
+      case "filesystem":
+        return Boolean(
+          host.filesystem && typeof host.filesystem.read === "function" && typeof host.filesystem.write === "function" && typeof host.filesystem.list === "function" && typeof host.filesystem.stat === "function"
+        );
+      case "actions":
+        return typeof host.actions?.describe === "function" && typeof host.actions?.invoke === "function";
+      case "interactiveActions":
+        return typeof host.interactiveActions?.open === "function";
+      case "workspace.import":
+        return typeof host.workspace?.importWorkspace === "function";
+      case "workspace.export":
+        return typeof host.workspace?.exportWorkspace === "function";
+      case "workspace.picker":
+        return typeof host.workspace?.pickWorkspace === "function";
+      case "terminal":
+        return Boolean(
+          host.terminal && typeof host.terminal.write === "function" && typeof host.terminal.onInput === "function"
+        );
+      case "process":
+        return typeof host.process?.execute === "function";
+      case "pty":
+        return typeof host.pty?.execute === "function";
+      case "network":
+        return typeof host.network?.request === "function";
+      case "clock":
+        return Boolean(
+          host.clock && typeof host.clock.now === "function" && typeof host.clock.setTimeout === "function" && typeof host.clock.clearTimeout === "function"
+        );
+      case "scheduler":
+        return Boolean(
+          host.scheduler && typeof host.scheduler.setTimeout === "function" && typeof host.scheduler.clearTimeout === "function" && typeof host.scheduler.queueMicrotask === "function"
+        );
+      case "crypto":
+        return typeof host.crypto?.digest === "function";
+      case "clone":
+        return typeof host.clone?.clone === "function";
+    }
+  }
+  function isKnownCapability(value) {
+    return typeof value === "string" && capabilityOrder.includes(value);
+  }
+
+  // src/host/memory-host.ts
+  var MemoryHostStorage = class {
+    values = /* @__PURE__ */ new Map();
+    async get(key) {
+      return structuredClone(this.values.get(key));
+    }
+    async set(key, value) {
+      this.values.set(key, structuredClone(value));
+    }
+    async remove(key) {
+      this.values.delete(key);
+    }
+    async list(prefix = "") {
+      return [...this.values.keys()].filter((key) => key.startsWith(prefix)).sort();
+    }
+  };
+  var MemoryHostBridge = class {
+    descriptor;
+    storage;
+    filesystem;
+    clock;
+    scheduler;
+    crypto;
+    clone;
+    constructor(options = {}) {
+      this.storage = options.storage ?? new MemoryHostStorage();
+      this.filesystem = options.filesystem;
+      this.clock = options.clock ?? systemHostClock;
+      this.scheduler = {
+        setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
+        clearTimeout: (handle) => globalThis.clearTimeout(
+          handle
+        ),
+        queueMicrotask: (callback) => globalThis.queueMicrotask(callback)
+      };
+      this.crypto = options.crypto ?? systemHostCrypto;
+      this.clone = {
+        clone: options.clone ?? ((value) => structuredClone(value))
+      };
+      const provided = [
+        "storage",
+        ...this.filesystem ? ["filesystem"] : [],
+        "clock",
+        "scheduler",
+        "crypto",
+        "clone"
+      ];
+      this.descriptor = {
+        id: options.descriptor?.id ?? "memory-host",
+        platform: options.descriptor?.platform ?? "portable",
+        capabilities: options.descriptor?.capabilities ?? provided
+      };
+    }
+  };
+  var systemHostClock = {
+    now: () => Date.now(),
+    setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
+    clearTimeout: (handle) => globalThis.clearTimeout(
+      handle
+    )
+  };
+  var systemHostCrypto = {
+    async digest(algorithm, data) {
+      if (algorithm !== "SHA-256" || !globalThis.crypto?.subtle) {
+        throw new Error("SHA-256 is unavailable in this host");
+      }
+      const digest2 = await globalThis.crypto.subtle.digest(
+        algorithm,
+        toArrayBuffer(data)
+      );
+      return new Uint8Array(digest2);
+    },
+    randomBytes(length) {
+      const bytes = new Uint8Array(length);
+      globalThis.crypto.getRandomValues(bytes);
+      return bytes;
+    }
+  };
+  function toArrayBuffer(data) {
+    return data.buffer.slice(
+      data.byteOffset,
+      data.byteOffset + data.byteLength
+    );
+  }
+
+  // src/core/tool-schema.ts
+  function parseToolArguments(source) {
+    if (!source.trim()) return {};
+    let parsed;
+    try {
+      parsed = JSON.parse(source);
+    } catch (error2) {
+      throw new AgentError("TOOL_ARGUMENTS_INVALID", "Tool arguments must be valid JSON", {
+        details: { cause: error2 instanceof Error ? error2.message : String(error2) }
+      });
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new AgentError("TOOL_ARGUMENTS_INVALID", "Tool arguments must be a JSON object");
+    }
+    return parsed;
+  }
+  function validateNode(schema3, value, path) {
+    if (!schema3 || typeof schema3 !== "object" || Array.isArray(schema3)) return;
+    const rule = schema3;
+    if (Array.isArray(rule.enum) && !rule.enum.some((candidate) => Object.is(candidate, value))) {
+      throw new AgentError("TOOL_SCHEMA_INVALID", `${path} must be one of the declared enum values`);
+    }
+    const type = typeof rule.type === "string" ? rule.type : void 0;
+    if (type === "object") {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new AgentError("TOOL_SCHEMA_INVALID", `${path} must be an object`);
+      }
+      const object = value;
+      const required = Array.isArray(rule.required) ? rule.required.map(String) : [];
+      for (const key of required) {
+        if (!(key in object)) {
+          throw new AgentError("TOOL_SCHEMA_INVALID", `${path}.${key} is required`);
+        }
+      }
+      const properties = rule.properties && typeof rule.properties === "object" && !Array.isArray(rule.properties) ? rule.properties : {};
+      for (const [key, child] of Object.entries(properties)) {
+        if (key in object) validateNode(child, object[key], `${path}.${key}`);
+      }
+      return;
+    }
+    if (type === "array") {
+      if (!Array.isArray(value)) {
+        throw new AgentError("TOOL_SCHEMA_INVALID", `${path} must be an array`);
+      }
+      for (let index = 0; index < value.length; index += 1) {
+        validateNode(rule.items, value[index], `${path}[${index}]`);
+      }
+      return;
+    }
+    if (type === "string" && typeof value !== "string") {
+      throw new AgentError("TOOL_SCHEMA_INVALID", `${path} must be a string`);
+    }
+    if (type === "number" && (typeof value !== "number" || !Number.isFinite(value))) {
+      throw new AgentError("TOOL_SCHEMA_INVALID", `${path} must be a finite number`);
+    }
+    if (type === "integer" && (!Number.isInteger(value) || typeof value !== "number")) {
+      throw new AgentError("TOOL_SCHEMA_INVALID", `${path} must be an integer`);
+    }
+    if (type === "boolean" && typeof value !== "boolean") {
+      throw new AgentError("TOOL_SCHEMA_INVALID", `${path} must be a boolean`);
+    }
+  }
+  function validateToolInput(schema3, input) {
+    validateNode(schema3, input, "arguments");
+  }
+  function validateJsonValue(schema3, value, path = "value") {
+    validateNode(schema3, value, path);
+  }
+
+  // src/host/profile-matrix.ts
+  var portableProfile = (id, label, options = {}) => ({
+    id,
+    label,
+    requiredTiers: ["core", "workspace", "portable-coding"],
+    requiredHostCapabilities: options.requiredHostCapabilities ?? [],
+    optionalHostCapabilities: options.optionalHostCapabilities ?? [
+      "actions",
+      "interactiveActions",
+      "network",
+      "terminal",
+      "process",
+      "pty"
+    ],
+    forbiddenActionPrefixes: [
+      "host.storage",
+      "host.filesystem",
+      "host.clock",
+      "host.scheduler",
+      "host.crypto",
+      "host.session"
+    ]
+  });
+  var HOST_BASELINE_PROFILES = Object.freeze({
+    "tui-local": portableProfile("tui-local", "Local TUI"),
+    chrome: portableProfile("chrome", "Chrome extension"),
+    ios: portableProfile("ios", "iOS native host"),
+    sandbox: portableProfile("sandbox", "Restricted sandbox"),
+    memory: portableProfile("memory", "Memory/test host")
+  });
+  function hostBaselineProfile(id) {
+    const profile = HOST_BASELINE_PROFILES[id];
+    if (!profile) {
+      throw new Error(`Unknown host baseline profile: ${id}`);
+    }
+    return profile;
+  }
+
+  // src/host/baseline.ts
+  function probeHostBaseline(host, profileId, options) {
+    let profile;
+    try {
+      profile = hostBaselineProfile(profileId);
+    } catch {
+      throw new AgentError(
+        "HOST_PROFILE_UNKNOWN",
+        `Unknown host baseline profile: ${profileId}`
+      );
+    }
+    const hostCapabilities = inspectHostCapabilities(host);
+    const available = new Set(hostCapabilities.available);
+    const declared = new Set(hostCapabilities.declared);
+    const diagnostics = [];
+    const coreCapabilities = [
+      "storage",
+      "clock",
+      "scheduler",
+      "crypto"
+    ];
+    const missingCore = coreCapabilities.filter(
+      (capability) => !available.has(capability) || !declared.has(capability)
+    );
+    if (missingCore.length) {
+      diagnostics.push({
+        code: "HOST_BASELINE_MISSING",
+        severity: "error",
+        tier: "core",
+        capability: missingCore[0],
+        message: `Core baseline is missing: ${missingCore.join(", ")}`
+      });
+    }
+    const missingRequired = profile.requiredHostCapabilities.filter(
+      (capability) => !available.has(capability) || !declared.has(capability)
+    );
+    if (missingRequired.length) {
+      diagnostics.push({
+        code: "HOST_BASELINE_MISSING",
+        severity: "error",
+        capability: missingRequired[0],
+        message: `Profile ${profile.id} requires: ${missingRequired.join(", ")}`
+      });
+    }
+    const workspaceAvailable = workspaceBaselineAvailable(
+      options.workspaceStorage,
+      available,
+      declared
+    );
+    if (!workspaceAvailable) {
+      diagnostics.push({
+        code: "HOST_BASELINE_MISSING",
+        severity: "error",
+        tier: "workspace",
+        capability: options.workspaceStorage === "host-fs" ? "filesystem" : "storage",
+        message: `Workspace baseline is unavailable in ${options.workspaceStorage} mode`
+      });
+    }
+    const portableAvailable = workspaceAvailable && (options.portableRuntime ?? true);
+    if (!portableAvailable) {
+      diagnostics.push({
+        code: "HOST_BASELINE_MISSING",
+        severity: "error",
+        tier: "portable-coding",
+        message: "Portable coding runtime is unavailable"
+      });
+    }
+    const actions = options.availableActions ?? [];
+    const actionIds = actions.map((action) => action.descriptor.id).sort();
+    for (const actionId of actionIds) {
+      const prefix = profile.forbiddenActionPrefixes.find(
+        (candidate) => actionId === candidate || actionId.startsWith(`${candidate}.`)
+      );
+      if (prefix) {
+        diagnostics.push({
+          code: "HOST_ACTION_SUBSTITUTION_FORBIDDEN",
+          severity: "error",
+          capability: actionId,
+          message: `Action ${actionId} cannot substitute host baseline capability ${prefix}`
+        });
+      }
+    }
+    if (hostCapabilities.diagnostics.some((item) => item.severity === "error")) {
+      diagnostics.push({
+        code: "HOST_PROFILE_INCOMPATIBLE",
+        severity: "error",
+        message: "Host capability declarations are inconsistent with their implementations"
+      });
+    }
+    const executionAvailable = actions.some(
+      (action) => action.descriptor.effects.includes("execute")
+    );
+    if (!executionAvailable) {
+      diagnostics.push({
+        code: "HOST_EXECUTION_DEGRADED",
+        severity: "warning",
+        tier: "real-execution",
+        message: "No executable application Action is available; portable coding remains enabled"
+      });
+    }
+    const tierState = {
+      core: missingCore.length ? "unavailable" : "available",
+      workspace: workspaceAvailable ? "available" : "unavailable",
+      "portable-coding": portableAvailable ? "available" : "unavailable",
+      "real-execution": executionAvailable ? "available" : "degraded"
+    };
+    if (options.actionDiagnostics?.some(
+      (diagnostic) => diagnostic.code === "ACTION_PROBE_FAILED"
+    ) && tierState["real-execution"] === "available") {
+      tierState["real-execution"] = "degraded";
+    }
+    return {
+      profile,
+      tierState,
+      hostCapabilities,
+      availableActionIds: actionIds,
+      diagnostics,
+      healthy: diagnostics.every((diagnostic) => diagnostic.severity !== "error")
+    };
+  }
+  function assertHostBaseline(host, profileId, options) {
+    const report = probeHostBaseline(host, profileId, options);
+    for (const tier of report.profile.requiredTiers) {
+      if (report.tierState[tier] === "unavailable") {
+        throw new AgentError(
+          "HOST_BASELINE_MISSING",
+          `Host ${host.descriptor.id} cannot satisfy ${profileId} ${tier} baseline`,
+          { details: { profile: profileId, tier } }
+        );
+      }
+    }
+    const error2 = report.diagnostics.find(
+      (diagnostic) => diagnostic.severity === "error"
+    );
+    if (error2) {
+      throw new AgentError(error2.code, error2.message, {
+        details: {
+          profile: profileId,
+          ...error2.capability ? { capability: error2.capability } : {},
+          ...error2.tier ? { tier: error2.tier } : {}
+        }
+      });
+    }
+    return report;
+  }
+  function workspaceBaselineAvailable(mode, available, declared) {
+    switch (mode) {
+      case "host-fs":
+        return available.has("filesystem") && declared.has("filesystem");
+      case "storage-backed":
+        return available.has("storage") && declared.has("storage");
+      case "package-memory":
+        return true;
+    }
+  }
+
   // src/git/binary.ts
   var encoder = new TextEncoder();
   async function sha1(data) {
@@ -1817,7 +2331,7 @@
     }
     const digest2 = await globalThis.crypto.subtle.digest(
       "SHA-1",
-      toArrayBuffer(data)
+      toArrayBuffer2(data)
     );
     return new Uint8Array(digest2);
   }
@@ -1831,7 +2345,7 @@
         "zlib compression is unavailable in this runtime"
       );
     }
-    const stream = new Blob([toArrayBuffer(data)]).stream().pipeThrough(new CompressionStream("deflate"));
+    const stream = new Blob([toArrayBuffer2(data)]).stream().pipeThrough(new CompressionStream("deflate"));
     return new Uint8Array(await new Response(stream).arrayBuffer());
   }
   async function inflateZlib(data) {
@@ -1842,7 +2356,7 @@
       );
     }
     try {
-      const stream = new Blob([toArrayBuffer(data)]).stream().pipeThrough(new DecompressionStream("deflate"));
+      const stream = new Blob([toArrayBuffer2(data)]).stream().pipeThrough(new DecompressionStream("deflate"));
       return new Uint8Array(await new Response(stream).arrayBuffer());
     } catch (error2) {
       throw new AgentError(
@@ -1937,7 +2451,7 @@
       2
     ).getUint16(0, false);
   }
-  function toArrayBuffer(data) {
+  function toArrayBuffer2(data) {
     return data.buffer.slice(
       data.byteOffset,
       data.byteOffset + data.byteLength
@@ -6529,246 +7043,6 @@
     return result;
   }
 
-  // src/host/capabilities.ts
-  var capabilityOrder = [
-    "storage",
-    "actions",
-    "interactiveActions",
-    "workspace.import",
-    "workspace.export",
-    "workspace.picker",
-    "terminal",
-    "process",
-    "pty",
-    "network",
-    "clock",
-    "scheduler",
-    "crypto",
-    "clone"
-  ];
-  function inspectHostCapabilities(host) {
-    const rawDeclared = host.descriptor?.capabilities;
-    const declarations = Array.isArray(rawDeclared) ? rawDeclared : [];
-    const declared = [
-      ...new Set(declarations.filter(isKnownCapability))
-    ];
-    const available = capabilityOrder.filter(
-      (capability) => isCapabilityImplemented(host, capability)
-    );
-    const diagnostics = [];
-    if (!host.descriptor?.id?.trim()) {
-      diagnostics.push({
-        capability: "storage",
-        severity: "error",
-        code: "HOST_DESCRIPTOR_INVALID",
-        message: "Host descriptor must include a non-empty id"
-      });
-    }
-    if (!Array.isArray(rawDeclared)) {
-      diagnostics.push({
-        capability: "storage",
-        severity: "error",
-        code: "HOST_DESCRIPTOR_INVALID",
-        message: "Host capabilities must be an array"
-      });
-    }
-    const seen = /* @__PURE__ */ new Set();
-    for (const capability of declarations) {
-      if (!isKnownCapability(capability)) {
-        diagnostics.push({
-          capability: String(capability),
-          severity: "error",
-          code: "HOST_CAPABILITY_UNKNOWN",
-          message: `Host declared an unknown capability: ${String(capability)}`
-        });
-        continue;
-      }
-      if (seen.has(capability)) {
-        diagnostics.push({
-          capability,
-          severity: "error",
-          code: "HOST_CAPABILITY_DUPLICATE",
-          message: `Host declared capability more than once: ${capability}`
-        });
-      }
-      seen.add(capability);
-    }
-    for (const capability of declared) {
-      if (!available.includes(capability)) {
-        diagnostics.push({
-          capability,
-          severity: "error",
-          code: "HOST_CAPABILITY_MISSING",
-          message: `Host declared ${capability} but did not provide its bridge`
-        });
-      }
-    }
-    for (const capability of available) {
-      if (!declared.includes(capability)) {
-        diagnostics.push({
-          capability,
-          severity: "warning",
-          code: "HOST_CAPABILITY_UNDECLARED",
-          message: `Host provides ${capability} but did not declare it`
-        });
-      }
-    }
-    return {
-      declared,
-      available,
-      diagnostics,
-      healthy: diagnostics.every((item) => item.severity !== "error")
-    };
-  }
-  function assertHostCapabilities(host, required) {
-    const report = inspectHostCapabilities(host);
-    const invalid4 = report.diagnostics.find(
-      (diagnostic) => diagnostic.severity === "error"
-    );
-    if (invalid4) {
-      throw new AgentError(invalid4.code, invalid4.message, {
-        details: { capability: invalid4.capability }
-      });
-    }
-    const missing = required.filter(
-      (capability) => !report.declared.includes(capability)
-    );
-    if (missing.length) {
-      throw new AgentError(
-        "HOST_CAPABILITY_MISSING",
-        `Host ${host.descriptor.id} is missing required capabilities: ${missing.join(", ")}`,
-        { details: { missing } }
-      );
-    }
-    return report;
-  }
-  function hasHostCapability(host, capability) {
-    return host.descriptor.capabilities.includes(capability) && isCapabilityImplemented(host, capability);
-  }
-  function isCapabilityImplemented(host, capability) {
-    switch (capability) {
-      case "storage":
-        return Boolean(host.storage);
-      case "actions":
-        return typeof host.actions?.describe === "function" && typeof host.actions?.invoke === "function";
-      case "interactiveActions":
-        return typeof host.interactiveActions?.open === "function";
-      case "workspace.import":
-        return typeof host.workspace?.importWorkspace === "function";
-      case "workspace.export":
-        return typeof host.workspace?.exportWorkspace === "function";
-      case "workspace.picker":
-        return typeof host.workspace?.pickWorkspace === "function";
-      case "terminal":
-        return Boolean(
-          host.terminal && typeof host.terminal.write === "function" && typeof host.terminal.onInput === "function"
-        );
-      case "process":
-        return typeof host.process?.execute === "function";
-      case "pty":
-        return typeof host.pty?.execute === "function";
-      case "network":
-        return typeof host.network?.request === "function";
-      case "clock":
-        return Boolean(
-          host.clock && typeof host.clock.now === "function" && typeof host.clock.setTimeout === "function" && typeof host.clock.clearTimeout === "function"
-        );
-      case "scheduler":
-        return Boolean(
-          host.scheduler && typeof host.scheduler.setTimeout === "function" && typeof host.scheduler.clearTimeout === "function" && typeof host.scheduler.queueMicrotask === "function"
-        );
-      case "crypto":
-        return typeof host.crypto?.digest === "function";
-      case "clone":
-        return typeof host.clone?.clone === "function";
-    }
-  }
-  function isKnownCapability(value) {
-    return typeof value === "string" && capabilityOrder.includes(value);
-  }
-
-  // src/host/memory-host.ts
-  var MemoryHostStorage = class {
-    values = /* @__PURE__ */ new Map();
-    async get(key) {
-      return structuredClone(this.values.get(key));
-    }
-    async set(key, value) {
-      this.values.set(key, structuredClone(value));
-    }
-    async remove(key) {
-      this.values.delete(key);
-    }
-    async list(prefix = "") {
-      return [...this.values.keys()].filter((key) => key.startsWith(prefix)).sort();
-    }
-  };
-  var MemoryHostBridge = class {
-    descriptor;
-    storage;
-    clock;
-    scheduler;
-    crypto;
-    clone;
-    constructor(options = {}) {
-      this.storage = options.storage ?? new MemoryHostStorage();
-      this.clock = options.clock ?? systemHostClock;
-      this.scheduler = {
-        setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
-        clearTimeout: (handle) => globalThis.clearTimeout(
-          handle
-        ),
-        queueMicrotask: (callback) => globalThis.queueMicrotask(callback)
-      };
-      this.crypto = options.crypto ?? systemHostCrypto;
-      this.clone = {
-        clone: options.clone ?? ((value) => structuredClone(value))
-      };
-      const provided = [
-        "storage",
-        "clock",
-        "scheduler",
-        "crypto",
-        "clone"
-      ];
-      this.descriptor = {
-        id: options.descriptor?.id ?? "memory-host",
-        platform: options.descriptor?.platform ?? "portable",
-        capabilities: options.descriptor?.capabilities ?? provided
-      };
-    }
-  };
-  var systemHostClock = {
-    now: () => Date.now(),
-    setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
-    clearTimeout: (handle) => globalThis.clearTimeout(
-      handle
-    )
-  };
-  var systemHostCrypto = {
-    async digest(algorithm, data) {
-      if (algorithm !== "SHA-256" || !globalThis.crypto?.subtle) {
-        throw new Error("SHA-256 is unavailable in this host");
-      }
-      const digest2 = await globalThis.crypto.subtle.digest(
-        algorithm,
-        toArrayBuffer2(data)
-      );
-      return new Uint8Array(digest2);
-    },
-    randomBytes(length) {
-      const bytes = new Uint8Array(length);
-      globalThis.crypto.getRandomValues(bytes);
-      return bytes;
-    }
-  };
-  function toArrayBuffer2(data) {
-    return data.buffer.slice(
-      data.byteOffset,
-      data.byteOffset + data.byteLength
-    );
-  }
-
   // src/virtual/workspace.ts
   var VirtualWorkspace = class _VirtualWorkspace {
     host;
@@ -7895,75 +8169,6 @@
       return { decision: "context", content: rule.content };
     }
     return { decision: "allow" };
-  }
-
-  // src/core/tool-schema.ts
-  function parseToolArguments(source) {
-    if (!source.trim()) return {};
-    let parsed;
-    try {
-      parsed = JSON.parse(source);
-    } catch (error2) {
-      throw new AgentError("TOOL_ARGUMENTS_INVALID", "Tool arguments must be valid JSON", {
-        details: { cause: error2 instanceof Error ? error2.message : String(error2) }
-      });
-    }
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new AgentError("TOOL_ARGUMENTS_INVALID", "Tool arguments must be a JSON object");
-    }
-    return parsed;
-  }
-  function validateNode(schema3, value, path) {
-    if (!schema3 || typeof schema3 !== "object" || Array.isArray(schema3)) return;
-    const rule = schema3;
-    if (Array.isArray(rule.enum) && !rule.enum.some((candidate) => Object.is(candidate, value))) {
-      throw new AgentError("TOOL_SCHEMA_INVALID", `${path} must be one of the declared enum values`);
-    }
-    const type = typeof rule.type === "string" ? rule.type : void 0;
-    if (type === "object") {
-      if (!value || typeof value !== "object" || Array.isArray(value)) {
-        throw new AgentError("TOOL_SCHEMA_INVALID", `${path} must be an object`);
-      }
-      const object = value;
-      const required = Array.isArray(rule.required) ? rule.required.map(String) : [];
-      for (const key of required) {
-        if (!(key in object)) {
-          throw new AgentError("TOOL_SCHEMA_INVALID", `${path}.${key} is required`);
-        }
-      }
-      const properties = rule.properties && typeof rule.properties === "object" && !Array.isArray(rule.properties) ? rule.properties : {};
-      for (const [key, child] of Object.entries(properties)) {
-        if (key in object) validateNode(child, object[key], `${path}.${key}`);
-      }
-      return;
-    }
-    if (type === "array") {
-      if (!Array.isArray(value)) {
-        throw new AgentError("TOOL_SCHEMA_INVALID", `${path} must be an array`);
-      }
-      for (let index = 0; index < value.length; index += 1) {
-        validateNode(rule.items, value[index], `${path}[${index}]`);
-      }
-      return;
-    }
-    if (type === "string" && typeof value !== "string") {
-      throw new AgentError("TOOL_SCHEMA_INVALID", `${path} must be a string`);
-    }
-    if (type === "number" && (typeof value !== "number" || !Number.isFinite(value))) {
-      throw new AgentError("TOOL_SCHEMA_INVALID", `${path} must be a finite number`);
-    }
-    if (type === "integer" && (!Number.isInteger(value) || typeof value !== "number")) {
-      throw new AgentError("TOOL_SCHEMA_INVALID", `${path} must be an integer`);
-    }
-    if (type === "boolean" && typeof value !== "boolean") {
-      throw new AgentError("TOOL_SCHEMA_INVALID", `${path} must be a boolean`);
-    }
-  }
-  function validateToolInput(schema3, input) {
-    validateNode(schema3, input, "arguments");
-  }
-  function validateJsonValue(schema3, value, path = "value") {
-    validateNode(schema3, value, path);
   }
 
   // src/core/subagent-coordinator.ts
@@ -9114,6 +9319,21 @@ ${skillListing}` : ""
       let policyRequiresApproval = false;
       let actionDigest;
       if (this.options.policy) {
+        let approvalContext;
+        if (tool5.approvalContext) {
+          try {
+            approvalContext = await tool5.approvalContext(input, invocation);
+          } catch (error2) {
+            return {
+              ...base,
+              status: "failed",
+              error: toStructuredError(
+                error2,
+                "TOOL_APPROVAL_CONTEXT_FAILED"
+              )
+            };
+          }
+        }
         const decision = await this.options.policy.evaluate(
           {
             sessionId: invocation.sessionId,
@@ -9123,7 +9343,8 @@ ${skillListing}` : ""
             capabilities: [...tool5.capabilities ?? []],
             effect: tool5.effect ?? (tool5.risk === "read" ? "read" : "write"),
             risk: tool5.risk,
-            input
+            input,
+            ...approvalContext === void 0 ? {} : { approvalContext }
           },
           invocation.signal
         );
@@ -14043,6 +14264,10 @@ ${lines.join("\n")}
       host: chromeHost,
       storageKey: "tinyai:virtual-workspace:v1"
     });
+    assertHostBaseline(chromeHost, "chrome", {
+      workspaceStorage: "storage-backed",
+      availableActions: []
+    });
     const storage = options.storage ?? chromeLocalStorage();
     const sessionStore = new ChromeSessionStore({
       storage: chromeStorageForSessions(storage)
@@ -14080,7 +14305,7 @@ ${lines.join("\n")}
       artifacts: artifactStore,
       environmentId: "chrome-extension-v1",
       hostProfile: "browser-agent",
-      agentVersion: "0.3.0",
+      agentVersion: "0.6.0",
       newId: () => `capsule_${crypto.randomUUID()}`,
       beforeExport: async () => {
         if (!activeRuntime) return;

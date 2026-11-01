@@ -3,6 +3,7 @@ import type {
   HostCapability,
   HostClock,
   HostCrypto,
+  HostFileSystemBridge,
   HostStorage,
 } from '../host';
 import type { HostActionProvider } from '../platform/host-action';
@@ -18,6 +19,7 @@ export interface ChromeHostOptions {
   id?: string;
   now?: () => number;
   actions?: HostActionProvider;
+  filesystem?: HostFileSystemBridge;
 }
 
 export class ChromeHostStorage implements HostStorage {
@@ -45,6 +47,7 @@ export class ChromeHostStorage implements HostStorage {
 export class ChromeHostBridge implements HostBridge {
   readonly descriptor;
   readonly storage: ChromeHostStorage;
+  readonly filesystem?: HostFileSystemBridge;
   readonly clock: HostClock;
   readonly scheduler: NonNullable<HostBridge['scheduler']>;
   readonly crypto: HostCrypto;
@@ -53,6 +56,7 @@ export class ChromeHostBridge implements HostBridge {
 
   constructor(options: ChromeHostOptions) {
     this.storage = new ChromeHostStorage(options.storage);
+    this.filesystem = options.filesystem;
     const now = options.now ?? (() => Date.now());
     this.clock = {
       now,
@@ -71,6 +75,7 @@ export class ChromeHostBridge implements HostBridge {
     this.actions = options.actions;
     const capabilities: HostCapability[] = [
       'storage',
+      ...(this.filesystem ? (['filesystem'] as const) : []),
       'clock',
       'scheduler',
       'crypto',

@@ -182,6 +182,10 @@ export interface ToolDefinition {
   executionMode?: 'parallel' | 'sequential';
   replay?: 'never' | 'safe';
   timeoutMs?: number;
+  approvalContext?: (
+    input: JsonValue,
+    invocation: ToolInvocation
+  ) => JsonValue | Promise<JsonValue>;
   execute: (input: JsonValue, invocation: ToolInvocation) => Promise<JsonValue>;
 }
 

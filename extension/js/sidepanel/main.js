@@ -102,6 +102,37 @@
     return '<div class="wb-rt-tablewrap"><table class="wb-rt-table"><thead><tr>' + head.map((cell) => `<th class="wb-rt-th">${inline(cell)}</th>`).join("") + "</tr></thead><tbody>" + body.map((row) => `<tr>${row.map((cell) => `<td class="wb-rt-td">${inline(cell)}</td>`).join("")}</tr>`).join("") + "</tbody></table></div>";
   }
 
+  // src/host/profile-matrix.ts
+  var portableProfile = (id, label, options = {}) => ({
+    id,
+    label,
+    requiredTiers: ["core", "workspace", "portable-coding"],
+    requiredHostCapabilities: options.requiredHostCapabilities ?? [],
+    optionalHostCapabilities: options.optionalHostCapabilities ?? [
+      "actions",
+      "interactiveActions",
+      "network",
+      "terminal",
+      "process",
+      "pty"
+    ],
+    forbiddenActionPrefixes: [
+      "host.storage",
+      "host.filesystem",
+      "host.clock",
+      "host.scheduler",
+      "host.crypto",
+      "host.session"
+    ]
+  });
+  var HOST_BASELINE_PROFILES = Object.freeze({
+    "tui-local": portableProfile("tui-local", "Local TUI"),
+    chrome: portableProfile("chrome", "Chrome extension"),
+    ios: portableProfile("ios", "iOS native host"),
+    sandbox: portableProfile("sandbox", "Restricted sandbox"),
+    memory: portableProfile("memory", "Memory/test host")
+  });
+
   // src/git/binary.ts
   var encoder = new TextEncoder();
 

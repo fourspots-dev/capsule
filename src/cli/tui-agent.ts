@@ -8,6 +8,7 @@ import {
   type NpmScriptActionDefinition,
 } from '../adapters/npm-action-provider';
 import { RemoteToolchainProvider } from '../adapters/remote-toolchain-provider';
+import { RemoteActionProvider } from '../adapters/remote-action-provider';
 import { createSubagentTools } from '../adapters/subagent-tools';
 import { createVirtualWorkspaceTools } from '../adapters/virtual-workspace-tools';
 import {
@@ -17,6 +18,7 @@ import {
 import type { ApprovalPort } from '../core/ports';
 import { SequentialIdGenerator, systemClock } from '../core/ports';
 import { HostActionRegistry } from '../platform/host-action';
+import { assertHostBaseline } from '../host';
 import { PermissionModeRegistry, PolicyEngine } from '../core/policy';
 import { SubagentCoordinator } from '../core/subagent-coordinator';
 import { ToolExecutor } from '../core/tool-executor';
@@ -24,6 +26,10 @@ import type { JsonValue, ToolDefinition } from '../core/types';
 import { WorkspaceRuntime } from '../core/workspace-runtime';
 import { NodeHostBridge } from '../node/node-host';
 import { NodeHostFileSystem } from '../node/host-fs';
+import {
+  TrustedActionModuleLoader,
+  type TrustedActionModuleSpec,
+} from '../node/actions/trusted-module-loader';
 import { PortableGitBackend } from '../git/backend';
 import { runNodeTui } from '../node/run-tui';
 import { WorkspaceSubagentDriver } from '../runtime/workspace-subagent-driver';
@@ -50,8 +56,9 @@ interface TuiCliOptions {
   importProject: 'auto' | 'always' | 'never';
   workspaceMode: 'virtual' | 'host';
   toolProfile: WorkspaceToolProfile;
-  approval: 'auto' | 'deny';
+  approval: 'auto' | 'ask' | 'deny';
   actionScripts: NpmScriptActionDefinition[];
+  actionModules: TrustedActionModuleSpec[];
   capsuleExportPath?: string;
 }
 
@@ -68,15 +75,16 @@ async function main(): Promise<void> {
     throw new Error('tinyai TUI requires an interactive terminal');
   }
 
-  const host = new NodeHostBridge({
-    id: 'tinyai-node-tui',
-    projectRoot: resolve(options.workspace),
-    terminal: { input: process.stdin, output: process.stdout, error: process.stderr },
-  });
   const hostFileSystem =
     options.workspaceMode === 'host'
       ? new NodeHostFileSystem(resolve(options.workspace), () => systemClock.now())
       : undefined;
+  const host = new NodeHostBridge({
+    id: 'tinyai-node-tui',
+    projectRoot: resolve(options.workspace),
+    terminal: { input: process.stdin, output: process.stdout, error: process.stderr },
+    ...(hostFileSystem ? { filesystem: hostFileSystem } : {}),
+  });
   const workspace = new VirtualWorkspace({
     host,
     ...(hostFileSystem ? { vfs: hostFileSystem } : {}),
@@ -140,18 +148,57 @@ async function main(): Promise<void> {
       })
     );
   }
+  if (options.actionModules.length) {
+    const loader = new TrustedActionModuleLoader({
+      allowedModules: options.actionModules,
+      workspaceRoot: resolve(options.workspace),
+    });
+    for (const spec of options.actionModules) {
+      const loaded = await loader.load(spec.path);
+      actionRegistry.register(`trusted:${loaded.id}`, loaded.provider);
+    }
+  }
+  if (process.env.TINYAI_REMOTE_ACTIONS_URL) {
+    actionRegistry.register(
+      'remote-actions',
+      new RemoteActionProvider({
+        endpoint: process.env.TINYAI_REMOTE_ACTIONS_URL,
+        ...(process.env.TINYAI_REMOTE_ACTIONS_TOKEN
+          ? { token: process.env.TINYAI_REMOTE_ACTIONS_TOKEN }
+          : {}),
+      })
+    );
+  }
+  const actionReport = await actionRegistry.discover();
+  const hostBaseline = assertHostBaseline(host, 'tui-local', {
+    workspaceStorage:
+      options.workspaceMode === 'host' ? 'host-fs' : 'storage-backed',
+    availableActions: actionReport.available,
+    actionDiagnostics: actionReport.diagnostics,
+  });
   const capability = await createWorkspaceCapabilityComposition({
     workspace,
     profile: options.toolProfile,
     actionRegistry,
     workspacePath: '',
     hostProfile: options.workspaceMode === 'host' ? 'local-coding' : 'portable',
-    environmentFingerprint: `tui-${options.workspaceMode}-${options.toolProfile}`,
+    environmentFingerprint: [
+      `tui-${options.workspaceMode}-${options.toolProfile}`,
+      ...Object.entries(hostBaseline.tierState)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([tier, state]) => `${tier}:${state}`),
+    ].join('|'),
+    hostBaseline,
   });
   const actionTools = capability.actionTools;
   const applicationActions = capability.applicationActions;
+  let app!: TuiApp;
   const approvalPort: ApprovalPort = {
-    requestApproval: async () => options.approval === 'auto',
+    requestApproval: async (request, signal) => {
+      if (options.approval === 'auto') return true;
+      if (options.approval === 'deny') return false;
+      return app.requestApproval(request, signal);
+    },
   };
   const model = new OpenAIModelTransport({
     baseUrl: options.baseUrl,
@@ -297,7 +344,7 @@ async function main(): Promise<void> {
     environmentId: `tui-${options.workspaceMode}-${options.toolProfile}`,
     hostProfile:
       options.workspaceMode === 'host' ? 'local-coding' : 'portable',
-    agentVersion: '0.4.0',
+    agentVersion: '0.6.0',
     environment: {
       manifestVersion: 1,
       requiredActions: options.actionScripts.map((script) => ({
@@ -358,7 +405,7 @@ async function main(): Promise<void> {
   });
 
   const views = new ViewStateStore(new HostViewStateStorage(host.storage));
-  const app = new TuiApp({
+  app = new TuiApp({
     runtime: new LocalTuiRuntimePort(runtime, {
       project: resolve(options.workspace).split('/').at(-1) ?? options.workspace,
       branch: process.env.TINYAI_BRANCH,
@@ -436,6 +483,7 @@ async function main(): Promise<void> {
     await coordinator.dispose();
     await runtime.dispose();
     await workspace.jobs.dispose();
+    await actionRegistry.dispose();
   }
 }
 
@@ -443,6 +491,7 @@ function parseArgs(args: string[]): TuiCliOptions {
   const values = new Map<string, string>();
   const positional: string[] = [];
   const actionScripts: NpmScriptActionDefinition[] = [];
+  const actionModules: TrustedActionModuleSpec[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === '--action-script') {
@@ -458,6 +507,12 @@ function parseArgs(args: string[]): TuiCliOptions {
         title: title.join(':') || script,
         description: `Run the application npm script "${script}".`,
       });
+      continue;
+    }
+    if (arg === '--action-module') {
+      const value = args[++index];
+      if (!value) throw new Error('--action-module requires an absolute path');
+      actionModules.push({ path: resolve(value) });
       continue;
     }
     if (
@@ -495,8 +550,8 @@ function parseArgs(args: string[]): TuiCliOptions {
     throw new Error('--tool-profile must be portable or legacy');
   }
   const approval = values.get('--approval') ?? 'auto';
-  if (!['auto', 'deny'].includes(approval)) {
-    throw new Error('--approval must be auto or deny');
+  if (!['auto', 'ask', 'deny'].includes(approval)) {
+    throw new Error('--approval must be auto, ask or deny');
   }
   return {
     workspace: resolve(values.get('--workspace') ?? positional[0] ?? process.cwd()),
@@ -515,6 +570,7 @@ function parseArgs(args: string[]): TuiCliOptions {
     toolProfile: toolProfile as WorkspaceToolProfile,
     approval: approval as TuiCliOptions['approval'],
     actionScripts,
+    actionModules,
     ...(values.get('--capsule-export')
       ? { capsuleExportPath: resolve(values.get('--capsule-export')!) }
       : {}),
@@ -532,8 +588,9 @@ function usage(): void {
       '  --import <mode>      auto | always | never',
       '  --workspace-mode     virtual | host (host uses fenced range-read FS)',
       '  --tool-profile       portable | legacy (default: portable)',
-      '  --approval           auto | deny (default: auto)',
+      '  --approval           auto | ask | deny (default: auto)',
       '  --action-script      id:script:title (repeatable)',
+      '  --action-module      absolute trusted provider module (repeatable)',
       '  --capsule-export     Fixed output path for Ctrl+X Capsule export',
       '',
       'Environment: DEEPSEEK_API_KEY / TINYAI_API_KEY / OPENAI_API_KEY',

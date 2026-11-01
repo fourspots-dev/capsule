@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createHostActionTools } from '../../src/adapters/host-action-tools';
+import { ToolExecutor } from '../../src/core/tool-executor';
+import { PermissionModeRegistry, PolicyEngine } from '../../src/core/policy';
 import {
   HostActionRegistry,
   type HostActionDescriptor,
   type HostActionProvider,
 } from '../../src/platform/host-action';
+import { FakeApproval } from '../harness/fakes';
 
 function descriptor(
   overrides: Partial<HostActionDescriptor> = {}
@@ -64,9 +67,10 @@ describe('HostActionRegistry', () => {
         workspacePath: 'apps/server',
         signal: controller.signal,
       })
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       value: { passed: true },
       artifactIds: ['artifact_1'],
+      status: 'succeeded',
     });
     expect(invoke).toHaveBeenCalledWith(
       'app.python.run-tests',
@@ -169,7 +173,122 @@ describe('HostActionRegistry', () => {
     expect(invoke).toHaveBeenCalledWith(
       'app.python.run-tests',
       { pattern: 'unit' },
-      expect.objectContaining({ workspacePath: 'game' })
+      expect.objectContaining({
+        workspacePath: 'game',
+        requestId: 'call_1',
+      })
     );
+  });
+
+  it('validates input again at the registry boundary and exposes lifecycle hooks', async () => {
+    const dispose = vi.fn(async () => undefined);
+    const cancel = vi.fn(async () => undefined);
+    const registry = new HostActionRegistry();
+    registry.register('python-app', {
+      ...provider([
+        descriptor({
+          inputSchema: {
+            type: 'object',
+            properties: { pattern: { type: 'string' } },
+            required: ['pattern'],
+          },
+        }),
+      ]),
+      cancel,
+      dispose,
+    });
+    await expect(
+      registry.invoke('app.python.run-tests', {}, {
+        sessionId: 's',
+        taskId: 't',
+        signal: new AbortController().signal,
+      })
+    ).rejects.toMatchObject({ code: 'ACTION_INPUT_INVALID' });
+    await registry.cancel('request_1');
+    expect(cancel).toHaveBeenCalledWith('request_1');
+    await registry.dispose();
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it('routes dangerous Actions through the shared approval gate without exec fallback', async () => {
+    const invoke = vi.fn(async () => ({ value: { passed: true } }));
+    const registry = new HostActionRegistry();
+    registry.register('python-app', provider([descriptor()], invoke));
+    const tools = await createHostActionTools(registry);
+    const denied = new ToolExecutor(tools, new FakeApproval(false));
+    const deniedResult = await denied.execute({
+      sessionId: 's',
+      taskId: 't',
+      call: {
+        id: 'call_denied',
+        name: 'action_app_python_run_tests',
+        arguments: '{"pattern":"unit"}',
+      },
+      signal: new AbortController().signal,
+    });
+    expect(deniedResult).toMatchObject({ status: 'denied' });
+    expect(invoke).not.toHaveBeenCalled();
+
+    const approved = new ToolExecutor(tools, new FakeApproval(true));
+    await expect(
+      approved.execute({
+        sessionId: 's',
+        taskId: 't',
+        call: {
+          id: 'call_approved',
+          name: 'action_app_python_run_tests',
+          arguments: '{"pattern":"unit"}',
+        },
+        signal: new AbortController().signal,
+      })
+    ).resolves.toMatchObject({ status: 'succeeded' });
+    expect(invoke).toHaveBeenCalledOnce();
+  });
+
+  it('binds approval digests to Action input and environment context', async () => {
+    const registry = new HostActionRegistry();
+    registry.register('python-app', provider([descriptor()]));
+    const tools = await createHostActionTools(registry, {
+      workspaceId: 'workspace_1',
+      workspaceGeneration: 7,
+      environmentFingerprint: 'environment-a',
+    });
+    const approval = new FakeApproval(true);
+    const modes = new PermissionModeRegistry('guarded');
+    const executor = new ToolExecutor(tools, approval, {
+      policy: new PolicyEngine((sessionId) => modes.mode(sessionId)),
+    });
+    for (const [id, pattern] of [
+      ['call_1', 'unit'],
+      ['call_2', 'integration'],
+    ] as const) {
+      await executor.execute({
+        sessionId: 'session',
+        taskId: 'task',
+        call: {
+          id,
+          name: 'action_app_python_run_tests',
+          arguments: JSON.stringify({ pattern }),
+        },
+        signal: new AbortController().signal,
+      });
+    }
+    expect(approval.requests).toHaveLength(2);
+    expect(approval.requests[0].actionDigest).toBeTruthy();
+    expect(approval.requests[0].actionDigest).not.toBe(
+      approval.requests[1].actionDigest
+    );
+  });
+
+  it('re-discovers provider versions before each invocation', async () => {
+    let version = '1.0.0';
+    const registry = new HostActionRegistry();
+    registry.register('python-app', {
+      describe: async () => [descriptor({ version })],
+      invoke: async () => ({ value: { version } }),
+    });
+    expect((await registry.list())[0].descriptor.version).toBe('1.0.0');
+    version = '1.1.0';
+    expect((await registry.list())[0].descriptor.version).toBe('1.1.0');
   });
 });

@@ -1,4 +1,5 @@
 import type { JsonValue, ToolDefinition } from '../core/types';
+import { AgentError } from '../core/errors';
 import {
   HostActionRegistry,
   toolNameForAction,
@@ -9,6 +10,9 @@ export async function createHostActionTools(
   registry: HostActionRegistry,
   options: {
     workspacePath?: string;
+    workspaceId?: string;
+    workspaceGeneration?: number;
+    environmentFingerprint?: string;
     signal?: AbortSignal;
   } = {}
 ): Promise<ToolDefinition[]> {
@@ -40,7 +44,7 @@ export async function createHostActionTools(
   return [
     discovery,
     ...actions.map((action) =>
-      actionTool(registry, action, options.workspacePath)
+      actionTool(registry, action, options)
     ),
   ];
 }
@@ -48,7 +52,12 @@ export async function createHostActionTools(
 function actionTool(
   registry: HostActionRegistry,
   action: AvailableHostAction,
-  workspacePath?: string
+  options: {
+    workspacePath?: string;
+    workspaceId?: string;
+    workspaceGeneration?: number;
+    environmentFingerprint?: string;
+  }
 ): ToolDefinition {
   const descriptor = action.descriptor;
   const toolName = toolNameForAction(descriptor.id);
@@ -78,6 +87,19 @@ function actionTool(
     ...(descriptor.timeoutMs === undefined
       ? {}
       : { timeoutMs: descriptor.timeoutMs }),
+    approvalContext: () => ({
+      actionId: descriptor.id,
+      actionVersion: descriptor.version,
+      effects: [...descriptor.effects],
+      risk: descriptor.risk,
+      ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+      ...(options.workspaceGeneration === undefined
+        ? {}
+        : { workspaceGeneration: options.workspaceGeneration }),
+      ...(options.environmentFingerprint
+        ? { environmentFingerprint: options.environmentFingerprint }
+        : {}),
+    }),
     execute: async (input, invocation) => {
       const result = await registry.invoke(
         descriptor.id,
@@ -85,10 +107,41 @@ function actionTool(
         {
           sessionId: invocation.sessionId,
           taskId: invocation.taskId,
-          ...(workspacePath ? { workspacePath } : {}),
+          requestId: invocation.call.id,
+          ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+          ...(options.workspaceGeneration === undefined
+            ? {}
+            : { workspaceGeneration: options.workspaceGeneration }),
+          ...(options.workspacePath
+            ? { workspacePath: options.workspacePath }
+            : {}),
+          ...(options.environmentFingerprint
+            ? { environmentFingerprint: options.environmentFingerprint }
+            : {}),
           signal: invocation.signal,
         }
       );
+      if (result.status === 'failed') {
+        throw new AgentError(
+          'ACTION_FAILED',
+          `Application Action failed: ${descriptor.id}`,
+          {
+            details: {
+              actionId: descriptor.id,
+              result: result.value,
+              ...(result.exitCode === undefined
+                ? {}
+                : { exitCode: result.exitCode }),
+            },
+          }
+        );
+      }
+      if (result.status === 'cancelled') {
+        throw new AgentError(
+          'ACTION_CANCELLED',
+          `Application Action was cancelled: ${descriptor.id}`
+        );
+      }
       return result.value;
     },
   };

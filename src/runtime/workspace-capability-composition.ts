@@ -4,6 +4,7 @@ import type { CompletionGuard } from '../core/session-runtime';
 import type { SessionView, ToolDefinition } from '../core/types';
 import { CapabilityGraph } from '../platform/capability';
 import type { HostActionRegistry } from '../platform/host-action';
+import type { HostBaselineReport } from '../host';
 import { ToolPackComposer } from '../platform/tool-pack';
 import type { VirtualWorkspace } from '../virtual';
 
@@ -16,6 +17,7 @@ export interface WorkspaceCapabilityCompositionOptions {
   workspacePath?: string;
   hostProfile?: string;
   environmentFingerprint?: string;
+  hostBaseline?: HostBaselineReport;
 }
 
 export interface WorkspaceCapabilityComposition {
@@ -40,8 +42,14 @@ export async function createWorkspaceCapabilityComposition(
     options.actionRegistry &&
     (await options.actionRegistry.list()).length > 0
       ? await createHostActionTools(options.actionRegistry, {
+          ...(options.workspace.workspaceId
+            ? { workspaceId: options.workspace.workspaceId }
+            : {}),
           ...(options.workspacePath
             ? { workspacePath: options.workspacePath }
+            : {}),
+          ...(options.environmentFingerprint
+            ? { environmentFingerprint: options.environmentFingerprint }
             : {}),
         })
       : [];
@@ -56,19 +64,28 @@ export async function createWorkspaceCapabilityComposition(
   graph.register({
     id: 'filesystem',
     version: '1',
-    state: 'available',
-    limitations: [],
+    state: options.hostBaseline?.tierState.workspace ?? 'available',
+    limitations:
+      options.hostBaseline?.tierState.workspace === 'unavailable'
+        ? ['Workspace baseline is unavailable']
+        : [],
   });
   graph.register({
     id: 'git',
     version: '1',
-    state: 'available',
-    limitations: ['portable-common-subset'],
+    state: options.hostBaseline?.tierState['portable-coding'] ?? 'available',
+    limitations:
+      options.hostBaseline?.tierState['portable-coding'] === 'unavailable'
+        ? ['Portable coding baseline is unavailable']
+        : ['portable-common-subset'],
   });
   graph.register({
     id: 'actions',
     version: '1',
-    state: applicationActions.length > 0 ? 'available' : 'unavailable',
+    state:
+      applicationActions.length > 0
+        ? options.hostBaseline?.tierState['real-execution'] ?? 'available'
+        : 'unavailable',
     limitations:
       applicationActions.length > 0
         ? []

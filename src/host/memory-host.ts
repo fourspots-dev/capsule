@@ -4,6 +4,7 @@ import type {
   HostClock,
   HostCrypto,
   HostDescriptor,
+  HostFileSystemBridge,
   HostStorage,
 } from './types';
 
@@ -12,6 +13,7 @@ export interface MemoryHostBridgeOptions {
     capabilities?: readonly HostCapability[];
   };
   storage?: HostStorage;
+  filesystem?: HostFileSystemBridge;
   clock?: HostClock;
   clone?: <T>(value: T) => T;
   crypto?: HostCrypto;
@@ -42,6 +44,7 @@ export class MemoryHostStorage implements HostStorage {
 export class MemoryHostBridge implements HostBridge {
   readonly descriptor: HostDescriptor;
   readonly storage: HostStorage;
+  readonly filesystem?: HostFileSystemBridge;
   readonly clock: HostClock;
   readonly scheduler: HostBridge['scheduler'];
   readonly crypto: HostCrypto;
@@ -49,6 +52,7 @@ export class MemoryHostBridge implements HostBridge {
 
   constructor(options: MemoryHostBridgeOptions = {}) {
     this.storage = options.storage ?? new MemoryHostStorage();
+    this.filesystem = options.filesystem;
     this.clock = options.clock ?? systemHostClock;
     this.scheduler = {
       setTimeout: (callback, delayMs) =>
@@ -65,6 +69,7 @@ export class MemoryHostBridge implements HostBridge {
     };
     const provided: HostCapability[] = [
       'storage',
+      ...(this.filesystem ? (['filesystem'] as const) : []),
       'clock',
       'scheduler',
       'crypto',

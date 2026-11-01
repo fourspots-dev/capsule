@@ -6,6 +6,7 @@ import type {
   HostCapability,
   HostClock,
   HostCrypto,
+  HostFileSystemBridge,
   HostProcessBridge,
   HostProcessRequest,
   HostProcessResult,
@@ -33,6 +34,7 @@ export interface NodeHostOptions {
   stateRoot?: string;
   terminal?: NodeTerminalStreams;
   process?: boolean;
+  filesystem?: HostFileSystemBridge;
   actions?: HostActionProvider;
   now?: () => number;
 }
@@ -42,6 +44,7 @@ const skippedDirectories = new Set(['.git', 'node_modules', '.tinyai']);
 export class NodeHostBridge implements HostBridge {
   readonly descriptor;
   readonly storage: NodeHostStorage;
+  readonly filesystem?: HostFileSystemBridge;
   readonly clock: HostClock;
   readonly scheduler: NonNullable<HostBridge['scheduler']>;
   readonly crypto: HostCrypto;
@@ -54,6 +57,7 @@ export class NodeHostBridge implements HostBridge {
   constructor(private readonly options: NodeHostOptions) {
     const stateRoot = options.stateRoot ?? join(options.projectRoot ?? process.cwd(), '.tinyai');
     this.storage = new NodeHostStorage(join(stateRoot, 'host-storage.json'));
+    this.filesystem = options.filesystem;
     this.clock = nodeClock(options.now);
     this.scheduler = {
       setTimeout: (callback, delay) => setTimeout(callback, delay),
@@ -82,6 +86,7 @@ export class NodeHostBridge implements HostBridge {
         ? (['workspace.import', 'workspace.export'] as const)
         : (['workspace.export'] as const)),
       'storage',
+      ...(this.filesystem ? (['filesystem'] as const) : []),
       'clock',
       'scheduler',
       'crypto',

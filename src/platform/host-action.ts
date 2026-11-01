@@ -1,4 +1,5 @@
 import { AgentError } from '../core/errors';
+import { validateToolInput } from '../core/tool-schema';
 import type { JsonValue, ToolRisk } from '../core/types';
 
 export type HostActionEffect = 'read' | 'write' | 'execute' | 'network';
@@ -20,6 +21,7 @@ export interface HostActionDescriptor {
   outputSchema?: JsonValue;
   effects: readonly HostActionEffect[];
   risk: ToolRisk;
+  workspaceBinding?: 'root' | 'fork' | 'remote';
   timeoutMs?: number;
   limitations?: readonly string[];
   probe(): Promise<HostActionProbe>;
@@ -28,12 +30,19 @@ export interface HostActionDescriptor {
 export interface HostActionContext {
   sessionId: string;
   taskId: string;
+  requestId?: string;
+  workspaceId?: string;
+  workspaceGeneration?: number;
   workspacePath?: string;
+  environmentFingerprint?: string;
   signal: AbortSignal;
 }
 
 export interface HostActionResult {
   value: JsonValue;
+  status?: 'succeeded' | 'failed' | 'cancelled';
+  durationMs?: number;
+  exitCode?: number;
   truncated?: boolean;
   artifactIds?: readonly string[];
 }
@@ -45,6 +54,8 @@ export interface HostActionProvider {
     input: JsonValue,
     context: HostActionContext
   ): Promise<HostActionResult | JsonValue>;
+  cancel?(requestId: string): Promise<void>;
+  dispose?(): Promise<void>;
 }
 
 export interface HostInteractiveSession {
@@ -80,7 +91,10 @@ export interface HostActionDiagnostic {
     | 'ACTION_DUPLICATE'
     | 'ACTION_PROBE_FAILED'
     | 'ACTION_SCHEMA_INVALID'
-    | 'ACTION_VERSION_INVALID';
+    | 'ACTION_VERSION_INVALID'
+    | 'ACTION_EFFECT_INVALID'
+    | 'ACTION_RISK_INVALID'
+    | 'ACTION_WORKSPACE_BINDING_INVALID';
   message: string;
 }
 
@@ -180,6 +194,54 @@ export class HostActionRegistry {
           });
           continue;
         }
+        if (
+          descriptor.outputSchema !== undefined &&
+          !isObjectSchema(descriptor.outputSchema)
+        ) {
+          diagnostics.push({
+            actionId: descriptor.id,
+            sourceId: registration.sourceId,
+            code: 'ACTION_SCHEMA_INVALID',
+            message: `Action ${descriptor.id} outputSchema must be an object schema`,
+          });
+          continue;
+        }
+        if (
+          !Array.isArray(descriptor.effects) ||
+          descriptor.effects.length === 0 ||
+          descriptor.effects.some(
+            (effect) => !actionEffects.has(effect as HostActionEffect)
+          )
+        ) {
+          diagnostics.push({
+            actionId: descriptor.id,
+            sourceId: registration.sourceId,
+            code: 'ACTION_EFFECT_INVALID',
+            message: `Action ${descriptor.id} must declare valid effects`,
+          });
+          continue;
+        }
+        if (!actionRisks.has(descriptor.risk)) {
+          diagnostics.push({
+            actionId: descriptor.id,
+            sourceId: registration.sourceId,
+            code: 'ACTION_RISK_INVALID',
+            message: `Action ${descriptor.id} has invalid risk ${descriptor.risk}`,
+          });
+          continue;
+        }
+        if (
+          descriptor.workspaceBinding !== undefined &&
+          !workspaceBindings.has(descriptor.workspaceBinding)
+        ) {
+          diagnostics.push({
+            actionId: descriptor.id,
+            sourceId: registration.sourceId,
+            code: 'ACTION_WORKSPACE_BINDING_INVALID',
+            message: `Action ${descriptor.id} has invalid workspace binding`,
+          });
+          continue;
+        }
         let probe: HostActionProbe;
         const started = Date.now();
         try {
@@ -225,6 +287,7 @@ export class HostActionRegistry {
     context: HostActionContext
   ): Promise<HostActionResult> {
     throwIfAborted(context.signal);
+    const started = Date.now();
     const report = await this.discover(context.signal);
     const action = report.available.find(
       (candidate) => candidate.descriptor.id === actionId
@@ -242,16 +305,62 @@ export class HostActionRegistry {
         `Application action provider disappeared: ${action.sourceId}`
       );
     }
-    const result = await registration.provider.invoke(
-      actionId,
-      input,
-      context
-    );
-    return isActionResult(result) ? result : { value: result };
+    try {
+      validateToolInput(
+        action.descriptor.inputSchema as Record<string, JsonValue>,
+        input as Record<string, JsonValue>
+      );
+    } catch (error) {
+      throw new AgentError(
+        'ACTION_INPUT_INVALID',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+    try {
+      const result = await registration.provider.invoke(
+        actionId,
+        input,
+        context
+      );
+      throwIfAborted(context.signal);
+      const normalized = isActionResult(result) ? result : { value: result };
+      return {
+        ...normalized,
+        status: normalized.status ?? 'succeeded',
+        durationMs: normalized.durationMs ?? Date.now() - started,
+      };
+    } catch (error) {
+      if (context.signal.aborted) {
+        throw new AgentError(
+          'ACTION_CANCELLED',
+          `Application Action was cancelled: ${actionId}`
+        );
+      }
+      if (error instanceof AgentError) throw error;
+      throw new AgentError(
+        'ACTION_PROVIDER_CRASHED',
+        error instanceof Error ? error.message : String(error),
+        { details: { actionId, sourceId: action.sourceId } }
+      );
+    }
   }
 
   async list(): Promise<AvailableHostAction[]> {
     return (await this.discover()).available;
+  }
+
+  async cancel(requestId: string): Promise<void> {
+    for (const provider of this.providers.values()) {
+      await provider.provider.cancel?.(requestId);
+    }
+  }
+
+  async dispose(): Promise<void> {
+    const providers = [...this.providers.values()];
+    this.providers.clear();
+    await Promise.allSettled(
+      providers.map((provider) => provider.provider.dispose?.())
+    );
   }
 }
 
@@ -280,6 +389,15 @@ function isActionResult(value: HostActionResult | JsonValue): value is HostActio
       'value' in value
   );
 }
+
+const actionEffects = new Set<HostActionEffect>([
+  'read',
+  'write',
+  'execute',
+  'network',
+]);
+const actionRisks = new Set<ToolRisk>(['read', 'write', 'dangerous']);
+const workspaceBindings = new Set(['root', 'fork', 'remote']);
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw abortError();

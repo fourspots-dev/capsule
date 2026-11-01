@@ -107,6 +107,12 @@ async function probeStructure(
       if (!host.storage) return unavailable(capability, 'Storage bridge is missing');
       await host.storage.get('__tinyai_probe__');
       return available(capability);
+    case 'filesystem':
+      if (!host.filesystem) {
+        return unavailable(capability, 'Filesystem bridge is missing');
+      }
+      await host.filesystem.stat('');
+      return available(capability);
     case 'clock':
       if (!host.clock || !Number.isFinite(host.clock.now())) {
         return unavailable(capability, 'Clock bridge is missing');

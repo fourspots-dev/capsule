@@ -83,6 +83,42 @@ describe('TuiApp and renderer', () => {
     await app.dispose();
   });
 
+  it('shows a blocking Action approval prompt and resolves allow or deny', async () => {
+    const { app } = await appWithAnswer();
+    const allow = app.requestApproval(
+      {
+        sessionId: 'session',
+        taskId: 'task',
+        callId: 'call_allow',
+        toolName: 'action_app_python_tests',
+        risk: 'dangerous',
+        input: {},
+      },
+      new AbortController().signal
+    );
+    expect(app.render(100, 24).join('\n')).toContain(
+      'Allow action_app_python_tests (dangerous)'
+    );
+    await app.handleInput('\r');
+    await expect(allow).resolves.toBe(true);
+
+    const denyController = new AbortController();
+    const deny = app.requestApproval(
+      {
+        sessionId: 'session',
+        taskId: 'task',
+        callId: 'call_deny',
+        toolName: 'action_dangerous',
+        risk: 'dangerous',
+        input: {},
+      },
+      denyController.signal
+    );
+    await app.handleInput('\x1b');
+    await expect(deny).resolves.toBe(false);
+    await app.dispose();
+  });
+
   it('hides the composer cursor while an overlay owns focus', async () => {
     const { app } = await appWithAnswer();
     await app.handleInput('\x0b');

@@ -1,4 +1,5 @@
 import type { ProductProjection } from '../core/types';
+import type { ApprovalRequest } from '../core/ports';
 import { buildAgentRows, selectAgent } from './agent-board';
 import {
   clampCursor,
@@ -50,10 +51,15 @@ export interface TuiAgentWorkspacePort {
 }
 
 interface Confirmation {
-  kind: 'rename' | 'delete' | 'merge';
+  kind: 'rename' | 'delete' | 'merge' | 'approval';
   sessionId: string;
   value: string;
   taskId?: string;
+  approval?: {
+    request: ApprovalRequest;
+    resolve(value: boolean): void;
+    abort: () => void;
+  };
 }
 
 export class TuiApp {
@@ -94,6 +100,36 @@ export class TuiApp {
 
   get exitRequested(): boolean {
     return this.shouldExit;
+  }
+
+  requestApproval(
+    request: ApprovalRequest,
+    signal: AbortSignal
+  ): Promise<boolean> {
+    if (signal.aborted) return Promise.resolve(false);
+    if (this.confirmation) {
+      return Promise.reject(new Error('Another TUI confirmation is active'));
+    }
+    return new Promise<boolean>((resolveApproval) => {
+      const abort = () => {
+        if (this.confirmation?.kind !== 'approval') return;
+        this.confirmation = undefined;
+        resolveApproval(false);
+        this.notifyRender();
+      };
+      signal.addEventListener('abort', abort, { once: true });
+      this.confirmation = {
+        kind: 'approval',
+        sessionId: request.sessionId,
+        value: '',
+        approval: {
+          request,
+          resolve: resolveApproval,
+          abort: () => signal.removeEventListener('abort', abort),
+        },
+      };
+      this.notifyRender();
+    });
   }
 
   async initialize(): Promise<void> {
@@ -486,7 +522,21 @@ export class TuiApp {
   private async handleConfirmation(intent: TuiIntent): Promise<void> {
     const confirmation = this.confirmation!;
     if (intent.type === 'back') {
+      if (confirmation.kind === 'approval') {
+        confirmation.approval?.abort();
+        confirmation.approval?.resolve(false);
+      }
       this.confirmation = undefined;
+      this.notifyRender();
+      return;
+    }
+    if (confirmation.kind === 'approval') {
+      if (intent.type === 'activate' || intent.type === 'send') {
+        confirmation.approval?.abort();
+        confirmation.approval?.resolve(true);
+        this.confirmation = undefined;
+        this.notifyRender();
+      }
       return;
     }
     if (confirmation.kind === 'rename') {
@@ -734,7 +784,9 @@ export class TuiApp {
                   ? 'Rename: '
                   : this.confirmation.kind === 'merge'
                     ? 'Apply reviewed child workspace merge? Enter confirm, Esc cancel · '
-                    : `Delete ${this.confirmation.sessionId}? Enter confirm, Esc cancel · `,
+                    : this.confirmation.kind === 'approval'
+                      ? `Allow ${this.confirmation.approval?.request.toolName ?? 'Action'} (${this.confirmation.approval?.request.risk ?? 'write'})? Enter allow, Esc deny · `
+                      : `Delete ${this.confirmation.sessionId}? Enter confirm, Esc cancel · `,
               value: this.confirmation.value,
             },
           }

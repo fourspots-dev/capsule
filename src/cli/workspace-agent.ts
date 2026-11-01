@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { HostArtifactStore } from '../adapters/host-artifact-store';
 import { HostSessionStore } from '../adapters/host-session-store';
 import { NpmScriptActionProvider, type NpmScriptActionDefinition } from '../adapters/npm-action-provider';
+import { RemoteActionProvider } from '../adapters/remote-action-provider';
 import { OpenAIModelTransport } from '../adapters/openai-model';
 import { createSubagentTools } from '../adapters/subagent-tools';
 import { createVirtualWorkspaceTools } from '../adapters/virtual-workspace-tools';
@@ -21,7 +22,12 @@ import { WorkspaceRuntime } from '../core/workspace-runtime';
 import { PortableGitBackend } from '../git/backend';
 import { NodeHostFileSystem } from '../node/host-fs';
 import { NodeHostBridge } from '../node/node-host';
+import {
+  TrustedActionModuleLoader,
+  type TrustedActionModuleSpec,
+} from '../node/actions/trusted-module-loader';
 import { HostActionRegistry } from '../platform/host-action';
+import { assertHostBaseline } from '../host';
 import { workspaceEditPrompt } from '../platform/workspace-edit-prompt';
 import { WorkspaceSubagentDriver } from '../runtime/workspace-subagent-driver';
 import {
@@ -41,6 +47,7 @@ interface WorkspaceAgentOptions {
   importCapsule?: string;
   exportCapsule?: string;
   scripts: NpmScriptActionDefinition[];
+  actionModules: TrustedActionModuleSpec[];
   maxSteps: number;
   approval: 'auto' | 'ask';
 }
@@ -58,12 +65,13 @@ async function main(): Promise<void> {
   if (!apiKey) {
     throw new Error('Set DEEPSEEK_API_KEY, TINYAI_API_KEY or OPENAI_API_KEY');
   }
+  const fs = new NodeHostFileSystem(options.workspace, () => systemClock.now());
   const host = new NodeHostBridge({
     id: 'tinyai-workspace-agent',
     projectRoot: options.workspace,
     stateRoot: resolve(options.workspace, '.tinyai'),
+    filesystem: fs,
   });
-  const fs = new NodeHostFileSystem(options.workspace, () => systemClock.now());
   const workspace = new VirtualWorkspace({
     host,
     vfs: fs,
@@ -78,13 +86,46 @@ async function main(): Promise<void> {
   });
   const actionRegistry = new HostActionRegistry();
   actionRegistry.register('workspace-app', npmActions);
+  if (options.actionModules.length) {
+    const loader = new TrustedActionModuleLoader({
+      allowedModules: options.actionModules,
+      workspaceRoot: options.workspace,
+    });
+    for (const spec of options.actionModules) {
+      const loaded = await loader.load(spec.path);
+      actionRegistry.register(`trusted:${loaded.id}`, loaded.provider);
+    }
+  }
+  if (process.env.TINYAI_REMOTE_ACTIONS_URL) {
+    actionRegistry.register(
+      'remote-actions',
+      new RemoteActionProvider({
+        endpoint: process.env.TINYAI_REMOTE_ACTIONS_URL,
+        ...(process.env.TINYAI_REMOTE_ACTIONS_TOKEN
+          ? { token: process.env.TINYAI_REMOTE_ACTIONS_TOKEN }
+          : {}),
+      })
+    );
+  }
+  const actionReport = await actionRegistry.discover();
+  const hostBaseline = assertHostBaseline(host, 'sandbox', {
+    workspaceStorage: 'host-fs',
+    availableActions: actionReport.available,
+    actionDiagnostics: actionReport.diagnostics,
+  });
   const capability = await createWorkspaceCapabilityComposition({
     workspace,
     profile: 'portable',
     actionRegistry,
     workspacePath: '',
     hostProfile: 'local-coding',
-    environmentFingerprint: `local-${process.platform}-${process.arch}`,
+    environmentFingerprint: [
+      `local-${process.platform}-${process.arch}`,
+      ...Object.entries(hostBaseline.tierState)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([tier, state]) => `${tier}:${state}`),
+    ].join('|'),
+    hostBaseline,
   });
   const actionTools = capability.actionTools;
   const applicationActions = capability.applicationActions;
@@ -96,7 +137,7 @@ async function main(): Promise<void> {
     artifacts,
     environmentId: `local-${process.platform}-${process.arch}`,
     hostProfile: 'local-coding',
-    agentVersion: '0.3.0',
+    agentVersion: '0.6.0',
     newId: () => `capsule_${randomUUID()}`,
     environment: {
       manifestVersion: 1,
@@ -308,18 +349,26 @@ async function main(): Promise<void> {
     await coordinator.dispose();
     await runtime.dispose();
     await workspace.jobs.dispose();
+    await actionRegistry.dispose();
   }
 }
 
 function parseArgs(args: string[]): WorkspaceAgentOptions {
   const values = new Map<string, string>();
   const scriptSpecs: string[] = [];
+  const actionModules: TrustedActionModuleSpec[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === '--script') {
       const value = args[++index];
       if (!value) throw new Error('--script requires id:script:title');
       scriptSpecs.push(value);
+      continue;
+    }
+    if (arg === '--action-module') {
+      const value = args[++index];
+      if (!value) throw new Error('--action-module requires a path');
+      actionModules.push({ path: resolve(value) });
       continue;
     }
     if (
@@ -374,6 +423,7 @@ function parseArgs(args: string[]): WorkspaceAgentOptions {
       ? { exportCapsule: resolve(values.get('--export-capsule')!) }
       : {}),
     scripts,
+    actionModules,
     maxSteps: Number(values.get('--max-steps') ?? 120),
     approval:
       values.get('--approval') === 'ask'

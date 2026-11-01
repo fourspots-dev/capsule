@@ -190,6 +190,37 @@ node dist/tinyai-tui.cjs --workspace /path/to/large-repo --workspace-mode host
 `host` mode uses `NodeHostFileSystem` byte-range reads and still rejects paths or
 symlinks outside the selected project root. VFS remains the default.
 
+Every TUI/Headless startup runs the shared Host Baseline probe. Core, Workspace
+and Portable Coding are mandatory; missing executable Actions only degrades Real
+Execution and never disables Portable Git, Patch, Search or file editing.
+
+Application operations are exposed as named Actions:
+
+```bash
+node dist/tinyai-tui.cjs --workspace ./app \
+  --action-script app.test:test:"Run application tests" \
+  --approval ask
+
+node dist/tinyai-tui.cjs --workspace ./app \
+  --action-module /absolute/trusted/action-provider.mjs \
+  --approval ask
+```
+
+`--action-module` accepts only explicitly configured absolute modules and never
+auto-loads provider code from the workspace. Local Actions use an executable
+allowlist, argv without a shell, a fenced cwd, a compact environment, bounded
+output, timeout and process-tree cancellation.
+
+Remote named Actions can be configured without adding a generic command tool:
+
+```bash
+export TINYAI_REMOTE_ACTIONS_URL='https://actions.example/v1'
+export TINYAI_REMOTE_ACTIONS_TOKEN='...'
+```
+
+`--approval ask` shows a blocking TUI prompt for dangerous Actions. Enter
+approves the current input/environment digest; Escape denies it.
+
 The default screen contains one status line, the conversation and the composer.
 Useful keys:
 

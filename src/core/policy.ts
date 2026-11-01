@@ -17,6 +17,7 @@ export interface ActionRequest {
   effect: NonNullable<ToolDefinition['effect']>;
   risk: ToolDefinition['risk'];
   input: JsonValue;
+  approvalContext?: JsonValue;
 }
 
 export interface PolicyDecision {

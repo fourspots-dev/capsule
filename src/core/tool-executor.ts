@@ -138,6 +138,21 @@ export class ToolExecutor {
     let policyRequiresApproval = false;
     let actionDigest: string | undefined;
     if (this.options.policy) {
+      let approvalContext: JsonValue | undefined;
+      if (tool.approvalContext) {
+        try {
+          approvalContext = await tool.approvalContext(input, invocation);
+        } catch (error) {
+          return {
+            ...base,
+            status: 'failed',
+            error: toStructuredError(
+              error,
+              'TOOL_APPROVAL_CONTEXT_FAILED'
+            ),
+          };
+        }
+      }
       const decision = await this.options.policy.evaluate(
         {
           sessionId: invocation.sessionId,
@@ -148,6 +163,7 @@ export class ToolExecutor {
           effect: tool.effect ?? (tool.risk === 'read' ? 'read' : 'write'),
           risk: tool.risk,
           input,
+          ...(approvalContext === undefined ? {} : { approvalContext }),
         },
         invocation.signal
       );
