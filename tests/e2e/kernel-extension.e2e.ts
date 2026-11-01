@@ -1,6 +1,6 @@
 import { createServer, type Server } from 'node:http';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { chromium, type BrowserContext } from 'playwright-core';
@@ -18,6 +18,9 @@ const browserPromptCalls = new Map<string, number>();
 const subagentPromptCalls = new Map<string, number>();
 const handoffPromptCalls = new Map<string, number>();
 const groupWorkspacePromptCalls = new Map<string, number>();
+const remoteActionPromptCalls = new Map<string, number>();
+const capturedToolRequests: string[][] = [];
+let remoteActionCalls = 0;
 
 beforeAll(async () => {
   server = createServer((request, response) => {
@@ -27,6 +30,54 @@ beforeAll(async () => {
       response.end(
         '<!doctype html><html><head><title>E2E Fixture</title></head><body><h1>Browser fixture ready</h1><button>Continue</button></body></html>'
       );
+      return;
+    }
+    if (request.url === '/actions') {
+      let body = '';
+      request.on('data', (chunk) => {
+        body += chunk;
+      });
+      request.on('end', () => {
+        remoteActionCalls += 1;
+        const parsed = JSON.parse(body) as {
+          type?: string;
+          actionId?: string;
+        };
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        if (parsed.type === 'describe') {
+          response.end(
+            JSON.stringify({
+              actions: [
+                {
+                  id: 'app.e2e.remote-check',
+                  version: '1.0.0',
+                  title: 'Remote E2E check',
+                  description: 'Validate the remote Action bridge.',
+                  inputSchema: { type: 'object', properties: {} },
+                  outputSchema: { type: 'object', properties: {} },
+                  effects: ['read'],
+                  risk: 'read',
+                  workspaceBinding: 'remote',
+                  probe: { state: 'available' },
+                },
+              ],
+            })
+          );
+          return;
+        }
+        response.end(
+          JSON.stringify({
+            result: {
+              status:
+                parsed.type === 'invoke' &&
+                parsed.actionId === 'app.e2e.remote-check'
+                  ? 'succeeded'
+                  : 'failed',
+              value: { remoteCheck: 'passed' },
+            },
+          })
+        );
+      });
       return;
     }
     if (request.url !== '/v1/chat/completions') {
@@ -39,10 +90,52 @@ beforeAll(async () => {
     });
     request.on('end', () => {
       modelCalls += 1;
-      const parsed = JSON.parse(body) as { messages?: Array<{ role: string; content: string }> };
+      const parsed = JSON.parse(body) as {
+        messages?: Array<{ role: string; content: string }>;
+        tools?: Array<{ function?: { name?: string } }>;
+      };
+      capturedToolRequests.push(
+        (parsed.tools ?? [])
+          .map((tool) => tool.function?.name)
+          .filter((name): name is string => Boolean(name))
+      );
       const userText =
         [...(parsed.messages ?? [])].reverse().find((message) => message.role === 'user')?.content ??
         '';
+      if (userText.includes('remote action smoke')) {
+        const count = (remoteActionPromptCalls.get(userText) ?? 0) + 1;
+        remoteActionPromptCalls.set(userText, count);
+        if (count === 1) {
+          response.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+          });
+          response.write(
+            `data: ${JSON.stringify({
+              choices: [
+                {
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: 'call_remote_check',
+                        function: {
+                          name: 'action_app_e2e_remote_check',
+                          arguments: '{}',
+                        },
+                      },
+                    ],
+                  },
+                  finish_reason: 'tool_calls',
+                },
+              ],
+            })}\n\n`
+          );
+          response.write('data: [DONE]\n\n');
+          response.end();
+          return;
+        }
+      }
       if (userText.includes('detached task')) {
         detachedStarted = true;
         setTimeout(() => {
@@ -1127,5 +1220,160 @@ describe('kernel extension E2E', () => {
     expect(status).not.toContain('disconnected');
     expect(pageErrors).toEqual([]);
     await page.close();
+  });
+
+  it('configures Remote Actions, exposes evidence state and transfers a Capsule', async () => {
+    const remoteDir = await mkdtemp(join(tmpdir(), 'tinyai-chrome-remote-e2e-'));
+    const remoteContext = await chromium.launchPersistentContext(remoteDir, {
+      headless: true,
+      executablePath: chromeExecutable(),
+      args: [
+        `--disable-extensions-except=${resolve('extension')}`,
+        `--load-extension=${resolve('extension')}`,
+        '--no-first-run',
+      ],
+      ignoreDefaultArgs: ['--disable-extensions'],
+    });
+    try {
+      let worker = remoteContext.serviceWorkers()[0];
+      if (!worker) worker = await remoteContext.waitForEvent('serviceworker');
+      const extensionId = new URL(worker.url()).host;
+      await worker.evaluate(
+        async ({ modelUrl }) => {
+          await chrome.storage.local.clear();
+          await chrome.storage.local.set({
+            'tinyai:v2:config': {
+              approval: 'auto',
+              language: 'en',
+              theme: 'light',
+              zoom: 100,
+              connection: 'e2e',
+              model: 'e2e-model',
+              connections: [
+                {
+                  id: 'e2e',
+                  label: 'E2E',
+                  'base-url': modelUrl,
+                  'api-key': 'e2e-key',
+                  models: ['e2e-model'],
+                },
+              ],
+            },
+          });
+        },
+        { modelUrl: baseUrl }
+      );
+
+      const page = await remoteContext.newPage();
+      const pageErrors: string[] = [];
+      page.on('pageerror', (error) => pageErrors.push(error.message));
+      await page.goto(`chrome-extension://${extensionId}/sidepanel.html`);
+      await page.waitForSelector('#kernel-input');
+      const requestStart = capturedToolRequests.length;
+      const initialTab = await page.evaluate(async () => {
+        const current = await chrome.windows.getCurrent();
+        const tab = await chrome.tabs.create({
+          windowId: current.id,
+          url: 'about:blank',
+          active: true,
+        });
+        return String(tab.id);
+      });
+      await page.click('#kernel-tabs');
+      await page.waitForSelector('#kernel-tab-menu:not([hidden])');
+      await page.click(`[data-kernel-tab="${initialTab}"]`);
+      await page.waitForFunction(
+        (tabId) => document.documentElement.dataset.tinyaiTabId === tabId,
+        initialTab
+      );
+
+      await page.click('#kernel-settings');
+      await page.waitForSelector('#kernel-remote-endpoint');
+      await page.fill(
+        '#kernel-remote-endpoint',
+        `${baseUrl.replace(/\/v1$/, '')}/actions`
+      );
+      await page.fill('#kernel-remote-allowlist', 'app.e2e.remote-check');
+      await page.click('[data-page-action="remote-save"]');
+      try {
+        await page.waitForFunction(
+          () =>
+            document
+              .querySelector('#kernel-page-layer')
+              ?.textContent?.includes('Remote E2E check'),
+          undefined,
+          { timeout: 30_000 }
+        );
+      } catch (cause) {
+        throw new Error(
+          `Remote Action board did not update: calls=${remoteActionCalls} body=${JSON.stringify(
+            await page.textContent('body')
+          )} errors=${JSON.stringify(pageErrors)}`,
+          { cause }
+        );
+      }
+      const boardText = await page.textContent('#kernel-page-layer');
+      expect(boardText).toContain('Remote E2E check');
+      expect(boardText).toContain('available');
+      expect(boardText).toContain('current evidence');
+
+      await page.click('[data-page-action="back"]');
+      await page.fill('#kernel-input', 'remote action smoke');
+      await page.click('#kernel-send');
+      await page.waitForFunction(
+        () =>
+          document.querySelector('#kernel-rows')?.textContent?.includes(
+            'remoteCheck'
+          ),
+        undefined,
+        { timeout: 30_000 }
+      );
+      await page.waitForFunction(
+        () =>
+          document.querySelector('#kernel-rows')?.textContent?.includes(
+            'E2E received: remote action smoke'
+          ),
+        undefined,
+        { timeout: 30_000 }
+      );
+      expect(remoteActionCalls).toBeGreaterThanOrEqual(3);
+      const requestedTools = capturedToolRequests
+        .slice(requestStart)
+        .flat();
+      expect(requestedTools).toContain('action_app_e2e_remote_check');
+      expect(requestedTools).not.toContain('exec');
+      expect(requestedTools).not.toContain('job_start');
+
+      await page.click('#kernel-settings');
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector('#kernel-page-layer')
+            ?.textContent?.includes('Last call · completed'),
+        undefined,
+        { timeout: 30_000 }
+      );
+      await page.waitForSelector('[data-page-action="capsule-export"]');
+      const downloadPromise = page.waitForEvent('download');
+      await page.click('[data-page-action="capsule-export"]');
+      const download = await downloadPromise;
+      const capsulePath = join(remoteDir, 'workspace.capsule');
+      await download.saveAs(capsulePath);
+      expect((await readFile(capsulePath)).byteLength).toBeGreaterThan(100);
+
+      page.once('dialog', (dialog) => void dialog.accept());
+      await page.setInputFiles('#kernel-capsule-file', capsulePath);
+      await page.waitForFunction(
+        () =>
+          !document.querySelector('#kernel-page-layer') &&
+          document.documentElement.dataset.tinyaiActivated === 'true',
+        undefined,
+        { timeout: 30_000 }
+      );
+      expect(pageErrors).toEqual([]);
+    } finally {
+      await remoteContext.close();
+      await rm(remoteDir, { recursive: true, force: true });
+    }
   });
 });

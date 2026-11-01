@@ -61,7 +61,7 @@ async function importAndStage(capsuleBase64: string, environmentId: string) {
     artifacts,
     environmentId,
     hostProfile: 'browser-agent',
-    agentVersion: '0.9.1',
+    agentVersion: '0.10.0',
     newId: () => `capsule_${crypto.randomUUID()}`,
     environment: {
       manifestVersion: 1,

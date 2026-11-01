@@ -20,4 +20,5 @@ export const icons = {
   zoom: "<svg viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'><circle cx='8.5' cy='8.5' r='4.8'/><path d='M12.2 12.2 17 17M6.5 8.5h4M8.5 6.5v4'/></svg>",
   shield: "<svg viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M10 2.5 16 5v4.6c0 3.5-2.4 6-6 7.9-3.6-1.9-6-4.4-6-7.9V5z'/><path d='m7.3 9.8 1.8 1.8 3.6-3.8'/></svg>",
   info: "<svg viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'><circle cx='10' cy='10' r='7'/><path d='M10 9v4M10 6.5v.1'/></svg>",
+  download: "<svg viewBox='0 0 20 20' fill='none' aria-hidden='true'><path d='M10 3v9m0 0 3.2-3.2M10 12 6.8 8.8M4 13.8v2.4h12v-2.4' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>",
 } as const;

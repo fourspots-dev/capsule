@@ -32,6 +32,9 @@ export type RuntimeRequest =
   | { type: 'list_skills'; requestId?: string }
   | { type: 'reload_runtime'; requestId?: string }
   | { type: 'read_artifact'; artifactId: string; requestId?: string }
+  | { type: 'serialize_capsule'; requestId?: string }
+  | { type: 'import_capsule'; dataBase64: string; requestId?: string }
+  | { type: 'get_capability_status'; sessionId?: string; requestId?: string }
   | { type: 'approval_response'; approvalId: string; approved: boolean; requestId?: string }
   | {
       type: 'handoff_response';

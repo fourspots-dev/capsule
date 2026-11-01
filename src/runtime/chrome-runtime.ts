@@ -9,7 +9,17 @@ import { OpenAIModelTransport } from '../adapters/openai-model';
 import { createSubagentTools } from '../adapters/subagent-tools';
 import { ChromeHostBridge, type ChromeStorageArea } from '../adapters/chrome-host';
 import { assertHostBaseline } from '../host';
-import { createVirtualWorkspaceTools } from '../adapters/virtual-workspace-tools';
+import {
+  HostActionRegistry,
+  toolNameForAction,
+} from '../platform/host-action';
+import { RemoteActionProvider } from '../adapters/remote-action-provider';
+import { LspActionCodeIntelligence } from '../adapters/lsp-action-code-intelligence';
+import { createWorkspaceCapabilityComposition } from './workspace-capability-composition';
+import {
+  TestEvidenceService,
+  createTestEvidenceCompletionGuard,
+} from '../evidence';
 import { VirtualWorkspace } from '../virtual';
 import { createSkillTools } from '../adapters/skill-tools';
 import { registerDeclarativeHooks } from '../adapters/declarative-hooks';
@@ -39,6 +49,7 @@ import { WorkspaceContinuityService } from '../workspace/continuity';
 import { serializeWorkspaceCapsuleV2 } from '../workspace/capsule-v2';
 
 export const KERNEL_PORT_NAME = 'tinyai-runtime-v1';
+export const REMOTE_ACTIONS_KEY = 'tinyai-remote-actions';
 
 export interface ChromeKeyValueStorage {
   get(keys: string | string[] | null): Promise<Record<string, unknown>>;
@@ -62,6 +73,36 @@ export interface KernelConnectionConfig {
   model: string;
   approval: 'ask' | 'auto';
   connectionId: string;
+}
+
+export interface ChromeRemoteActionConfig {
+  endpoint: string;
+  token?: string;
+  allowedActionIds?: string[];
+  timeoutMs?: number;
+}
+
+export function parseRemoteActionConfig(
+  raw: unknown
+): ChromeRemoteActionConfig | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const value = raw as Record<string, unknown>;
+  const endpoint = stringValue(value.endpoint);
+  if (!/^https?:\/\//.test(endpoint)) return undefined;
+  return {
+    endpoint,
+    ...(stringValue(value.token) ? { token: stringValue(value.token) } : {}),
+    ...(Array.isArray(value.allowedActionIds)
+      ? {
+          allowedActionIds: value.allowedActionIds
+            .map(String)
+            .filter(Boolean),
+        }
+      : {}),
+    ...(typeof value.timeoutMs === 'number' && value.timeoutMs > 0
+      ? { timeoutMs: value.timeoutMs }
+      : {}),
+  };
 }
 
 export function parseKernelConfig(raw: unknown): KernelConnectionConfig {
@@ -121,16 +162,13 @@ export async function createChromeRuntimeBundle(
     host: chromeHost,
     storageKey: 'tinyai:virtual-workspace:v1',
   });
-  assertHostBaseline(chromeHost, 'chrome', {
-    workspaceStorage: 'storage-backed',
-    availableActions: [],
-  });
   const storage = options.storage ?? chromeLocalStorage();
   const sessionStore = new ChromeSessionStore({
     storage: chromeStorageForSessions(storage),
   });
   await migrateLegacyStorage(storage, sessionStore, systemClock.now());
   const stored = await storage.get(CONFIG_KEY);
+  const remoteActionStored = await storage.get(REMOTE_ACTIONS_KEY);
   const config = parseKernelConfig(stored[CONFIG_KEY]);
   const profiles = await storage.get('tinyai-agent-profiles');
   const mcpConfig = await storage.get('tinyai-mcp-servers');
@@ -160,6 +198,67 @@ export async function createChromeRuntimeBundle(
   );
   const evidenceStore = new HostEvidenceStore(chromeHost.storage);
   const importJournal = new HostWorkspaceImportJournal(chromeHost.storage);
+  const actionRegistry = new HostActionRegistry();
+  const remoteActionConfig = parseRemoteActionConfig(
+    remoteActionStored[REMOTE_ACTIONS_KEY]
+  );
+  if (remoteActionConfig) {
+    actionRegistry.register(
+      'chrome-remote-actions',
+      new RemoteActionProvider(remoteActionConfig)
+    );
+  }
+  const actionReport = await actionRegistry.discover();
+  const hostBaseline = assertHostBaseline(chromeHost, 'chrome', {
+    workspaceStorage: 'storage-backed',
+    availableActions: actionReport.available,
+    actionDiagnostics: actionReport.diagnostics,
+  });
+  const environmentFingerprint = [
+    'chrome-extension-v1',
+    ...Object.entries(hostBaseline.tierState)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([tier, state]) => `${tier}:${state}`),
+  ].join('|');
+  const testEvidence = new TestEvidenceService({
+    store: evidenceStore,
+    artifacts: artifactStore,
+    vfs: virtualWorkspace.fs,
+    environmentFingerprint,
+    workspaceGeneration: () => virtualWorkspace.generation(),
+  });
+  const completionGuard = createTestEvidenceCompletionGuard({
+    service: testEvidence,
+    store: evidenceStore,
+    actionVersions: async (actionId) =>
+      (await actionRegistry.list()).find(
+        (action) => action.descriptor.id === actionId
+      )?.descriptor.version,
+  });
+  const sharedComposition = await createWorkspaceCapabilityComposition({
+    workspace: virtualWorkspace,
+    profile: 'portable',
+    actionRegistry,
+    workspacePath: '',
+    hostProfile: 'browser-agent',
+    environmentFingerprint,
+    hostBaseline,
+    workspaceGeneration: () => virtualWorkspace.generation(),
+    testEvidence,
+    ...(actionReport.available.some(
+      (action) => action.descriptor.id === 'code.lsp.query'
+    )
+      ? {
+          codeIntelligence: new LspActionCodeIntelligence(actionRegistry),
+        }
+      : {}),
+    actionBindingForInvocation: async () => ({
+      workspaceId: virtualWorkspace.workspaceId,
+      workspaceGeneration: await virtualWorkspace.generation(),
+      environmentFingerprint,
+      evidenceVfs: virtualWorkspace.fs,
+    }),
+  });
   let activeRuntime: WorkspaceRuntime | undefined;
   const continuity = new WorkspaceContinuityService({
     workspaceId: 'tinyai-browser-workspace',
@@ -169,7 +268,7 @@ export async function createChromeRuntimeBundle(
     artifacts: artifactStore,
     environmentId: 'chrome-extension-v1',
     hostProfile: 'browser-agent',
-    agentVersion: '0.9.1',
+    agentVersion: '0.10.0',
     newId: () => `capsule_${crypto.randomUUID()}`,
     beforeExport: async () => {
       if (!activeRuntime) return;
@@ -240,6 +339,7 @@ export async function createChromeRuntimeBundle(
       'browser:interact',
       'browser:script',
       'browser:network',
+      'action:invoke',
       'agent:spawn',
       'agent:manage',
       'extension:skills',
@@ -263,10 +363,13 @@ export async function createChromeRuntimeBundle(
         artifactStore,
         trace,
         hooks,
-        systemPrompt: chromePromptProfile.build({
-          profile,
-          skills: initialSkills,
-        }),
+        systemPrompt: [
+          sharedComposition.prompt,
+          chromePromptProfile.build({
+            profile,
+            skills: initialSkills,
+          }),
+        ].join('\n\n'),
         maxSteps: spec.budget.maxTurns,
         toolSelection: {
           allow: profile.tools.allow,
@@ -274,6 +377,11 @@ export async function createChromeRuntimeBundle(
           capabilities: profile.effectivePermissions.capabilities,
         },
         additionalTools: [
+          ...sharedComposition.tools.map((definition) => ({
+            definition,
+            source: 'builtin' as const,
+            sourceId: 'workspace-shared',
+          })),
           ...skillTools.map((definition) => ({
             definition,
             source: 'builtin' as const,
@@ -285,6 +393,7 @@ export async function createChromeRuntimeBundle(
             sourceId: 'mcp',
           })),
         ],
+        completionGuard,
         tabScoped: true,
       }).runtime,
   });
@@ -335,7 +444,10 @@ export async function createChromeRuntimeBundle(
     artifactStore,
     trace,
     hooks,
-    systemPrompt: chromePromptProfile.build({ skills: initialSkills }),
+    systemPrompt: [
+      sharedComposition.prompt,
+      chromePromptProfile.build({ skills: initialSkills }),
+    ].join('\n\n'),
     download: async (name, mime, base64) => {
       await chrome.downloads.download({
         url: `data:${mime};base64,${base64}`,
@@ -344,10 +456,10 @@ export async function createChromeRuntimeBundle(
       });
     },
     additionalTools: [
-      ...createVirtualWorkspaceTools(virtualWorkspace).map((definition) => ({
+      ...sharedComposition.tools.map((definition) => ({
         definition,
         source: 'builtin' as const,
-        sourceId: 'virtual-workspace',
+        sourceId: 'workspace-shared',
       })),
       ...subagentTools.map((definition) => ({
         definition,
@@ -365,6 +477,7 @@ export async function createChromeRuntimeBundle(
         sourceId: 'mcp',
       })),
     ],
+    completionGuard,
     workspaceTabs,
   });
   activeRuntime = mainWorkspace.runtime;
@@ -407,6 +520,21 @@ export async function createChromeRuntimeBundle(
         return continuity.commitImport(prepared, { replaceProject: true });
       },
     },
+    capabilityStatus: async (sessionId) => ({
+      actions: await actionRegistry.discover(),
+      evidence: await evidenceStore.list(
+        sessionId ? { sessionId } : {}
+      ),
+      actionOutcomes: sessionId
+        ? actionOutcomesForSession(
+            activeRuntime,
+            sessionId,
+            actionReport.inspected.map(
+              (entry) => entry.descriptor.id
+            )
+          )
+        : undefined,
+    }),
     async dispose() {
       await extension.dispose();
       unsubscribeChildren();
@@ -417,6 +545,47 @@ export async function createChromeRuntimeBundle(
       await Promise.all(mcpClients.map((client) => client.close()));
     },
   };
+}
+
+function actionIdForToolName(
+  toolName: string,
+  actionIds: readonly string[]
+): string | undefined {
+  return actionIds.find(
+    (actionId) => toolNameForAction(actionId) === toolName
+  );
+}
+
+function actionOutcomesForSession(
+  runtime: WorkspaceRuntime | undefined,
+  sessionId: string,
+  actionIds: readonly string[]
+): Record<string, string> | undefined {
+  if (!runtime) return undefined;
+  let rows: ReturnType<WorkspaceRuntime['getProjection']>['rows'];
+  try {
+    rows = runtime.getProjection(sessionId).rows;
+  } catch {
+    return undefined;
+  }
+  return Object.fromEntries(
+    [...rows]
+      .reverse()
+      .filter(
+        (row) =>
+          row.kind === 'tool' &&
+          row.toolName?.startsWith('action_') &&
+          row.status !== 'streaming' &&
+          row.status !== 'pending'
+      )
+      .flatMap((row) => {
+        const actionId = actionIdForToolName(
+          row.toolName ?? '',
+          actionIds
+        );
+        return actionId ? [[actionId, row.status] as const] : [];
+      })
+  );
 }
 
 export function installKernelRuntimeGateway(

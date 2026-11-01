@@ -116,30 +116,49 @@ describe('workspace capability composition', () => {
     ).toEqual({ ok: true });
   });
 
-  it('produces the same normalized tools for TUI and Headless inputs', async () => {
+  it('produces the same normalized tools for TUI, Headless and Chrome', async () => {
+    const compositions = await Promise.all(
+      ['tui', 'headless', 'browser-agent'].map((hostProfile) =>
+        createWorkspaceCapabilityComposition({
+          workspace: workspace(),
+          profile: 'portable',
+          actionRegistry: actionRegistry(),
+          hostProfile,
+        })
+      )
+    );
+    const normalized = compositions.map((composition) =>
+      composition.tools.map((tool) => ({
+        name: tool.name,
+        parameters: tool.parameters,
+        effect: tool.effect,
+        risk: tool.risk,
+      }))
+    );
+    expect(normalized[1]).toEqual(normalized[0]);
+    expect(normalized[2]).toEqual(normalized[0]);
+    expect(normalized[2].map((tool) => tool.name)).not.toEqual(
+      expect.arrayContaining(['exec', 'job_start', 'job_read', 'job_stop'])
+    );
+  });
+
+  it('re-probes an Action registry without duplicating tools', async () => {
+    const registry = actionRegistry();
     const first = await createWorkspaceCapabilityComposition({
       workspace: workspace(),
       profile: 'portable',
-      actionRegistry: actionRegistry(),
+      actionRegistry: registry,
+      hostProfile: 'browser-agent',
     });
     const second = await createWorkspaceCapabilityComposition({
       workspace: workspace(),
       profile: 'portable',
-      actionRegistry: actionRegistry(),
+      actionRegistry: registry,
+      hostProfile: 'browser-agent',
     });
-    expect(
-      first.tools.map((tool) => ({
-        name: tool.name,
-        parameters: tool.parameters,
-        effect: tool.effect,
-      }))
-    ).toEqual(
-      second.tools.map((tool) => ({
-        name: tool.name,
-        parameters: tool.parameters,
-        effect: tool.effect,
-      }))
-    );
+    const names = second.tools.map((tool) => tool.name);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).toEqual(first.tools.map((tool) => tool.name));
   });
 
   it('provides a CompletionGuard wrapper', () => {

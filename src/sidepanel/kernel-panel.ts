@@ -1,8 +1,12 @@
 import type { ProductProjection } from '../core/types';
 import type { SkillDefinition } from '../core/extension-registry';
 import { escapeHtml, md } from './html';
-import { KERNEL_PORT_NAME } from '../runtime/chrome-runtime';
+import {
+  KERNEL_PORT_NAME,
+  REMOTE_ACTIONS_KEY,
+} from '../runtime/chrome-runtime';
 import { CONFIG_KEY } from '../runtime/storage-migration';
+import type { RuntimeCapabilityStatus } from '../runtime/runtime-gateway';
 import type { KernelApprovalEvent, KernelHandoffEvent } from './kernel-client';
 import { KernelClient, connectChromeKernelPort } from './kernel-client';
 import { icons } from './icons';
@@ -36,6 +40,13 @@ interface KernelStoredConfig {
   connections: KernelConnectionConfig[];
 }
 
+interface KernelRemoteActionConfig {
+  endpoint: string;
+  token?: string;
+  allowedActionIds?: string[];
+  timeoutMs?: number;
+}
+
 interface ComposerDraft {
   text: string;
   attachments: Array<{
@@ -51,6 +62,7 @@ export async function initKernelUi(): Promise<void> {
   const root = document.querySelector<HTMLElement>('#root');
   if (!root) throw new Error('Missing #root');
   let pageConfig: KernelStoredConfig = await readPageConfig();
+  let remoteActionConfig = await readRemoteActionConfig();
   root.innerHTML = shell(pageConfig);
   applyPageAppearance();
 
@@ -84,6 +96,8 @@ export async function initKernelUi(): Promise<void> {
   let pageSessions: Awaited<ReturnType<KernelClient['listSessions']>> = [];
   let editingConnectionId: string | null | undefined;
   let connectionTestMessage = '';
+  let capabilityStatus: RuntimeCapabilityStatus | undefined;
+  let capabilityStatusError = '';
   let pageError = '';
   let error = '';
   let busy = false;
@@ -583,7 +597,7 @@ export async function initKernelUi(): Promise<void> {
       .catch(showError);
   });
   document.addEventListener('change', (event) => {
-    const target = event.target as HTMLSelectElement;
+    const target = event.target as HTMLSelectElement | HTMLInputElement;
     if (target.id === 'kernel-page-language') {
       pageConfig.language = target.value;
       void writePageConfig().then(() => renderPage()).catch((cause) => {
@@ -606,6 +620,11 @@ export async function initKernelUi(): Promise<void> {
           pageError = errorMessage(cause);
           renderPage();
         });
+    }
+    if (target.id === 'kernel-capsule-file') {
+      const file = (target as HTMLInputElement).files?.[0];
+      if (file) void importWorkspaceCapsule(file).catch(showError);
+      return;
     }
   });
   document.querySelector('#kernel-compact')?.addEventListener('click', () => {
@@ -842,7 +861,17 @@ export async function initKernelUi(): Promise<void> {
 
   async function showPage(view: 'settings' | 'connections' | 'history'): Promise<void> {
     pageConfig = await readPageConfig();
+    remoteActionConfig = await readRemoteActionConfig();
     if (view === 'history') pageSessions = await client.listSessions();
+    capabilityStatus = undefined;
+    capabilityStatusError = '';
+    if (view === 'settings' && sessionActivated) {
+      try {
+        capabilityStatus = await client.capabilityStatus(sessionId);
+      } catch (cause) {
+        capabilityStatusError = errorMessage(cause);
+      }
+    }
     pageView = view;
     pageError = '';
     connectionTestMessage = '';
@@ -948,8 +977,27 @@ export async function initKernelUi(): Promise<void> {
               <button type="button" class="wb-set-select" data-page-action="reasoning"><span class="wb-set-select-value">${pageConfig.showReasoning ? (zh ? '显示' : 'Show') : (zh ? '隐藏' : 'Hidden')}</span>${icons.chevronDown}</button></div>
           </div>
         </div>
+        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? '运行时能力' : 'Runtime capabilities'}</div>
+          ${capabilityBoardMarkup(zh)}
+        </div>
+        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? '远程 Action' : 'Remote Actions'}</div>
+          ${remoteActionFormMarkup(zh)}
+        </div>
         <div class="wb-set-group"><div class="wb-set-group-label">${zh ? '数据' : 'Data'}</div>
           <div class="wb-set-card">
+            <button type="button" class="wb-set-row wb-set-navrow wb-clickable" data-page-action="capsule-export">
+              <span class="wb-set-row-label">${icons.download}${zh ? '导出 Workspace Capsule' : 'Export Workspace Capsule'}</span>
+              <span class="wb-input-grow"></span>
+              ${icons.chevronDown}
+            </button>
+            <div class="wb-set-sepa"></div>
+            <button type="button" class="wb-set-row wb-set-navrow wb-clickable" data-page-action="capsule-import">
+              <span class="wb-set-row-label">${icons.file}${zh ? '导入 Workspace Capsule' : 'Import Workspace Capsule'}</span>
+              <span class="wb-input-grow"></span>
+              ${icons.chevronDown}
+            </button>
+            <input id="kernel-capsule-file" type="file" accept=".capsule,.tinyai,application/octet-stream" hidden>
+            <div class="wb-set-sepa"></div>
             <button type="button" class="wb-set-row wb-set-navrow wb-clickable kernel-danger-row" data-page-action="clear-history">
               <span class="wb-set-row-label">${icons.info}${zh ? '清除全部聊天历史' : 'Clear all chat history'}</span>
               <span class="wb-input-grow"></span>
@@ -964,6 +1012,70 @@ export async function initKernelUi(): Promise<void> {
         </div>
         ${pageAlertMarkup()}
       </div>`);
+  }
+
+  function capabilityBoardMarkup(zh: boolean): string {
+    if (capabilityStatusError) {
+      return `<div class="wb-set-card kernel-capability-card">
+        <div class="kernel-capability-empty">${escapeHtml(capabilityStatusError)}</div>
+        <button type="button" class="wb-ghost-btn" data-page-action="capability-refresh">${zh ? '重试' : 'Retry'}</button>
+      </div>`;
+    }
+    if (!capabilityStatus) {
+      return `<div class="wb-set-card kernel-capability-card">
+        <div class="kernel-capability-empty">${zh ? '运行时尚未启动。' : 'Runtime is not available yet.'}</div>
+      </div>`;
+    }
+    const available = capabilityStatus.actions.filter(
+      (action) => action.state === 'available'
+    ).length;
+    const degraded = capabilityStatus.actions.length - available;
+    const currentEvidence = capabilityStatus.evidence.filter(
+      (record) => record.status === 'current'
+    ).length;
+    const staleEvidence = capabilityStatus.evidence.filter(
+      (record) => record.status === 'stale'
+    ).length;
+    const actionRows = capabilityStatus.actions.slice(0, 8).map(
+      (action) => `<div class="kernel-capability-row">
+        <span class="kernel-capability-dot" data-state="${escapeHtml(action.state)}" aria-hidden="true"></span>
+        <span class="kernel-capability-copy">
+          <span class="kernel-capability-title">${escapeHtml(action.title || action.id)}</span>
+          <span class="kernel-capability-meta">${escapeHtml(action.id)} · v${escapeHtml(action.version)}</span>
+          ${action.reason ? `<span class="kernel-capability-reason">${escapeHtml(action.reason)}</span>` : ''}
+          ${action.lastOutcome ? `<span class="kernel-capability-meta">${zh ? '最近调用' : 'Last call'} · ${escapeHtml(action.lastOutcome)}</span>` : ''}
+        </span>
+        <span class="kernel-capability-state" data-state="${escapeHtml(action.state)}">${escapeHtml(action.state)}</span>
+      </div>`
+    );
+    const diagnostics = capabilityStatus.diagnostics.slice(0, 4).map(
+      (item) => `<div class="kernel-capability-diagnostic">${escapeHtml(item.code)} · ${escapeHtml(item.message)}</div>`
+    );
+    return `<div class="wb-set-card kernel-capability-card">
+      <div class="kernel-capability-summary">
+        <span><b>${available}</b> ${zh ? '可用' : 'available'}</span>
+        <span><b>${degraded}</b> ${zh ? '降级' : 'degraded'}</span>
+        <span><b>${currentEvidence}</b> ${zh ? '当前证据' : 'current evidence'}</span>
+        ${staleEvidence ? `<span><b>${staleEvidence}</b> ${zh ? '过期证据' : 'stale evidence'}</span>` : ''}
+        <button type="button" class="wb-ghost-btn kernel-capability-refresh" data-page-action="capability-refresh">${zh ? '重新探测' : 'Re-probe'}</button>
+      </div>
+      ${actionRows.join('') || `<div class="kernel-capability-empty">${zh ? '没有已注册的远程 Action。' : 'No remote Actions registered.'}</div>`}
+      ${diagnostics.join('')}
+    </div>`;
+  }
+
+  function remoteActionFormMarkup(zh: boolean): string {
+    return `<form id="kernel-remote-action-form" class="wb-form kernel-remote-action-form">
+      <label>${zh ? 'Action 端点' : 'Action endpoint'}<input id="kernel-remote-endpoint" type="url" value="${escapeHtml(remoteActionConfig?.endpoint ?? '')}" placeholder="https://actions.example.com/rpc"></label>
+      <label>Bearer Token<input id="kernel-remote-token" type="password" value="" placeholder="${remoteActionConfig?.token ? (zh ? '已保存，留空保持不变' : 'Saved — leave blank to keep') : 'optional'}" autocomplete="off"></label>
+      <label>${zh ? '允许的 Action ID（每行一个）' : 'Allowed Action IDs (one per line)'}<textarea id="kernel-remote-allowlist">${escapeHtml(remoteActionConfig?.allowedActionIds?.join('\n') ?? '')}</textarea></label>
+      <label>${zh ? '超时（毫秒）' : 'Timeout (ms)'}<input id="kernel-remote-timeout" type="number" min="1" value="${remoteActionConfig?.timeoutMs ?? 300000}"></label>
+      <div class="wb-form-actions">
+        <button type="button" class="wb-btn wb-btn--primary" data-page-action="remote-save">${zh ? '保存并探测' : 'Save and probe'}</button>
+        <button type="button" class="wb-ghost-btn" data-page-action="remote-clear">${zh ? '停用远程 Action' : 'Disable remote Actions'}</button>
+      </div>
+      <div class="wb-conn-url">${zh ? '只接受具名 Action；端点不会获得通用 Shell。' : 'Only named Actions are exposed; the endpoint never receives a generic shell.'}</div>
+    </form>`;
   }
 
   function connectionsPageMarkup(): string {
@@ -1054,6 +1166,34 @@ export async function initKernelUi(): Promise<void> {
       connection: typeof raw.connection === 'string' ? raw.connection : null,
       model: typeof raw.model === 'string' ? raw.model : null,
       connections,
+    };
+  }
+
+  async function readRemoteActionConfig(): Promise<
+    KernelRemoteActionConfig | undefined
+  > {
+    const stored = await chrome.storage.local.get(REMOTE_ACTIONS_KEY);
+    const raw = stored[REMOTE_ACTIONS_KEY];
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+    const value = raw as Record<string, unknown>;
+    if (typeof value.endpoint !== 'string' || !value.endpoint.trim()) {
+      return undefined;
+    }
+    return {
+      endpoint: value.endpoint,
+      ...(typeof value.token === 'string' && value.token
+        ? { token: value.token }
+        : {}),
+      ...(Array.isArray(value.allowedActionIds)
+        ? {
+            allowedActionIds: value.allowedActionIds
+              .map(String)
+              .filter(Boolean),
+          }
+        : {}),
+      ...(typeof value.timeoutMs === 'number' && value.timeoutMs > 0
+        ? { timeoutMs: value.timeoutMs }
+        : {}),
     };
   }
 
@@ -1149,6 +1289,36 @@ export async function initKernelUi(): Promise<void> {
       pageConfig.showReasoning = !pageConfig.showReasoning;
       await writePageConfig();
       renderPage();
+      return;
+    }
+    if (action === 'capability-refresh') {
+      capabilityStatusError = '';
+      try {
+        capabilityStatus = await client.capabilityStatus(sessionId);
+      } catch (cause) {
+        capabilityStatusError = errorMessage(cause);
+      }
+      renderPage();
+      return;
+    }
+    if (action === 'remote-save') {
+      await saveRemoteActionConfig();
+      return;
+    }
+    if (action === 'remote-clear') {
+      await chrome.storage.local.remove(REMOTE_ACTIONS_KEY);
+      remoteActionConfig = undefined;
+      await reloadRuntimeForCurrentTab();
+      capabilityStatus = await client.capabilityStatus(sessionId);
+      renderPage();
+      return;
+    }
+    if (action === 'capsule-export') {
+      await exportWorkspaceCapsule();
+      return;
+    }
+    if (action === 'capsule-import') {
+      document.querySelector<HTMLInputElement>('#kernel-capsule-file')?.click();
       return;
     }
     if (action === 'clear-history') {
@@ -1293,6 +1463,92 @@ export async function initKernelUi(): Promise<void> {
       ? `Connection OK · ${models.length} models available`
       : 'Connection OK';
     renderPage();
+  }
+
+  async function saveRemoteActionConfig(): Promise<void> {
+    const endpoint = pageValue('#kernel-remote-endpoint').replace(/\/+$/, '');
+    const tokenInput = pageValue('#kernel-remote-token');
+    const allowedActionIds = pageValue('#kernel-remote-allowlist')
+      .split(/\n|,/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const timeoutMs = Number(pageValue('#kernel-remote-timeout'));
+    if (!/^https?:\/\/[^/]+/i.test(endpoint)) {
+      throw new Error(
+        pageConfig.language.startsWith('zh')
+          ? '远程 Action 端点必须是 HTTP(S) URL。'
+          : 'Remote Action endpoint must be an HTTP(S) URL.'
+      );
+    }
+    const retainedToken =
+      remoteActionConfig?.endpoint === endpoint
+        ? remoteActionConfig.token
+        : undefined;
+    const config: KernelRemoteActionConfig = {
+      endpoint,
+      ...(tokenInput || retainedToken
+        ? { token: tokenInput || retainedToken }
+        : {}),
+      ...(allowedActionIds.length ? { allowedActionIds } : {}),
+      ...(Number.isFinite(timeoutMs) && timeoutMs > 0 ? { timeoutMs } : {}),
+    };
+    await chrome.storage.local.set({ [REMOTE_ACTIONS_KEY]: config });
+    remoteActionConfig = config;
+    await reloadRuntimeForCurrentTab();
+    capabilityStatusError = '';
+    try {
+      capabilityStatus = await client.capabilityStatus(sessionId);
+    } catch (cause) {
+      capabilityStatusError = errorMessage(cause);
+    }
+    renderPage();
+  }
+
+  async function exportWorkspaceCapsule(): Promise<void> {
+    const capsule = await client.serializeCapsule();
+    const bytes = Uint8Array.from(atob(capsule.dataBase64), (char) =>
+      char.charCodeAt(0)
+    );
+    const href = URL.createObjectURL(
+      new Blob([bytes], { type: 'application/octet-stream' })
+    );
+    const anchor = document.createElement('a');
+    anchor.href = href;
+    anchor.download = `tinyai-workspace-${new Date()
+      .toISOString()
+      .replace(/[:.]/g, '-')}.capsule`;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(href), 1_000);
+  }
+
+  async function importWorkspaceCapsule(file: File): Promise<void> {
+    const zh = pageConfig.language.startsWith('zh');
+    if (
+      !window.confirm(
+        zh
+          ? '导入会替换当前 Workspace 项目并恢复胶囊中的会话。继续吗？'
+          : 'Importing replaces the current Workspace project and restores its sessions. Continue?'
+      )
+    ) {
+      return;
+    }
+    const dataBase64 = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
+    const imported = await client.importCapsule(dataBase64);
+    pageError = '';
+    closePage();
+    await client.reloadRuntime();
+    if (imported.sessions.length && windowId !== undefined && activeTabId) {
+      await activateSession(() =>
+        client.bindTabSession(
+          windowId!,
+          activeTabId!,
+          imported.sessions[0],
+          activeGroupId
+        )
+      );
+    } else {
+      await reloadRuntimeForCurrentTab();
+    }
   }
 
   function pageValue(selector: string): string {
@@ -2068,6 +2324,12 @@ function themeLabel(theme: 'light' | 'dark' | 'system', zh: boolean): string {
 
 function errorMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
+}
+
+function bytesToBase64(value: Uint8Array): string {
+  let binary = '';
+  for (const byte of value) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 function isMissingTabError(cause: unknown): boolean {

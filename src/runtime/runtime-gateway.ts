@@ -14,11 +14,46 @@ import type {
   WorkspaceCapsule,
   WorkspaceImportResult,
 } from '../workspace/types';
+import type { EvidenceRecord } from '../core/evidence-store';
+import type {
+  HostActionDiagnostic,
+  HostActionEffect,
+  HostActionReport,
+  HostActionState,
+} from '../platform/host-action';
+import type { ToolRisk } from '../core/types';
 
 export interface WorkspaceTransferControl {
   exportCapsule(): Promise<WorkspaceCapsule>;
   importCapsule(capsule: Uint8Array): Promise<WorkspaceImportResult>;
   serializeCapsule(): Promise<Uint8Array>;
+}
+
+export interface RuntimeActionStatus {
+  id: string;
+  version: string;
+  title: string;
+  description: string;
+  sourceId: string;
+  effects: HostActionEffect[];
+  risk: ToolRisk;
+  state: HostActionState;
+  reason?: string;
+  latencyMs?: number;
+  limitations?: string[];
+  lastOutcome?: string;
+}
+
+export interface RuntimeCapabilitySnapshot {
+  actions: HostActionReport;
+  evidence: EvidenceRecord[];
+  actionOutcomes?: Record<string, string>;
+}
+
+export interface RuntimeCapabilityStatus {
+  actions: RuntimeActionStatus[];
+  diagnostics: HostActionDiagnostic[];
+  evidence: EvidenceRecord[];
 }
 
 export interface RuntimeBundle {
@@ -28,6 +63,9 @@ export interface RuntimeBundle {
   skills?: () => Promise<SkillDefinition[]>;
   artifacts?: ArtifactStore;
   workspaceTransfer?: WorkspaceTransferControl;
+  capabilityStatus?: (
+    sessionId?: string
+  ) => Promise<RuntimeCapabilitySnapshot>;
   dispose(): Promise<void>;
 }
 
@@ -217,6 +255,47 @@ export class RuntimeGateway {
         });
         return;
       }
+      if (core.type === 'serialize_capsule') {
+        if (!bundle.workspaceTransfer) {
+          throw new AgentError(
+            'WORKSPACE_TRANSFER_UNAVAILABLE',
+            'This runtime cannot export a Workspace Capsule'
+          );
+        }
+        const bytes = await bundle.workspaceTransfer.serializeCapsule();
+        this.reply(port, requestId, {
+          dataBase64: bytesToBase64(bytes),
+          bytes: bytes.byteLength,
+        });
+        return;
+      }
+      if (core.type === 'import_capsule') {
+        if (!bundle.workspaceTransfer) {
+          throw new AgentError(
+            'WORKSPACE_TRANSFER_UNAVAILABLE',
+            'This runtime cannot import a Workspace Capsule'
+          );
+        }
+        this.reply(
+          port,
+          requestId,
+          await bundle.workspaceTransfer.importCapsule(
+            base64ToBytes(core.dataBase64)
+          )
+        );
+        return;
+      }
+      if (core.type === 'get_capability_status') {
+        if (!bundle.capabilityStatus) {
+          throw new AgentError(
+            'CAPABILITY_STATUS_UNAVAILABLE',
+            'This runtime does not expose capability status'
+          );
+        }
+        const snapshot = await bundle.capabilityStatus(core.sessionId);
+        this.reply(port, requestId, toCapabilityStatus(snapshot));
+        return;
+      }
       throw new AgentError(
         'RUNTIME_REQUEST_UNSUPPORTED',
         `Unsupported runtime request: ${request.type}`
@@ -298,6 +377,46 @@ function bytesToBase64(value: Uint8Array): string {
   return btoa(binary);
 }
 
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function toCapabilityStatus(
+  snapshot: RuntimeCapabilitySnapshot
+): RuntimeCapabilityStatus {
+  return {
+    actions: snapshot.actions.inspected.map((entry) => ({
+      id: entry.descriptor.id,
+      version: entry.descriptor.version,
+      title: entry.descriptor.title,
+      description: entry.descriptor.description,
+      sourceId: entry.sourceId,
+      effects: [...entry.descriptor.effects],
+      risk: entry.descriptor.risk,
+      state: entry.probe.state,
+      ...(entry.probe.reason ? { reason: entry.probe.reason } : {}),
+      ...(entry.probe.latencyMs !== undefined
+        ? { latencyMs: entry.probe.latencyMs }
+        : {}),
+      ...(entry.descriptor.limitations
+        ? { limitations: [...entry.descriptor.limitations] }
+        : {}),
+      ...(snapshot.actionOutcomes?.[entry.descriptor.id]
+        ? { lastOutcome: snapshot.actionOutcomes[entry.descriptor.id] }
+        : {}),
+    })),
+    diagnostics: snapshot.actions.diagnostics.map((diagnostic) => ({
+      ...diagnostic,
+    })),
+    evidence: snapshot.evidence.map((record) => structuredClone(record)),
+  };
+}
+
 function isCoreRuntimeRequest(
   request: RuntimeRequest | RuntimeExtensionRequest
 ): request is RuntimeRequest {
@@ -320,6 +439,9 @@ const CORE_REQUEST_TYPES = new Set<string>([
   'list_skills',
   'reload_runtime',
   'read_artifact',
+  'serialize_capsule',
+  'import_capsule',
+  'get_capability_status',
   'approval_response',
   'handoff_response',
 ]);

@@ -85,6 +85,15 @@ describe('REQ-ACTION-001 remote Action provider', () => {
     await expect(provider.describe()).rejects.toMatchObject({
       code: 'REMOTE_ACTION_HTTP_ERROR',
     });
+    await expect(
+      provider.invoke('app.remote.check', {}, {
+        sessionId: 's',
+        taskId: 't',
+        signal: new AbortController().signal,
+      })
+    ).rejects.toMatchObject({
+      code: 'REMOTE_ACTION_HTTP_ERROR',
+    });
   });
 
   it('ignores a late remote response after cancellation', async () => {
@@ -108,6 +117,47 @@ describe('REQ-ACTION-001 remote Action provider', () => {
     });
     setTimeout(() => controller.abort(), 5);
     await expect(pending).rejects.toMatchObject({ code: 'ACTION_CANCELLED' });
+  });
+
+  it('filters descriptors and invocations through the configured allowlist', async () => {
+    const provider = new RemoteActionProvider({
+      endpoint: 'https://actions.example.test/rpc',
+      allowedActionIds: ['allowed.action'],
+      fetch: vi.fn(async () =>
+        jsonResponse({
+          actions: [
+            {
+              id: 'allowed.action',
+              version: '1.0.0',
+              title: 'Allowed',
+              description: 'Allowed',
+              inputSchema: { type: 'object', properties: {} },
+              effects: ['read'],
+              risk: 'read',
+            },
+            {
+              id: 'blocked.action',
+              version: '1.0.0',
+              title: 'Blocked',
+              description: 'Blocked',
+              inputSchema: { type: 'object', properties: {} },
+              effects: ['read'],
+              risk: 'read',
+            },
+          ],
+        })
+      ) as typeof fetch,
+    });
+    expect((await provider.describe()).map((item) => item.id)).toEqual([
+      'allowed.action',
+    ]);
+    await expect(
+      provider.invoke('blocked.action', {}, {
+        sessionId: 's',
+        taskId: 't',
+        signal: new AbortController().signal,
+      })
+    ).rejects.toMatchObject({ code: 'ACTION_UNAVAILABLE' });
   });
 });
 

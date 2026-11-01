@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.10.0
+
+### Features
+
+- `REQ-CHROME-001`: compose Chrome through the shared portable Workspace
+  capability graph while keeping Browser DOM tools in a separate ToolPack.
+- Add optional allowlisted Remote Action discovery and invocation with request
+  binding, cancellation, timeout handling and no generic shell fallback.
+- Add a compact Side Panel Action/Evidence capability board and Remote Action
+  configuration.
+- Add Workspace Capsule v2 export and atomic import through the Runtime
+  Gateway, restoring sessions and evidence without exposing storage to the UI.
+- Allow read-only tasks to complete without TestEvidence while retaining the
+  verification gate after write, delete or Git mutation tools.
+
+### Verification
+
+- `npm run check`: 432 tests passed, 3 skipped.
+- `npm run test:e2e`: 6 Chrome extension tests passed, including real Remote
+  Action invocation and Capsule download/import.
+- TUI/Headless/Chrome Portable Tool Golden parity, no `exec`/job tools, browser
+  ToolPack separation and disconnect/late-result failure paths.
+- `npm run verify:tui`.
+
 ## 0.9.1
 
 ### Fixes

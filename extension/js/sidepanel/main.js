@@ -139,6 +139,9 @@
   // src/git/objects.ts
   var encoder2 = new TextEncoder();
 
+  // src/intelligence/text-index.ts
+  var MAX_FILE_BYTES = 512 * 1024;
+
   // src/platform/workspace-edit-prompt.ts
   var workspaceEditPrompt = [
     "When editing workspace files, use apply_patch with *** Begin Patch / *** End Patch for multi-line or multi-file changes.",
@@ -314,6 +317,7 @@
 
   // src/runtime/chrome-runtime.ts
   var KERNEL_PORT_NAME = "tinyai-runtime-v1";
+  var REMOTE_ACTIONS_KEY = "tinyai-remote-actions";
 
   // src/sidepanel/kernel-client.ts
   var KernelClient = class {
@@ -382,6 +386,21 @@
       return await this.request({
         type: "read_artifact",
         artifactId
+      });
+    }
+    async serializeCapsule() {
+      return await this.request({ type: "serialize_capsule" });
+    }
+    async importCapsule(dataBase64) {
+      return await this.request({
+        type: "import_capsule",
+        dataBase64
+      });
+    }
+    async capabilityStatus(sessionId) {
+      return await this.request({
+        type: "get_capability_status",
+        ...sessionId ? { sessionId } : {}
       });
     }
     async listTabs() {
@@ -619,7 +638,8 @@
     sun: "<svg viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'><circle cx='10' cy='10' r='3.2'/><path d='M10 2v2M10 16v2M2 10h2M16 10h2M4.3 4.3l1.4 1.4M14.3 14.3l1.4 1.4M15.7 4.3l-1.4 1.4M5.7 14.3l-1.4 1.4'/></svg>",
     zoom: "<svg viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'><circle cx='8.5' cy='8.5' r='4.8'/><path d='M12.2 12.2 17 17M6.5 8.5h4M8.5 6.5v4'/></svg>",
     shield: "<svg viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M10 2.5 16 5v4.6c0 3.5-2.4 6-6 7.9-3.6-1.9-6-4.4-6-7.9V5z'/><path d='m7.3 9.8 1.8 1.8 3.6-3.8'/></svg>",
-    info: "<svg viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'><circle cx='10' cy='10' r='7'/><path d='M10 9v4M10 6.5v.1'/></svg>"
+    info: "<svg viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'><circle cx='10' cy='10' r='7'/><path d='M10 9v4M10 6.5v.1'/></svg>",
+    download: "<svg viewBox='0 0 20 20' fill='none' aria-hidden='true'><path d='M10 3v9m0 0 3.2-3.2M10 12 6.8 8.8M4 13.8v2.4h12v-2.4' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>"
   };
 
   // src/sidepanel/turn-render-model.ts
@@ -823,6 +843,7 @@
     const root = document.querySelector("#root");
     if (!root) throw new Error("Missing #root");
     let pageConfig = await readPageConfig();
+    let remoteActionConfig = await readRemoteActionConfig();
     root.innerHTML = shell(pageConfig);
     applyPageAppearance();
     const client = new KernelClient(() => connectChromeKernelPort(chrome, KERNEL_PORT_NAME), {
@@ -850,6 +871,8 @@
     let pageSessions = [];
     let editingConnectionId;
     let connectionTestMessage = "";
+    let capabilityStatus;
+    let capabilityStatusError = "";
     let pageError = "";
     let error = "";
     let busy = false;
@@ -1268,6 +1291,11 @@
           renderPage();
         });
       }
+      if (target.id === "kernel-capsule-file") {
+        const file = target.files?.[0];
+        if (file) void importWorkspaceCapsule(file).catch(showError);
+        return;
+      }
     });
     document.querySelector("#kernel-compact")?.addEventListener("click", () => {
       void sendControlCommand("compact", {}).catch(showError);
@@ -1481,7 +1509,17 @@
     }
     async function showPage(view) {
       pageConfig = await readPageConfig();
+      remoteActionConfig = await readRemoteActionConfig();
       if (view === "history") pageSessions = await client.listSessions();
+      capabilityStatus = void 0;
+      capabilityStatusError = "";
+      if (view === "settings" && sessionActivated) {
+        try {
+          capabilityStatus = await client.capabilityStatus(sessionId);
+        } catch (cause) {
+          capabilityStatusError = errorMessage(cause);
+        }
+      }
       pageView = view;
       pageError = "";
       connectionTestMessage = "";
@@ -1578,8 +1616,27 @@
               <button type="button" class="wb-set-select" data-page-action="reasoning"><span class="wb-set-select-value">${pageConfig.showReasoning ? zh ? "\u663E\u793A" : "Show" : zh ? "\u9690\u85CF" : "Hidden"}</span>${icons.chevronDown}</button></div>
           </div>
         </div>
+        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? "\u8FD0\u884C\u65F6\u80FD\u529B" : "Runtime capabilities"}</div>
+          ${capabilityBoardMarkup(zh)}
+        </div>
+        <div class="wb-set-group"><div class="wb-set-group-label">${zh ? "\u8FDC\u7A0B Action" : "Remote Actions"}</div>
+          ${remoteActionFormMarkup(zh)}
+        </div>
         <div class="wb-set-group"><div class="wb-set-group-label">${zh ? "\u6570\u636E" : "Data"}</div>
           <div class="wb-set-card">
+            <button type="button" class="wb-set-row wb-set-navrow wb-clickable" data-page-action="capsule-export">
+              <span class="wb-set-row-label">${icons.download}${zh ? "\u5BFC\u51FA Workspace Capsule" : "Export Workspace Capsule"}</span>
+              <span class="wb-input-grow"></span>
+              ${icons.chevronDown}
+            </button>
+            <div class="wb-set-sepa"></div>
+            <button type="button" class="wb-set-row wb-set-navrow wb-clickable" data-page-action="capsule-import">
+              <span class="wb-set-row-label">${icons.file}${zh ? "\u5BFC\u5165 Workspace Capsule" : "Import Workspace Capsule"}</span>
+              <span class="wb-input-grow"></span>
+              ${icons.chevronDown}
+            </button>
+            <input id="kernel-capsule-file" type="file" accept=".capsule,.tinyai,application/octet-stream" hidden>
+            <div class="wb-set-sepa"></div>
             <button type="button" class="wb-set-row wb-set-navrow wb-clickable kernel-danger-row" data-page-action="clear-history">
               <span class="wb-set-row-label">${icons.info}${zh ? "\u6E05\u9664\u5168\u90E8\u804A\u5929\u5386\u53F2" : "Clear all chat history"}</span>
               <span class="wb-input-grow"></span>
@@ -1594,6 +1651,68 @@
         </div>
         ${pageAlertMarkup()}
       </div>`);
+    }
+    function capabilityBoardMarkup(zh) {
+      if (capabilityStatusError) {
+        return `<div class="wb-set-card kernel-capability-card">
+        <div class="kernel-capability-empty">${escapeHtml(capabilityStatusError)}</div>
+        <button type="button" class="wb-ghost-btn" data-page-action="capability-refresh">${zh ? "\u91CD\u8BD5" : "Retry"}</button>
+      </div>`;
+      }
+      if (!capabilityStatus) {
+        return `<div class="wb-set-card kernel-capability-card">
+        <div class="kernel-capability-empty">${zh ? "\u8FD0\u884C\u65F6\u5C1A\u672A\u542F\u52A8\u3002" : "Runtime is not available yet."}</div>
+      </div>`;
+      }
+      const available = capabilityStatus.actions.filter(
+        (action) => action.state === "available"
+      ).length;
+      const degraded = capabilityStatus.actions.length - available;
+      const currentEvidence = capabilityStatus.evidence.filter(
+        (record) => record.status === "current"
+      ).length;
+      const staleEvidence = capabilityStatus.evidence.filter(
+        (record) => record.status === "stale"
+      ).length;
+      const actionRows = capabilityStatus.actions.slice(0, 8).map(
+        (action) => `<div class="kernel-capability-row">
+        <span class="kernel-capability-dot" data-state="${escapeHtml(action.state)}" aria-hidden="true"></span>
+        <span class="kernel-capability-copy">
+          <span class="kernel-capability-title">${escapeHtml(action.title || action.id)}</span>
+          <span class="kernel-capability-meta">${escapeHtml(action.id)} \xB7 v${escapeHtml(action.version)}</span>
+          ${action.reason ? `<span class="kernel-capability-reason">${escapeHtml(action.reason)}</span>` : ""}
+          ${action.lastOutcome ? `<span class="kernel-capability-meta">${zh ? "\u6700\u8FD1\u8C03\u7528" : "Last call"} \xB7 ${escapeHtml(action.lastOutcome)}</span>` : ""}
+        </span>
+        <span class="kernel-capability-state" data-state="${escapeHtml(action.state)}">${escapeHtml(action.state)}</span>
+      </div>`
+      );
+      const diagnostics = capabilityStatus.diagnostics.slice(0, 4).map(
+        (item) => `<div class="kernel-capability-diagnostic">${escapeHtml(item.code)} \xB7 ${escapeHtml(item.message)}</div>`
+      );
+      return `<div class="wb-set-card kernel-capability-card">
+      <div class="kernel-capability-summary">
+        <span><b>${available}</b> ${zh ? "\u53EF\u7528" : "available"}</span>
+        <span><b>${degraded}</b> ${zh ? "\u964D\u7EA7" : "degraded"}</span>
+        <span><b>${currentEvidence}</b> ${zh ? "\u5F53\u524D\u8BC1\u636E" : "current evidence"}</span>
+        ${staleEvidence ? `<span><b>${staleEvidence}</b> ${zh ? "\u8FC7\u671F\u8BC1\u636E" : "stale evidence"}</span>` : ""}
+        <button type="button" class="wb-ghost-btn kernel-capability-refresh" data-page-action="capability-refresh">${zh ? "\u91CD\u65B0\u63A2\u6D4B" : "Re-probe"}</button>
+      </div>
+      ${actionRows.join("") || `<div class="kernel-capability-empty">${zh ? "\u6CA1\u6709\u5DF2\u6CE8\u518C\u7684\u8FDC\u7A0B Action\u3002" : "No remote Actions registered."}</div>`}
+      ${diagnostics.join("")}
+    </div>`;
+    }
+    function remoteActionFormMarkup(zh) {
+      return `<form id="kernel-remote-action-form" class="wb-form kernel-remote-action-form">
+      <label>${zh ? "Action \u7AEF\u70B9" : "Action endpoint"}<input id="kernel-remote-endpoint" type="url" value="${escapeHtml(remoteActionConfig?.endpoint ?? "")}" placeholder="https://actions.example.com/rpc"></label>
+      <label>Bearer Token<input id="kernel-remote-token" type="password" value="" placeholder="${remoteActionConfig?.token ? zh ? "\u5DF2\u4FDD\u5B58\uFF0C\u7559\u7A7A\u4FDD\u6301\u4E0D\u53D8" : "Saved \u2014 leave blank to keep" : "optional"}" autocomplete="off"></label>
+      <label>${zh ? "\u5141\u8BB8\u7684 Action ID\uFF08\u6BCF\u884C\u4E00\u4E2A\uFF09" : "Allowed Action IDs (one per line)"}<textarea id="kernel-remote-allowlist">${escapeHtml(remoteActionConfig?.allowedActionIds?.join("\n") ?? "")}</textarea></label>
+      <label>${zh ? "\u8D85\u65F6\uFF08\u6BEB\u79D2\uFF09" : "Timeout (ms)"}<input id="kernel-remote-timeout" type="number" min="1" value="${remoteActionConfig?.timeoutMs ?? 3e5}"></label>
+      <div class="wb-form-actions">
+        <button type="button" class="wb-btn wb-btn--primary" data-page-action="remote-save">${zh ? "\u4FDD\u5B58\u5E76\u63A2\u6D4B" : "Save and probe"}</button>
+        <button type="button" class="wb-ghost-btn" data-page-action="remote-clear">${zh ? "\u505C\u7528\u8FDC\u7A0B Action" : "Disable remote Actions"}</button>
+      </div>
+      <div class="wb-conn-url">${zh ? "\u53EA\u63A5\u53D7\u5177\u540D Action\uFF1B\u7AEF\u70B9\u4E0D\u4F1A\u83B7\u5F97\u901A\u7528 Shell\u3002" : "Only named Actions are exposed; the endpoint never receives a generic shell."}</div>
+    </form>`;
     }
     function connectionsPageMarkup() {
       const zh = pageConfig.language.startsWith("zh");
@@ -1675,6 +1794,23 @@
         connections
       };
     }
+    async function readRemoteActionConfig() {
+      const stored = await chrome.storage.local.get(REMOTE_ACTIONS_KEY);
+      const raw = stored[REMOTE_ACTIONS_KEY];
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return void 0;
+      const value = raw;
+      if (typeof value.endpoint !== "string" || !value.endpoint.trim()) {
+        return void 0;
+      }
+      return {
+        endpoint: value.endpoint,
+        ...typeof value.token === "string" && value.token ? { token: value.token } : {},
+        ...Array.isArray(value.allowedActionIds) ? {
+          allowedActionIds: value.allowedActionIds.map(String).filter(Boolean)
+        } : {},
+        ...typeof value.timeoutMs === "number" && value.timeoutMs > 0 ? { timeoutMs: value.timeoutMs } : {}
+      };
+    }
     async function writePageConfig(config = pageConfig) {
       await chrome.storage.local.set({ [CONFIG_KEY]: config });
       pageConfig = config;
@@ -1751,6 +1887,36 @@
         pageConfig.showReasoning = !pageConfig.showReasoning;
         await writePageConfig();
         renderPage();
+        return;
+      }
+      if (action === "capability-refresh") {
+        capabilityStatusError = "";
+        try {
+          capabilityStatus = await client.capabilityStatus(sessionId);
+        } catch (cause) {
+          capabilityStatusError = errorMessage(cause);
+        }
+        renderPage();
+        return;
+      }
+      if (action === "remote-save") {
+        await saveRemoteActionConfig();
+        return;
+      }
+      if (action === "remote-clear") {
+        await chrome.storage.local.remove(REMOTE_ACTIONS_KEY);
+        remoteActionConfig = void 0;
+        await reloadRuntimeForCurrentTab();
+        capabilityStatus = await client.capabilityStatus(sessionId);
+        renderPage();
+        return;
+      }
+      if (action === "capsule-export") {
+        await exportWorkspaceCapsule();
+        return;
+      }
+      if (action === "capsule-import") {
+        document.querySelector("#kernel-capsule-file")?.click();
         return;
       }
       if (action === "clear-history") {
@@ -1878,6 +2044,74 @@
       const models = (payload.data ?? []).map((item) => item.id).filter(Boolean);
       connectionTestMessage = models.length ? `Connection OK \xB7 ${models.length} models available` : "Connection OK";
       renderPage();
+    }
+    async function saveRemoteActionConfig() {
+      const endpoint = pageValue("#kernel-remote-endpoint").replace(/\/+$/, "");
+      const tokenInput = pageValue("#kernel-remote-token");
+      const allowedActionIds = pageValue("#kernel-remote-allowlist").split(/\n|,/).map((value) => value.trim()).filter(Boolean);
+      const timeoutMs = Number(pageValue("#kernel-remote-timeout"));
+      if (!/^https?:\/\/[^/]+/i.test(endpoint)) {
+        throw new Error(
+          pageConfig.language.startsWith("zh") ? "\u8FDC\u7A0B Action \u7AEF\u70B9\u5FC5\u987B\u662F HTTP(S) URL\u3002" : "Remote Action endpoint must be an HTTP(S) URL."
+        );
+      }
+      const retainedToken = remoteActionConfig?.endpoint === endpoint ? remoteActionConfig.token : void 0;
+      const config = {
+        endpoint,
+        ...tokenInput || retainedToken ? { token: tokenInput || retainedToken } : {},
+        ...allowedActionIds.length ? { allowedActionIds } : {},
+        ...Number.isFinite(timeoutMs) && timeoutMs > 0 ? { timeoutMs } : {}
+      };
+      await chrome.storage.local.set({ [REMOTE_ACTIONS_KEY]: config });
+      remoteActionConfig = config;
+      await reloadRuntimeForCurrentTab();
+      capabilityStatusError = "";
+      try {
+        capabilityStatus = await client.capabilityStatus(sessionId);
+      } catch (cause) {
+        capabilityStatusError = errorMessage(cause);
+      }
+      renderPage();
+    }
+    async function exportWorkspaceCapsule() {
+      const capsule = await client.serializeCapsule();
+      const bytes = Uint8Array.from(
+        atob(capsule.dataBase64),
+        (char) => char.charCodeAt(0)
+      );
+      const href = URL.createObjectURL(
+        new Blob([bytes], { type: "application/octet-stream" })
+      );
+      const anchor = document.createElement("a");
+      anchor.href = href;
+      anchor.download = `tinyai-workspace-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}.capsule`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(href), 1e3);
+    }
+    async function importWorkspaceCapsule(file) {
+      const zh = pageConfig.language.startsWith("zh");
+      if (!window.confirm(
+        zh ? "\u5BFC\u5165\u4F1A\u66FF\u6362\u5F53\u524D Workspace \u9879\u76EE\u5E76\u6062\u590D\u80F6\u56CA\u4E2D\u7684\u4F1A\u8BDD\u3002\u7EE7\u7EED\u5417\uFF1F" : "Importing replaces the current Workspace project and restores its sessions. Continue?"
+      )) {
+        return;
+      }
+      const dataBase64 = bytesToBase642(new Uint8Array(await file.arrayBuffer()));
+      const imported = await client.importCapsule(dataBase64);
+      pageError = "";
+      closePage();
+      await client.reloadRuntime();
+      if (imported.sessions.length && windowId !== void 0 && activeTabId) {
+        await activateSession(
+          () => client.bindTabSession(
+            windowId,
+            activeTabId,
+            imported.sessions[0],
+            activeGroupId
+          )
+        );
+      } else {
+        await reloadRuntimeForCurrentTab();
+      }
     }
     function pageValue(selector) {
       return document.querySelector(
@@ -2440,6 +2674,11 @@
   }
   function errorMessage(cause) {
     return cause instanceof Error ? cause.message : String(cause);
+  }
+  function bytesToBase642(value) {
+    let binary = "";
+    for (const byte of value) binary += String.fromCharCode(byte);
+    return btoa(binary);
   }
   function isMissingTabError(cause) {
     return cause instanceof Error && cause.name === "BROWSER_TAB_NOT_FOUND";

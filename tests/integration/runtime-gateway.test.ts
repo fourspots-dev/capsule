@@ -293,6 +293,193 @@ describe('RuntimeGateway', () => {
     port.disconnect();
     await gateway.dispose();
   });
+
+  it('transfers Capsules through serializable runtime requests', async () => {
+    const imported: Uint8Array[] = [];
+    const gateway = new RuntimeGateway(async () => ({
+      runtime: workspace(),
+      workspaceTransfer: {
+        async exportCapsule() {
+          throw new Error('unused');
+        },
+        async serializeCapsule() {
+          return new Uint8Array([1, 2, 3, 4]);
+        },
+        async importCapsule(capsule) {
+          imported.push(capsule);
+          return {
+            workspaceId: 'workspace_1',
+            generation: 7,
+            sessions: ['session_restored'],
+            artifacts: 2,
+            environmentChanged: false,
+            warnings: [],
+          };
+        },
+      },
+      async dispose() {},
+    }));
+    const port = new FakePort();
+    gateway.connect(port);
+
+    port.send({ type: 'serialize_capsule', requestId: 'capsule-export' });
+    await until(() =>
+      port.sent.some(
+        (message) =>
+          message.type === 'response' && message.requestId === 'capsule-export'
+      )
+    );
+    expect(
+      port.sent.find(
+        (message) =>
+          message.type === 'response' && message.requestId === 'capsule-export'
+      )
+    ).toMatchObject({
+      ok: true,
+      data: {
+        dataBase64: 'AQIDBA==',
+        bytes: 4,
+      },
+    });
+
+    port.send({
+      type: 'import_capsule',
+      dataBase64: 'BQY=',
+      requestId: 'capsule-import',
+    });
+    await until(() =>
+      port.sent.some(
+        (message) =>
+          message.type === 'response' && message.requestId === 'capsule-import'
+      )
+    );
+    expect([...imported[0]]).toEqual([5, 6]);
+    expect(
+      port.sent.find(
+        (message) =>
+          message.type === 'response' && message.requestId === 'capsule-import'
+      )
+    ).toMatchObject({
+      ok: true,
+      data: {
+        workspaceId: 'workspace_1',
+        generation: 7,
+        sessions: ['session_restored'],
+      },
+    });
+    port.disconnect();
+    await gateway.dispose();
+  });
+
+  it('converts Action probes and Evidence into a clone-safe status snapshot', async () => {
+    const gateway = new RuntimeGateway(async () => ({
+      runtime: workspace(),
+      capabilityStatus: async (sessionId) => ({
+        actions: {
+          available: [
+            {
+              sourceId: 'remote',
+              probe: { state: 'available', latencyMs: 3 },
+              descriptor: {
+                id: 'app.remote.check',
+                version: '1.0.0',
+                title: 'Remote check',
+                description: 'Check the app',
+                inputSchema: { type: 'object', properties: {} },
+                effects: ['execute'],
+                risk: 'dangerous',
+                probe: async () => ({ state: 'available' }),
+              },
+            },
+          ],
+          inspected: [
+            {
+              sourceId: 'remote',
+              probe: { state: 'degraded', reason: 'remote offline', latencyMs: 4 },
+              descriptor: {
+                id: 'app.remote.audit',
+                version: '1.0.0',
+                title: 'Remote audit',
+                description: 'Audit the app',
+                inputSchema: { type: 'object', properties: {} },
+                effects: ['read'],
+                risk: 'read',
+                probe: async () => ({ state: 'degraded' }),
+              },
+            },
+          ],
+          diagnostics: [
+            {
+              actionId: 'app.remote.audit',
+              sourceId: 'remote',
+              code: 'ACTION_PROBE_FAILED',
+              message: 'remote offline',
+            },
+          ],
+        },
+        evidence: [
+          {
+            id: 'evidence_1',
+            sessionId: sessionId ?? 'session_1',
+            taskId: 'task_1',
+            workspaceGeneration: 2,
+            environmentFingerprint: 'env',
+            action: { id: 'app.remote.check', version: '1.0.0' },
+            fileHashes: {},
+            status: 'current',
+            artifactIds: [],
+            createdAt: 10,
+          },
+        ],
+        actionOutcomes: {
+          'app.remote.audit': 'denied',
+        },
+      }),
+      async dispose() {},
+    }));
+    const port = new FakePort();
+    gateway.connect(port);
+    port.send({
+      type: 'get_capability_status',
+      sessionId: 'session_1',
+      requestId: 'capability-status',
+    });
+    await until(() =>
+      port.sent.some(
+        (message) =>
+          message.type === 'response' &&
+          message.requestId === 'capability-status'
+      )
+    );
+    const status = port.sent.find(
+      (message) =>
+        message.type === 'response' &&
+        message.requestId === 'capability-status'
+    );
+    expect(status).toMatchObject({
+      ok: true,
+      data: {
+        actions: [
+          {
+            id: 'app.remote.audit',
+            state: 'degraded',
+            reason: 'remote offline',
+            lastOutcome: 'denied',
+          },
+        ],
+        diagnostics: [{ code: 'ACTION_PROBE_FAILED' }],
+        evidence: [{ id: 'evidence_1', status: 'current' }],
+      },
+    });
+    if (!status || status.type !== 'response' || !status.ok) {
+      throw new Error('capability status missing');
+    }
+    expect(
+      (status.data as { actions: Array<Record<string, unknown>> }).actions[0]
+    ).not.toHaveProperty('descriptor');
+    port.disconnect();
+    await gateway.dispose();
+  });
 });
 
 describe('PortApprovalBroker', () => {

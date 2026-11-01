@@ -77,11 +77,21 @@ describe('REQ-TEST-001 Action to completion evidence integration', () => {
       store: evidenceStore,
       actionVersions: async () => version,
     });
+    const writeView = {
+      rows: [
+        {
+          kind: 'tool',
+          status: 'completed',
+          toolName: 'write_file',
+          completedAt: 5,
+        },
+      ],
+    };
     expect(
       await guard({
         sessionId: 'session',
         taskId: 'task',
-        view: { rows: [] },
+        view: writeView,
       })
     ).toEqual({ ok: true });
 
@@ -90,7 +100,7 @@ describe('REQ-TEST-001 Action to completion evidence integration', () => {
       await guard({
         sessionId: 'session',
         taskId: 'task',
-        view: { rows: [] },
+        view: writeView,
       })
     ).toMatchObject({
       ok: false,
@@ -110,7 +120,7 @@ describe('REQ-TEST-001 Action to completion evidence integration', () => {
       await guard({
         sessionId: 'session',
         taskId: 'task',
-        view: { rows: [] },
+        view: writeView,
       })
     ).toMatchObject({
       ok: false,

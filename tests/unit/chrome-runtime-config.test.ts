@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   parseKernelConfig,
+  parseRemoteActionConfig,
   type ChromeKeyValueStorage,
 } from '../../src/runtime/chrome-runtime';
 
@@ -46,5 +47,22 @@ describe('chrome kernel configuration', () => {
     expect(() =>
       parseKernelConfig({ connections: [{ id: 'x', 'base-url': 'https://x' }] })
     ).toThrowError(/requires both base URL and API key/);
+  });
+
+  it('normalizes Remote Action endpoint and allowlist configuration', () => {
+    expect(
+      parseRemoteActionConfig({
+        endpoint: 'https://actions.example/v1',
+        token: 'token',
+        allowedActionIds: ['app.test', 'app.build'],
+        timeoutMs: 1000,
+      })
+    ).toEqual({
+      endpoint: 'https://actions.example/v1',
+      token: 'token',
+      allowedActionIds: ['app.test', 'app.build'],
+      timeoutMs: 1000,
+    });
+    expect(parseRemoteActionConfig({ endpoint: 'file:///tmp/action' })).toBeUndefined();
   });
 });

@@ -243,6 +243,49 @@ describe('engineering requirement policy', () => {
     }
   });
 
+  it('requires design and test documents for accepted requirements', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tinyai-accepted-docs-'));
+    try {
+      await mkdir(join(root, 'policy'), { recursive: true });
+      await writeFile(join(root, 'package.json'), '{"version":"0.4.0"}');
+      await writeFile(
+        join(root, 'policy/adr-registry.json'),
+        '{"schemaVersion":1,"decisions":[]}'
+      );
+      await writeFile(
+        join(root, 'policy/requirement-registry.json'),
+        JSON.stringify({
+          schemaVersion: 1,
+          baselineCommit: 'abcdef1',
+          requirements: [
+            {
+              id: 'REQ-ENG-994',
+              title: 'Accepted docs requirement',
+              type: 'infrastructure',
+              priority: 'P0',
+              status: 'accepted',
+              designStatus: 'review',
+              implementationAuthorized: false,
+              targetVersion: '0.4.0',
+              design: 'docs/missing-design.html#scope',
+              testDesign: 'docs/missing-testing.html#trace',
+              acceptance: 'Accepted requirements still require documents.',
+              legacyAliases: [],
+            },
+          ],
+        })
+      );
+      expect(checkRequirementTraceability(root).errors).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('design does not exist'),
+          expect.stringContaining('testDesign does not exist'),
+        ])
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('blocks review and implementation for pending or proposed ADR triage', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tinyai-adr-review-gate-'));
     try {

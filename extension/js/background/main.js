@@ -1204,9 +1204,9 @@
       const result = await this.transport.request("tools/list", {}, signal);
       const tools = result?.tools;
       if (!Array.isArray(tools)) return [];
-      return tools.flatMap((tool5) => {
-        if (!tool5 || typeof tool5 !== "object") return [];
-        const value = tool5;
+      return tools.flatMap((tool6) => {
+        if (!tool6 || typeof tool6 !== "object") return [];
+        const value = tool6;
         if (typeof value.name !== "string") return [];
         return [
           {
@@ -1221,17 +1221,17 @@
       return this.transport.request("tools/call", { name, arguments: input }, signal);
     }
     async definitions() {
-      return (await this.tools()).map((tool5) => ({
-        name: `${this.prefix}__${sanitize(tool5.name)}`,
-        description: tool5.description,
-        parameters: tool5.inputSchema,
+      return (await this.tools()).map((tool6) => ({
+        name: `${this.prefix}__${sanitize(tool6.name)}`,
+        description: tool6.description,
+        parameters: tool6.inputSchema,
         risk: "write",
         effect: "network",
         capabilities: ["mcp:call"],
         executionMode: "sequential",
         replay: "never",
         timeoutMs: 12e4,
-        execute: async (input, invocation) => this.call(tool5.name, input, invocation.signal)
+        execute: async (input, invocation) => this.call(tool6.name, input, invocation.signal)
       }));
     }
     close() {
@@ -1651,13 +1651,13 @@
     }
     return { role: message.role, content: message.content };
   }
-  function toOpenAITool(tool5) {
+  function toOpenAITool(tool6) {
     return {
       type: "function",
       function: {
-        name: tool5.name,
-        description: tool5.description,
-        parameters: tool5.parameters
+        name: tool6.name,
+        description: tool6.description,
+        parameters: tool6.parameters
       }
     };
   }
@@ -2183,9 +2183,9 @@
     }
     return parsed;
   }
-  function validateNode(schema3, value, path) {
-    if (!schema3 || typeof schema3 !== "object" || Array.isArray(schema3)) return;
-    const rule = schema3;
+  function validateNode(schema4, value, path) {
+    if (!schema4 || typeof schema4 !== "object" || Array.isArray(schema4)) return;
+    const rule = schema4;
     if (Array.isArray(rule.enum) && !rule.enum.some((candidate) => Object.is(candidate, value))) {
       throw new AgentError("TOOL_SCHEMA_INVALID", `${path} must be one of the declared enum values`);
     }
@@ -2229,11 +2229,342 @@
       throw new AgentError("TOOL_SCHEMA_INVALID", `${path} must be a boolean`);
     }
   }
-  function validateToolInput(schema3, input) {
-    validateNode(schema3, input, "arguments");
+  function validateToolInput(schema4, input) {
+    validateNode(schema4, input, "arguments");
   }
-  function validateJsonValue(schema3, value, path = "value") {
-    validateNode(schema3, value, path);
+  function validateJsonValue(schema4, value, path = "value") {
+    validateNode(schema4, value, path);
+  }
+
+  // src/platform/host-action.ts
+  var HostActionRegistry = class {
+    providers = /* @__PURE__ */ new Map();
+    idempotent = /* @__PURE__ */ new Map();
+    register(sourceId, provider) {
+      const normalized = sourceId.trim();
+      if (!normalized) {
+        throw new AgentError("ACTION_SOURCE_INVALID", "Action source id is required");
+      }
+      if (this.providers.has(normalized)) {
+        throw new AgentError(
+          "ACTION_SOURCE_DUPLICATE",
+          `Action provider is already registered: ${normalized}`
+        );
+      }
+      this.providers.set(normalized, { sourceId: normalized, provider });
+      return () => {
+        if (this.providers.get(normalized)?.provider === provider) {
+          this.providers.delete(normalized);
+        }
+      };
+    }
+    async discover(signal) {
+      throwIfAborted(signal);
+      const available = [];
+      const inspected = [];
+      const diagnostics = [];
+      const seen = /* @__PURE__ */ new Map();
+      for (const registration of [...this.providers.values()].sort(
+        (a, b) => a.sourceId.localeCompare(b.sourceId)
+      )) {
+        throwIfAborted(signal);
+        let descriptors;
+        try {
+          descriptors = await registration.provider.describe(signal);
+        } catch (error2) {
+          if (signal?.aborted) throw abortError();
+          diagnostics.push({
+            actionId: "*",
+            sourceId: registration.sourceId,
+            code: "ACTION_PROBE_FAILED",
+            message: `Provider ${registration.sourceId} discovery failed: ${errorMessage(error2)}`
+          });
+          continue;
+        }
+        const localIds = /* @__PURE__ */ new Set();
+        for (const descriptor of descriptors) {
+          throwIfAborted(signal);
+          if (!isValidActionId(descriptor.id)) {
+            diagnostics.push({
+              actionId: descriptor.id,
+              sourceId: registration.sourceId,
+              code: "ACTION_ID_INVALID",
+              message: `Invalid action id: ${String(descriptor.id)}`
+            });
+            continue;
+          }
+          if (localIds.has(descriptor.id) || seen.has(descriptor.id)) {
+            diagnostics.push({
+              actionId: descriptor.id,
+              sourceId: registration.sourceId,
+              code: "ACTION_DUPLICATE",
+              message: `Action ${descriptor.id} is declared more than once`
+            });
+            continue;
+          }
+          localIds.add(descriptor.id);
+          seen.set(descriptor.id, registration.sourceId);
+          if (!descriptor.version.trim()) {
+            diagnostics.push({
+              actionId: descriptor.id,
+              sourceId: registration.sourceId,
+              code: "ACTION_VERSION_INVALID",
+              message: `Action ${descriptor.id} must declare a version`
+            });
+            continue;
+          }
+          if (!isObjectSchema(descriptor.inputSchema)) {
+            diagnostics.push({
+              actionId: descriptor.id,
+              sourceId: registration.sourceId,
+              code: "ACTION_SCHEMA_INVALID",
+              message: `Action ${descriptor.id} inputSchema must be an object schema`
+            });
+            continue;
+          }
+          if (descriptor.outputSchema !== void 0 && !isObjectSchema(descriptor.outputSchema)) {
+            diagnostics.push({
+              actionId: descriptor.id,
+              sourceId: registration.sourceId,
+              code: "ACTION_SCHEMA_INVALID",
+              message: `Action ${descriptor.id} outputSchema must be an object schema`
+            });
+            continue;
+          }
+          if (!Array.isArray(descriptor.effects) || descriptor.effects.length === 0 || descriptor.effects.some(
+            (effect) => !actionEffects.has(effect)
+          )) {
+            diagnostics.push({
+              actionId: descriptor.id,
+              sourceId: registration.sourceId,
+              code: "ACTION_EFFECT_INVALID",
+              message: `Action ${descriptor.id} must declare valid effects`
+            });
+            continue;
+          }
+          if (!actionRisks.has(descriptor.risk)) {
+            diagnostics.push({
+              actionId: descriptor.id,
+              sourceId: registration.sourceId,
+              code: "ACTION_RISK_INVALID",
+              message: `Action ${descriptor.id} has invalid risk ${descriptor.risk}`
+            });
+            continue;
+          }
+          if (descriptor.workspaceBinding !== void 0 && !workspaceBindings.has(descriptor.workspaceBinding)) {
+            diagnostics.push({
+              actionId: descriptor.id,
+              sourceId: registration.sourceId,
+              code: "ACTION_WORKSPACE_BINDING_INVALID",
+              message: `Action ${descriptor.id} has invalid workspace binding`
+            });
+            continue;
+          }
+          if (descriptor.idempotency !== void 0 && !idempotencyModes.has(descriptor.idempotency)) {
+            diagnostics.push({
+              actionId: descriptor.id,
+              sourceId: registration.sourceId,
+              code: "ACTION_IDEMPOTENCY_INVALID",
+              message: `Action ${descriptor.id} has invalid idempotency policy`
+            });
+            continue;
+          }
+          let probe;
+          const started = Date.now();
+          try {
+            probe = await descriptor.probe();
+          } catch (error2) {
+            if (signal?.aborted) throw abortError();
+            probe = {
+              state: "unavailable",
+              reason: errorMessage(error2),
+              latencyMs: Date.now() - started
+            };
+          }
+          const observed = {
+            descriptor,
+            sourceId: registration.sourceId,
+            probe: { ...probe, latencyMs: probe.latencyMs ?? Date.now() - started }
+          };
+          inspected.push(observed);
+          if (probe.state !== "available") {
+            diagnostics.push({
+              actionId: descriptor.id,
+              sourceId: registration.sourceId,
+              code: "ACTION_PROBE_FAILED",
+              message: probe.reason ?? `Action ${descriptor.id} probe is ${probe.state}`
+            });
+            continue;
+          }
+          available.push({
+            ...observed
+          });
+        }
+      }
+      return {
+        available: available.sort(
+          (a, b) => a.descriptor.id.localeCompare(b.descriptor.id)
+        ),
+        inspected: inspected.sort(
+          (a, b) => a.descriptor.id.localeCompare(b.descriptor.id)
+        ),
+        diagnostics
+      };
+    }
+    async invoke(actionId, input, context) {
+      throwIfAborted(context.signal);
+      const started = Date.now();
+      const report = await this.discover(context.signal);
+      const action = report.available.find(
+        (candidate) => candidate.descriptor.id === actionId
+      );
+      if (!action) {
+        throw new AgentError(
+          "ACTION_UNAVAILABLE",
+          `Application action is unavailable: ${actionId}`
+        );
+      }
+      const registration = this.providers.get(action.sourceId);
+      if (!registration) {
+        throw new AgentError(
+          "ACTION_UNAVAILABLE",
+          `Application action provider disappeared: ${action.sourceId}`
+        );
+      }
+      try {
+        validateToolInput(
+          action.descriptor.inputSchema,
+          input
+        );
+      } catch (error2) {
+        throw new AgentError(
+          "ACTION_INPUT_INVALID",
+          error2 instanceof Error ? error2.message : String(error2)
+        );
+      }
+      try {
+        const cacheKey = action.descriptor.idempotency === "required" ? idempotencyCacheKey(action, input, context) : void 0;
+        let result;
+        if (cacheKey) {
+          const existing = this.idempotent.get(cacheKey);
+          if (existing) {
+            return { ...await existing, replayed: true };
+          }
+          const invocation = registration.provider.invoke(
+            actionId,
+            input,
+            { ...context, idempotencyKey: cacheKey }
+          );
+          const promise = invocation.then((value) => {
+            const normalized2 = isActionResult(value) ? value : { value };
+            return {
+              ...normalized2,
+              status: normalized2.status ?? "succeeded",
+              durationMs: normalized2.durationMs ?? Date.now() - started
+            };
+          });
+          this.idempotent.set(cacheKey, promise);
+          try {
+            result = await promise;
+          } catch (error2) {
+            this.idempotent.delete(cacheKey);
+            throw error2;
+          }
+        } else {
+          result = await registration.provider.invoke(
+            actionId,
+            input,
+            context
+          );
+        }
+        throwIfAborted(context.signal);
+        const normalized = isActionResult(result) ? result : { value: result };
+        return {
+          ...normalized,
+          status: normalized.status ?? "succeeded",
+          durationMs: normalized.durationMs ?? Date.now() - started
+        };
+      } catch (error2) {
+        if (context.signal.aborted) {
+          throw new AgentError(
+            "ACTION_CANCELLED",
+            `Application Action was cancelled: ${actionId}`
+          );
+        }
+        if (error2 instanceof AgentError) throw error2;
+        throw new AgentError(
+          "ACTION_PROVIDER_CRASHED",
+          error2 instanceof Error ? error2.message : String(error2),
+          { details: { actionId, sourceId: action.sourceId } }
+        );
+      }
+    }
+    async list() {
+      return (await this.discover()).available;
+    }
+    async cancel(requestId) {
+      for (const provider of this.providers.values()) {
+        await provider.provider.cancel?.(requestId);
+      }
+    }
+    async dispose() {
+      const providers = [...this.providers.values()];
+      this.providers.clear();
+      this.idempotent.clear();
+      await Promise.allSettled(
+        providers.map((provider) => provider.provider.dispose?.())
+      );
+    }
+  };
+  function toolNameForAction(actionId) {
+    return `action_${actionId.replace(/[^A-Za-z0-9_]/g, "_")}`;
+  }
+  function isValidActionId(value) {
+    return /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+$/.test(value);
+  }
+  function isObjectSchema(value) {
+    return Boolean(
+      value && typeof value === "object" && !Array.isArray(value) && value.type === "object"
+    );
+  }
+  function isActionResult(value) {
+    return Boolean(
+      value && typeof value === "object" && !Array.isArray(value) && "value" in value
+    );
+  }
+  var actionEffects = /* @__PURE__ */ new Set([
+    "read",
+    "write",
+    "execute",
+    "network"
+  ]);
+  var actionRisks = /* @__PURE__ */ new Set(["read", "write", "dangerous"]);
+  var workspaceBindings = /* @__PURE__ */ new Set(["root", "fork", "remote"]);
+  var idempotencyModes = /* @__PURE__ */ new Set(["safe", "required", "never"]);
+  function idempotencyCacheKey(action, input, context) {
+    return [
+      action.sourceId,
+      action.descriptor.id,
+      action.descriptor.version,
+      context.sessionId,
+      context.taskId,
+      context.workspaceId ?? "",
+      context.workspaceGeneration ?? "",
+      context.environmentFingerprint ?? "",
+      context.idempotencyKey ?? "",
+      JSON.stringify(input)
+    ].join(":");
+  }
+  function throwIfAborted(signal) {
+    if (signal?.aborted) throw abortError();
+  }
+  function abortError() {
+    const error2 = new Error("Action discovery was cancelled");
+    error2.name = "AbortError";
+    return error2;
+  }
+  function errorMessage(error2) {
+    return error2 instanceof Error ? error2.message : String(error2);
   }
 
   // src/host/profile-matrix.ts
@@ -2430,6 +2761,492 @@
     }
   }
 
+  // src/adapters/remote-action-provider.ts
+  var RemoteActionProvider = class {
+    constructor(options) {
+      this.options = options;
+      this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
+      this.timeoutMs = options.timeoutMs ?? 3e5;
+      this.allowedActionIds = options.allowedActionIds ? new Set(options.allowedActionIds) : void 0;
+    }
+    options;
+    fetchImpl;
+    timeoutMs;
+    allowedActionIds;
+    async describe(signal) {
+      const response = await this.request(
+        { type: "describe" },
+        signal
+      );
+      if (!Array.isArray(response.actions)) {
+        throw new AgentError(
+          "REMOTE_ACTION_RESPONSE_INVALID",
+          "Remote Action describe response is missing actions"
+        );
+      }
+      return response.actions.map((action) => remoteDescriptor(validateDescriptor(action))).filter(
+        (action) => !this.allowedActionIds || this.allowedActionIds.has(action.id)
+      );
+    }
+    async invoke(actionId, input, context) {
+      if (this.allowedActionIds && !this.allowedActionIds.has(actionId)) {
+        throw new AgentError(
+          "ACTION_UNAVAILABLE",
+          `Remote Action is not allowlisted: ${actionId}`
+        );
+      }
+      const response = await this.request(
+        {
+          type: "invoke",
+          actionId,
+          input,
+          context: {
+            sessionId: context.sessionId,
+            taskId: context.taskId,
+            requestId: context.requestId,
+            workspaceId: context.workspaceId,
+            workspaceGeneration: context.workspaceGeneration,
+            environmentFingerprint: context.environmentFingerprint
+          }
+        },
+        context.signal
+      );
+      if (!isRemoteResult(response.result)) {
+        throw new AgentError(
+          "ACTION_RESULT_INVALID",
+          `Remote Action ${actionId} returned an invalid result`
+        );
+      }
+      return response.result;
+    }
+    async cancel(requestId) {
+      await this.request({ type: "cancel", requestId });
+    }
+    async request(payload, signal) {
+      if (signal?.aborted) {
+        throw new AgentError("ACTION_CANCELLED", "Remote Action was cancelled");
+      }
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+      const abort = () => controller.abort();
+      signal?.addEventListener("abort", abort, { once: true });
+      try {
+        const response = await this.fetchImpl(this.options.endpoint, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...this.options.token ? { authorization: `Bearer ${this.options.token}` } : {},
+            ...this.options.headers
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal
+        });
+        if (!response.ok) {
+          throw new AgentError(
+            "REMOTE_ACTION_HTTP_ERROR",
+            `Remote Action endpoint returned HTTP ${response.status}`
+          );
+        }
+        const body = await response.json();
+        if (signal?.aborted) {
+          throw new AgentError("ACTION_CANCELLED", "Remote Action was cancelled");
+        }
+        if (controller.signal.aborted) {
+          throw new AgentError("ACTION_TIMEOUT", "Remote Action timed out");
+        }
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          throw new AgentError(
+            "REMOTE_ACTION_RESPONSE_INVALID",
+            "Remote Action response must be an object"
+          );
+        }
+        return body;
+      } catch (error2) {
+        if (signal?.aborted) {
+          throw new AgentError("ACTION_CANCELLED", "Remote Action was cancelled");
+        }
+        if (controller.signal.aborted) {
+          throw new AgentError("ACTION_TIMEOUT", "Remote Action timed out");
+        }
+        throw error2;
+      } finally {
+        clearTimeout(timeout);
+        signal?.removeEventListener("abort", abort);
+      }
+    }
+  };
+  function validateDescriptor(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value) || typeof value.id !== "string" || typeof value.version !== "string" || typeof value.title !== "string" || typeof value.description !== "string") {
+      throw new AgentError(
+        "REMOTE_ACTION_RESPONSE_INVALID",
+        "Remote Action descriptor is invalid"
+      );
+    }
+    return value;
+  }
+  function remoteDescriptor(value) {
+    return {
+      id: value.id,
+      version: value.version,
+      title: value.title,
+      description: value.description,
+      inputSchema: value.inputSchema,
+      ...value.outputSchema ? { outputSchema: value.outputSchema } : {},
+      effects: value.effects,
+      risk: value.risk,
+      ...value.workspaceBinding ? { workspaceBinding: value.workspaceBinding } : {},
+      ...value.timeoutMs === void 0 ? {} : { timeoutMs: value.timeoutMs },
+      ...value.limitations ? { limitations: value.limitations } : {},
+      probe: async () => value.probe ?? { state: "available" }
+    };
+  }
+  function isRemoteResult(value) {
+    return Boolean(
+      value && typeof value === "object" && !Array.isArray(value) && ["succeeded", "failed", "cancelled"].includes(
+        value.status
+      ) && "value" in value
+    );
+  }
+
+  // src/adapters/lsp-action-code-intelligence.ts
+  var LspActionCodeIntelligence = class {
+    constructor(registry, options = {}) {
+      this.registry = registry;
+      this.actionId = options.actionId ?? "code.lsp.query";
+      this.sessionId = options.sessionId ?? "code-intelligence";
+      this.taskId = options.taskId ?? "code-intelligence";
+    }
+    registry;
+    actionId;
+    sessionId;
+    taskId;
+    async capabilities() {
+      const action = (await this.registry.list()).find(
+        (candidate) => candidate.descriptor.id === this.actionId
+      );
+      return {
+        provider: "lsp",
+        diagnostics: Boolean(action),
+        symbols: Boolean(action),
+        definitions: Boolean(action),
+        references: Boolean(action),
+        codeActions: Boolean(action),
+        limitations: action ? [] : [`Action ${this.actionId} is unavailable; use text fallback`]
+      };
+    }
+    async diagnostics(paths, signal) {
+      return parseArray(
+        await this.query({ operation: "diagnostics", paths: [...paths] }, signal),
+        "diagnostics"
+      );
+    }
+    async symbols(query, signal) {
+      return parseArray(
+        await this.query({ operation: "symbols", query }, signal),
+        "symbols"
+      );
+    }
+    async definition(symbol, signal) {
+      return parseArray(
+        await this.query({ operation: "definition", symbol }, signal),
+        "locations"
+      );
+    }
+    async references(symbol, signal) {
+      return parseArray(
+        await this.query({ operation: "references", symbol }, signal),
+        "locations"
+      );
+    }
+    async codeActions(path, range, signal) {
+      return parseArray(
+        await this.query(
+          { operation: "codeActions", path, range },
+          signal
+        ),
+        "actions"
+      );
+    }
+    async query(input, signal = new AbortController().signal) {
+      const available = (await this.registry.list()).some(
+        (action) => action.descriptor.id === this.actionId
+      );
+      if (!available) {
+        throw new AgentError(
+          "CODE_INTELLIGENCE_UNAVAILABLE",
+          `LSP Action is unavailable: ${this.actionId}`
+        );
+      }
+      return (await this.registry.invoke(this.actionId, input, {
+        sessionId: this.sessionId,
+        taskId: this.taskId,
+        signal
+      })).value;
+    }
+  };
+  function parseArray(value, key) {
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const candidate = value[key];
+      if (Array.isArray(candidate)) return candidate;
+    }
+    throw new AgentError(
+      "CODE_INTELLIGENCE_RESULT_INVALID",
+      `LSP Action result must contain ${key}`
+    );
+  }
+
+  // src/adapters/host-action-tools.ts
+  async function createHostActionTools(registry, options = {}) {
+    const actions = (await registry.discover(options.signal)).available;
+    const discovery = {
+      name: "list_host_actions",
+      description: "List application-provided actions currently available from the host. Actions are named capabilities, not a generic shell.",
+      parameters: {
+        type: "object",
+        properties: {}
+      },
+      outputSchema: {
+        type: "object",
+        properties: {
+          actions: { type: "array", items: { type: "object" } }
+        }
+      },
+      risk: "read",
+      effect: "read",
+      capabilities: ["action:discover"],
+      executionMode: "parallel",
+      replay: "safe",
+      execute: async () => ({
+        actions: actions.map(describeAction)
+      })
+    };
+    return [
+      discovery,
+      ...actions.map(
+        (action) => actionTool(registry, action, options, /* @__PURE__ */ new Map())
+      )
+    ];
+  }
+  function actionTool(registry, action, options, approvalBindings) {
+    const descriptor = action.descriptor;
+    const toolName = toolNameForAction(descriptor.id);
+    return {
+      name: toolName,
+      description: `${descriptor.title}
+${descriptor.description}`,
+      parameters: descriptor.inputSchema,
+      ...descriptor.outputSchema ? {
+        outputSchema: descriptor.outputSchema
+      } : {},
+      risk: descriptor.risk,
+      effect: effectFor(descriptor.effects),
+      capabilities: [
+        "action:invoke",
+        `action:${descriptor.id}`,
+        ...descriptor.effects.map((effect) => `action-effect:${effect}`)
+      ],
+      executionMode: descriptor.effects.every((effect) => effect === "read") ? "parallel" : "sequential",
+      replay: descriptor.effects.every((effect) => effect === "read") ? "safe" : "never",
+      ...descriptor.timeoutMs === void 0 ? {} : { timeoutMs: descriptor.timeoutMs },
+      approvalContext: async (_input, invocation) => {
+        const binding = await resolveBinding(options, invocation, descriptor);
+        approvalBindings.set(invocation.call.id, binding);
+        return {
+          actionId: descriptor.id,
+          actionVersion: descriptor.version,
+          effects: [...descriptor.effects],
+          risk: descriptor.risk,
+          ...bindingContext(binding)
+        };
+      },
+      execute: async (input, invocation) => {
+        const binding = await resolveBinding(options, invocation, descriptor);
+        const result = await runAction(
+          registry,
+          action,
+          binding,
+          input,
+          invocation
+        );
+        assertActionSuccess(result, descriptor.id);
+        return result.value;
+      },
+      executeDetailed: async (input, invocation) => {
+        const approved = approvalBindings.get(invocation.call.id);
+        const current = await resolveBinding(options, invocation, descriptor);
+        if (approved && descriptor.risk !== "read" && bindingDigest(approved) !== bindingDigest(current)) {
+          approvalBindings.delete(invocation.call.id);
+          throw new AgentError(
+            "ACTION_APPROVAL_STALE",
+            `Workspace or environment changed after approval: ${descriptor.id}`
+          );
+        }
+        approvalBindings.delete(invocation.call.id);
+        const executionBinding = approved ?? current;
+        const result = await runAction(
+          registry,
+          action,
+          executionBinding,
+          input,
+          invocation
+        );
+        const evidence = descriptor.test && options.testEvidence ? await options.testEvidence.recordActionTest({
+          sessionId: invocation.sessionId,
+          taskId: invocation.taskId,
+          action: {
+            id: descriptor.id,
+            version: descriptor.version
+          },
+          runner: descriptor.test.runner,
+          result,
+          ...executionBinding.workspaceGeneration === void 0 ? {} : {
+            workspaceGeneration: executionBinding.workspaceGeneration
+          },
+          ...executionBinding.evidenceVfs ? { vfs: executionBinding.evidenceVfs } : {},
+          ...executionBinding.environmentFingerprint ? {
+            environmentFingerprint: executionBinding.environmentFingerprint
+          } : {}
+        }) : void 0;
+        const attachmentArtifacts = evidence ? [] : result.artifacts ?? [];
+        const artifactIds = evidence ? evidence.artifactIds : result.artifactIds ?? [];
+        return {
+          value: result.value,
+          metadata: {
+            status: result.status,
+            action: {
+              id: descriptor.id,
+              version: descriptor.version,
+              sourceId: action.sourceId
+            },
+            ...result.durationMs === void 0 ? {} : { durationMs: result.durationMs },
+            ...result.exitCode === void 0 ? {} : { exitCode: result.exitCode },
+            ...result.truncated === void 0 ? {} : { truncated: result.truncated },
+            ...result.replayed === void 0 ? {} : { replayed: result.replayed },
+            ...artifactIds.length ? { artifactIds: [...artifactIds] } : {},
+            ...evidence ? {
+              evidence: {
+                id: evidence.id,
+                status: evidence.status
+              }
+            } : {}
+          },
+          ...attachmentArtifacts.length ? {
+            attachments: attachmentArtifacts.map((artifact) => ({
+              name: artifact.name,
+              mimeType: artifact.mimeType,
+              kind: artifact.kind,
+              data: artifact.data
+            }))
+          } : {}
+        };
+      }
+    };
+  }
+  async function runAction(registry, action, binding, input, invocation) {
+    const descriptor = action.descriptor;
+    const context = {
+      sessionId: invocation.sessionId,
+      taskId: invocation.taskId,
+      requestId: invocation.call.id,
+      idempotencyKey: stableDigest(
+        JSON.stringify({
+          actionId: descriptor.id,
+          version: descriptor.version,
+          input,
+          workspaceId: binding.workspaceId,
+          workspaceGeneration: binding.workspaceGeneration,
+          environmentFingerprint: binding.environmentFingerprint
+        })
+      ),
+      ...binding.workspaceId ? { workspaceId: binding.workspaceId } : {},
+      ...binding.workspaceGeneration === void 0 ? {} : { workspaceGeneration: binding.workspaceGeneration },
+      ...binding.workspacePath ? { workspacePath: binding.workspacePath } : {},
+      ...binding.environmentFingerprint ? { environmentFingerprint: binding.environmentFingerprint } : {},
+      signal: invocation.signal
+    };
+    const result = await registry.invoke(descriptor.id, input, context);
+    return result;
+  }
+  function assertActionSuccess(result, actionId) {
+    if (result.status === "failed") {
+      throw new AgentError(
+        "ACTION_FAILED",
+        `Application Action failed: ${actionId}`,
+        {
+          details: {
+            actionId,
+            result: result.value,
+            ...result.exitCode === void 0 ? {} : { exitCode: result.exitCode }
+          }
+        }
+      );
+    }
+    if (result.status === "cancelled") {
+      throw new AgentError(
+        "ACTION_CANCELLED",
+        `Application Action was cancelled: ${actionId}`
+      );
+    }
+  }
+  async function resolveWorkspaceGeneration(value) {
+    return typeof value === "function" ? value() : value;
+  }
+  async function resolveBinding(options, invocation, descriptor) {
+    const dynamic = await options.bindingForInvocation?.(invocation, descriptor);
+    const workspaceGeneration = dynamic?.workspaceGeneration ?? (options.workspaceGeneration === void 0 ? void 0 : await resolveWorkspaceGeneration(options.workspaceGeneration));
+    return {
+      ...dynamic?.workspacePath ?? options.workspacePath ? {
+        workspacePath: dynamic?.workspacePath ?? options.workspacePath
+      } : {},
+      ...dynamic?.workspaceId ?? options.workspaceId ? { workspaceId: dynamic?.workspaceId ?? options.workspaceId } : {},
+      ...workspaceGeneration === void 0 ? {} : { workspaceGeneration },
+      ...dynamic?.environmentFingerprint ?? options.environmentFingerprint ? {
+        environmentFingerprint: dynamic?.environmentFingerprint ?? options.environmentFingerprint
+      } : {},
+      ...dynamic?.evidenceVfs ? { evidenceVfs: dynamic.evidenceVfs } : {}
+    };
+  }
+  function bindingDigest(binding) {
+    return stableDigest(JSON.stringify(binding));
+  }
+  function bindingContext(binding) {
+    return {
+      ...binding.workspacePath ? { workspacePath: binding.workspacePath } : {},
+      ...binding.workspaceId ? { workspaceId: binding.workspaceId } : {},
+      ...binding.workspaceGeneration === void 0 ? {} : { workspaceGeneration: binding.workspaceGeneration },
+      ...binding.environmentFingerprint ? { environmentFingerprint: binding.environmentFingerprint } : {}
+    };
+  }
+  function stableDigest(value) {
+    let first = 2166136261;
+    let second = 2654435769;
+    for (let index = 0; index < value.length; index += 1) {
+      const code = value.charCodeAt(index);
+      first = Math.imul(first ^ code, 16777619);
+      second = Math.imul(second ^ code, 2246822507);
+    }
+    return `${(first >>> 0).toString(16)}${(second >>> 0).toString(16)}`;
+  }
+  function describeAction(action) {
+    return {
+      id: action.descriptor.id,
+      version: action.descriptor.version,
+      title: action.descriptor.title,
+      description: action.descriptor.description,
+      effects: [...action.descriptor.effects],
+      risk: action.descriptor.risk,
+      state: action.probe.state,
+      ...action.descriptor.limitations ? { limitations: [...action.descriptor.limitations] } : {}
+    };
+  }
+  function effectFor(effects) {
+    if (effects.includes("network")) return "network";
+    if (effects.includes("execute")) return "execute";
+    if (effects.includes("write")) return "write";
+    return "read";
+  }
+
   // src/evidence/test-discovery.ts
   async function discoverTests(vfs) {
     const files = await vfs.list("", { recursive: true });
@@ -2458,6 +3275,393 @@
     }
     return candidates.sort(
       (left, right) => left.path.localeCompare(right.path)
+    );
+  }
+
+  // src/core/test-report.ts
+  function parseTestReport(value, fallbackRunner) {
+    const candidate = findCandidate(value);
+    if (candidate === void 0) {
+      return {
+        error: `No structured TestReport was found for ${fallbackRunner}`
+      };
+    }
+    const parsed = typeof candidate === "string" ? parseReportString(candidate, fallbackRunner) : parseReportObject(candidate, fallbackRunner);
+    if (!parsed.report) return parsed;
+    const { report } = parsed;
+    if (report.total < 0 || report.passed < 0 || report.failed < 0 || report.skipped < 0) {
+      return { error: "TestReport counts must be non-negative" };
+    }
+    if (report.total !== report.passed + report.failed + report.skipped) {
+      return {
+        error: `TestReport count mismatch: total=${report.total}, passed=${report.passed}, failed=${report.failed}, skipped=${report.skipped}`
+      };
+    }
+    if (report.total === 0) {
+      return { error: "Zero tests do not prove completion" };
+    }
+    return { report };
+  }
+  function findCandidate(value) {
+    if (value === void 0) return void 0;
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return void 0;
+    if (!value || typeof value !== "object") return void 0;
+    for (const key of ["testReport", "test_report", "report", "junit"]) {
+      const candidate = value[key];
+      if (candidate !== void 0) return candidate;
+    }
+    if (typeof value.total === "number" || typeof value.tests === "number") {
+      return value;
+    }
+    for (const key of ["stdout", "stderr", "output"]) {
+      const candidate = value[key];
+      if (typeof candidate === "string" && candidate.trim()) return candidate;
+    }
+    return void 0;
+  }
+  function parseReportString(value, runner) {
+    const trimmed = value.trim();
+    if (!trimmed) return { error: "Test output is empty" };
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return parseReportObject(parsed, runner);
+      } catch {
+        return { error: "Test output contains malformed JSON" };
+      }
+    }
+    if (trimmed.includes("<testsuite") || trimmed.includes("<testsuites")) {
+      return parseJunit(trimmed, runner);
+    }
+    return { error: "Test output has no supported JSON or JUnit report" };
+  }
+  function parseReportObject(value, runner) {
+    if (Array.isArray(value) || !value || typeof value !== "object") {
+      return { error: "TestReport must be an object" };
+    }
+    const nested = value.testReport ?? value.test_report ?? value.report;
+    if (nested !== void 0 && nested !== value) {
+      return parseReportObject(nested, runner);
+    }
+    const total = numberValue(value.total ?? value.tests);
+    if (total === void 0) {
+      return { error: "TestReport is missing total/tests" };
+    }
+    const failed2 = numberValue(value.failed ?? value.failuresCount) ?? 0;
+    const skipped = numberValue(value.skipped ?? value.pending) ?? 0;
+    const passed = numberValue(value.passed) ?? Math.max(0, total - failed2 - skipped);
+    const failures = Array.isArray(value.failures) ? value.failures.flatMap((failure) => {
+      if (!failure || typeof failure !== "object" || Array.isArray(failure)) {
+        return [];
+      }
+      const name = typeof failure.name === "string" ? failure.name : typeof failure.test === "string" ? failure.test : "failed test";
+      return [
+        {
+          name,
+          ...typeof failure.message === "string" ? { message: failure.message } : {},
+          ...Array.isArray(failure.artifactIds) ? { artifactIds: failure.artifactIds.map(String) } : {}
+        }
+      ];
+    }) : [];
+    return {
+      report: {
+        schemaVersion: 1,
+        runner: typeof value.runner === "string" && value.runner.trim() ? value.runner : runner,
+        total,
+        passed,
+        failed: failed2,
+        skipped,
+        failures,
+        ...numberValue(value.startedAt) === void 0 ? {} : { startedAt: numberValue(value.startedAt) },
+        ...numberValue(value.completedAt) === void 0 ? {} : { completedAt: numberValue(value.completedAt) }
+      }
+    };
+  }
+  function parseJunit(value, runner) {
+    const suiteAttributes = readAttributes(
+      value.match(/<testsuite\b([^>]*)>/)?.[1] ?? value.match(/<testsuites\b([^>]*)>/)?.[1] ?? ""
+    );
+    const total = Number(suiteAttributes.tests ?? 0);
+    const failed2 = Number(suiteAttributes.failures ?? 0);
+    const skipped = Number(suiteAttributes.skipped ?? 0) + Number(suiteAttributes.disabled ?? 0);
+    const errors = Number(suiteAttributes.errors ?? 0);
+    const failures = [
+      ...value.matchAll(
+        /<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g
+      )
+    ].filter((match) => /<failure\b|<error\b/.test(match[2] ?? "")).map((match) => ({
+      name: readAttributes(match[1]).name ?? readAttributes(match[1]).classname ?? "failed test",
+      ...(match[2] ?? "").match(
+        /<(?:failure|error)\b[^>]*message="([^"]*)"/
+      )?.[1] ? {
+        message: decodeXml(
+          (match[2] ?? "").match(
+            /<(?:failure|error)\b[^>]*message="([^"]*)"/
+          )[1]
+        )
+      } : {}
+    }));
+    return {
+      report: {
+        schemaVersion: 1,
+        runner,
+        total,
+        passed: Math.max(0, total - failed2 - errors - skipped),
+        failed: failed2 + errors,
+        skipped,
+        failures
+      }
+    };
+  }
+  function readAttributes(value) {
+    const result = {};
+    for (const match of value.matchAll(/([A-Za-z_:][\w:.-]*)="([^"]*)"/g)) {
+      result[match[1]] = decodeXml(match[2]);
+    }
+    return result;
+  }
+  function decodeXml(value) {
+    return value.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", '"').replaceAll("&apos;", "'").replaceAll("&amp;", "&");
+  }
+  function numberValue(value) {
+    return typeof value === "number" && Number.isFinite(value) ? value : void 0;
+  }
+
+  // src/evidence/test-evidence.ts
+  var TestEvidenceService = class {
+    constructor(options) {
+      this.options = options;
+      this.now = options.now ?? (() => Date.now());
+      this.newId = options.newId ?? (() => typeof crypto !== "undefined" && crypto.randomUUID ? `evidence_${crypto.randomUUID()}` : `evidence_${this.now()}_${Math.random().toString(36).slice(2)}`);
+    }
+    options;
+    now;
+    newId;
+    async recordActionTest(input) {
+      const artifactIds = [...input.result.artifactIds ?? []];
+      if (input.result.artifacts?.length) {
+        if (!this.options.artifacts) {
+          throw new AgentError(
+            "EVIDENCE_ARTIFACT_STORE_UNAVAILABLE",
+            "Test Action returned artifacts but no ArtifactStore is configured"
+          );
+        }
+        for (const attachment of input.result.artifacts) {
+          const ref = await this.options.artifacts.put({
+            ...attachment,
+            sessionId: input.sessionId,
+            taskId: input.taskId
+          });
+          artifactIds.push(ref.artifactId);
+        }
+      }
+      const parsed = parseTestReport(input.result.value, input.runner);
+      let status = "current";
+      let reason;
+      let report = parsed.report;
+      if (input.result.status === "failed" || input.result.status === "cancelled") {
+        status = "failed";
+        reason = input.result.status === "cancelled" ? "Test Action was cancelled" : "Test Action failed";
+      }
+      if (!report) {
+        const fallback = fallbackReport(
+          input.runner,
+          input.result.value,
+          input.result.status
+        );
+        if (fallback) {
+          report = fallback;
+          if (fallback.failed > 0) {
+            status = "failed";
+            reason = "Validation script failed";
+          }
+        } else {
+          status = "invalid";
+          reason = parsed.error ?? "Invalid TestReport";
+          report = failedSingleCheck(input.runner, reason);
+        }
+      } else if (report.failed > 0) {
+        status = "failed";
+        reason = `${report.failed} test${report.failed === 1 ? "" : "s"} failed`;
+      } else if (report.total === 0) {
+        status = "invalid";
+        reason = "Zero tests do not prove completion";
+      }
+      if (status === "failed" && report.failed > 0 && artifactIds.length === 0) {
+        status = "invalid";
+        reason = "Failed TestReport has no failure Artifact";
+      }
+      const record = {
+        id: this.newId(),
+        sessionId: input.sessionId,
+        taskId: input.taskId,
+        workspaceGeneration: input.workspaceGeneration ?? await this.options.workspaceGeneration(),
+        environmentFingerprint: input.environmentFingerprint ?? this.options.environmentFingerprint,
+        action: { ...input.action },
+        fileHashes: await workspaceFileHashes(
+          input.vfs ?? this.options.vfs
+        ),
+        report,
+        status,
+        ...reason ? { reason } : {},
+        artifactIds: [...new Set(artifactIds)],
+        createdAt: this.now()
+      };
+      await this.options.store.save(record);
+      return structuredClone(record);
+    }
+    async refresh(record) {
+      let status = record.status === "failed" ? "failed" : record.status;
+      let reason = record.reason;
+      if (status === "current" && record.workspaceGeneration !== await this.options.workspaceGeneration()) {
+        status = "stale";
+        reason = "Workspace generation changed";
+      }
+      if (status === "current" && record.environmentFingerprint !== this.options.environmentFingerprint) {
+        status = "stale";
+        reason = "Environment fingerprint changed";
+      }
+      if (status === "current") {
+        for (const [path, expected] of Object.entries(record.fileHashes)) {
+          const info2 = await this.options.vfs.stat(path);
+          if (!info2 || info2.kind !== "file") {
+            status = "stale";
+            reason = `Evidence file disappeared: ${path}`;
+            break;
+          }
+          const actual = await sha256Hex(await this.options.vfs.read(path));
+          if (actual !== expected) {
+            status = "stale";
+            reason = `Evidence file changed: ${path}`;
+            break;
+          }
+        }
+      }
+      const refreshed = {
+        ...record,
+        status,
+        ...reason ? { reason } : {}
+      };
+      await this.options.store.save(refreshed);
+      return structuredClone(refreshed);
+    }
+  };
+  function createTestEvidenceCompletionGuard(options) {
+    return async ({ sessionId, taskId, view }) => {
+      const lastWrite = latestWrite(view.rows);
+      if (lastWrite === void 0) return { ok: true };
+      const records = await options.store.list({ sessionId, taskId });
+      const latest = records.at(-1);
+      if (!latest) {
+        return {
+          ok: false,
+          reason: "No TestEvidence exists for the current task"
+        };
+      }
+      const refreshed = await options.service.refresh(latest);
+      if (refreshed.status !== "current") {
+        return {
+          ok: false,
+          reason: `Latest TestEvidence is ${refreshed.status}: ${refreshed.reason ?? "verification failed"}`
+        };
+      }
+      if (!refreshed.report || refreshed.report.total <= 0) {
+        return {
+          ok: false,
+          reason: "TestEvidence contains zero tests"
+        };
+      }
+      if (refreshed.report.failed > 0) {
+        return {
+          ok: false,
+          reason: "TestEvidence contains failed tests"
+        };
+      }
+      if (options.actionVersions) {
+        const currentVersion = await options.actionVersions(
+          refreshed.action.id
+        );
+        if (currentVersion !== refreshed.action.version) {
+          return {
+            ok: false,
+            reason: "Action version changed after TestEvidence was recorded"
+          };
+        }
+      }
+      if (refreshed.createdAt < lastWrite) {
+        return {
+          ok: false,
+          reason: "Workspace changed after TestEvidence was recorded"
+        };
+      }
+      return { ok: true };
+    };
+  }
+  async function workspaceFileHashes(vfs) {
+    const hashes = {};
+    for (const entry of await vfs.list("", { recursive: true })) {
+      if (entry.kind !== "file") continue;
+      if (entry.path === ".git" || entry.path.startsWith(".git/") || entry.path === ".tinyai" || entry.path.startsWith(".tinyai/")) {
+        continue;
+      }
+      hashes[entry.path] = await sha256Hex(await vfs.read(entry.path));
+    }
+    return hashes;
+  }
+  async function sha256Hex(data) {
+    const digest2 = await crypto.subtle.digest(
+      "SHA-256",
+      data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
+    );
+    return [...new Uint8Array(digest2)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+  function failedSingleCheck(runner, reason) {
+    return {
+      schemaVersion: 1,
+      runner,
+      total: 1,
+      passed: 0,
+      failed: 1,
+      skipped: 0,
+      failures: [{ name: runner, message: reason }]
+    };
+  }
+  function fallbackReport(runner, value, status) {
+    if (status === "cancelled") return void 0;
+    const explicitPassed = value && typeof value === "object" && !Array.isArray(value) ? value.passed : void 0;
+    if (typeof explicitPassed !== "boolean" && status !== "succeeded" && status !== "failed") {
+      return void 0;
+    }
+    const passed = status !== "failed" && explicitPassed !== false;
+    return {
+      schemaVersion: 1,
+      runner,
+      total: 1,
+      passed: passed ? 1 : 0,
+      failed: passed ? 0 : 1,
+      skipped: 0,
+      failures: passed ? [] : [{ name: runner, message: "Validation script failed" }]
+    };
+  }
+  function latestWrite(rows) {
+    const writeTools = /* @__PURE__ */ new Set([
+      "write_file",
+      "replace_in_file",
+      "append_file",
+      "apply_patch",
+      "apply_unified_diff",
+      "delete_file",
+      "git_add",
+      "git_commit",
+      "git_checkout",
+      "git_branch"
+    ]);
+    return rows.filter(
+      (row) => row.kind === "tool" && row.status === "completed" && writeTools.has(row.toolName ?? "")
+    ).reduce(
+      (latest, row) => row.completedAt === void 0 ? latest : Math.max(latest ?? 0, row.completedAt),
+      void 0
     );
   }
 
@@ -2502,7 +3706,7 @@
     } catch (error2) {
       throw new AgentError(
         "GIT_OBJECT_INVALID",
-        `Invalid zlib stream: ${errorMessage(error2)}`
+        `Invalid zlib stream: ${errorMessage2(error2)}`
       );
     }
   }
@@ -2601,7 +3805,7 @@
   function invalidObject(message) {
     return new AgentError("GIT_OBJECT_INVALID", message);
   }
-  function errorMessage(error2) {
+  function errorMessage2(error2) {
     return error2 instanceof Error ? error2.message : String(error2);
   }
 
@@ -4215,7 +5419,7 @@
         "read",
         async (input, signal) => git.log(
           {
-            ...numberValue(input.max_count) === void 0 ? {} : { maxCount: Math.max(1, Math.min(1e3, numberValue(input.max_count))) },
+            ...numberValue2(input.max_count) === void 0 ? {} : { maxCount: Math.max(1, Math.min(1e3, numberValue2(input.max_count))) },
             ...optionalString2(input, "revision") ? { revision: optionalString2(input, "revision") } : {}
           },
           signal
@@ -4334,7 +5538,7 @@
     const value = input[key];
     return typeof value === "string" && value.trim() ? value : void 0;
   }
-  function numberValue(value) {
+  function numberValue2(value) {
     return typeof value === "number" && Number.isFinite(value) ? value : void 0;
   }
   function stringArray(value) {
@@ -7893,7 +9097,7 @@
       ...createGitTools(git)
     ];
     return options.includeVirtualShell === false ? tools.filter(
-      (tool5) => tool5.name !== "exec" && tool5.name !== "job_start" && tool5.name !== "job_read" && tool5.name !== "job_list" && tool5.name !== "job_cancel"
+      (tool6) => tool6.name !== "exec" && tool6.name !== "job_start" && tool6.name !== "job_read" && tool6.name !== "job_list" && tool6.name !== "job_cancel"
     ) : tools;
   }
   function tool3(name, description, parameters, risk, effect, execute) {
@@ -7964,6 +9168,503 @@
   function shellQuote(value) {
     if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) return value;
     return `'${value.replaceAll("'", "'\\''")}'`;
+  }
+
+  // src/platform/capability.ts
+  var CapabilityGraph = class {
+    capabilities = /* @__PURE__ */ new Map();
+    environmentFingerprint;
+    register(descriptor) {
+      if (this.capabilities.has(descriptor.id)) {
+        throw new Error(`Capability is already registered: ${descriptor.id}`);
+      }
+      this.capabilities.set(descriptor.id, {
+        ...descriptor,
+        limitations: [...descriptor.limitations]
+      });
+    }
+    setEnvironmentFingerprint(value) {
+      this.environmentFingerprint = value;
+    }
+    get(id) {
+      return this.capabilities.get(id);
+    }
+    isAvailable(id) {
+      return this.capabilities.get(id)?.state === "available";
+    }
+    canUse(id) {
+      const state = this.capabilities.get(id)?.state;
+      return state === "available" || state === "degraded";
+    }
+    report() {
+      return {
+        ...this.environmentFingerprint ? { environmentFingerprint: this.environmentFingerprint } : {},
+        capabilities: [...this.capabilities.values()].sort((left, right) => left.id.localeCompare(right.id)).map((descriptor) => ({
+          ...descriptor,
+          limitations: [...descriptor.limitations]
+        })),
+        diagnostics: [...this.capabilities.values()].filter((descriptor) => descriptor.state === "unavailable").map((descriptor) => ({
+          capabilityId: descriptor.id,
+          code: "CAPABILITY_UNAVAILABLE",
+          message: descriptor.limitations.join("; ") || "Capability is unavailable"
+        }))
+      };
+    }
+  };
+
+  // src/platform/tool-pack.ts
+  var ToolPackComposer = class {
+    packs = [];
+    register(pack) {
+      if (this.packs.some((item) => item.id === pack.id)) {
+        throw new Error(`Tool pack is already registered: ${pack.id}`);
+      }
+      this.packs.push(pack);
+      return () => {
+        const index = this.packs.findIndex((item) => item === pack);
+        if (index >= 0) this.packs.splice(index, 1);
+      };
+    }
+    compose(graph) {
+      const tools = [];
+      const activated = [];
+      const skipped = [];
+      for (const pack of [...this.packs].sort((left, right) => left.id.localeCompare(right.id))) {
+        const missing = (pack.requiredCapabilities ?? []).filter(
+          (capability) => !graph.canUse(capability)
+        );
+        const anyMissing = pack.requiresAny?.length && !pack.requiresAny.some((capability) => graph.canUse(capability));
+        if (missing.length || anyMissing) {
+          skipped.push({
+            id: pack.id,
+            reason: missing.length ? `Missing required capabilities: ${missing.join(", ")}` : `None of the alternative capabilities are available: ${(pack.requiresAny ?? []).join(", ")}`
+          });
+          continue;
+        }
+        const names = new Set(tools.map((tool6) => tool6.name));
+        for (const tool6 of pack.tools) {
+          if (names.has(tool6.name)) {
+            throw new Error(`Duplicate tool name across packs: ${tool6.name}`);
+          }
+          names.add(tool6.name);
+          tools.push(tool6);
+        }
+        activated.push(pack.id);
+      }
+      return {
+        tools: tools.sort((left, right) => left.name.localeCompare(right.name)),
+        activated,
+        skipped,
+        capabilities: graph.report()
+      };
+    }
+  };
+
+  // src/intelligence/text-index.ts
+  var SOURCE_EXTENSIONS = /* @__PURE__ */ new Set([
+    "ts",
+    "tsx",
+    "js",
+    "jsx",
+    "mjs",
+    "cjs",
+    "py",
+    "go",
+    "rs",
+    "java",
+    "kt",
+    "swift",
+    "c",
+    "cc",
+    "cpp",
+    "h",
+    "hpp"
+  ]);
+  var MAX_FILE_BYTES = 512 * 1024;
+  var TextCodeIntelligence = class {
+    constructor(vfs) {
+      this.vfs = vfs;
+    }
+    vfs;
+    async capabilities() {
+      return {
+        provider: "text",
+        diagnostics: false,
+        symbols: true,
+        definitions: true,
+        references: true,
+        codeActions: false,
+        limitations: [
+          "Text fallback cannot provide semantic diagnostics or code actions",
+          "Definitions and references are lexical matches, not compiler-resolved"
+        ]
+      };
+    }
+    async diagnostics(_paths, _signal) {
+      return [];
+    }
+    async symbols(query, signal) {
+      const needle = query.trim().toLowerCase();
+      const result = [];
+      for (const file of await this.index(signal)) {
+        for (const symbol of extractSymbols(file)) {
+          if (!needle || symbol.name.toLowerCase().includes(needle)) {
+            result.push(symbol);
+          }
+        }
+      }
+      return result.slice(0, 500);
+    }
+    async definition(symbol, signal) {
+      return this.findMatches(symbol, signal, true);
+    }
+    async references(symbol, signal) {
+      return this.findMatches(symbol, signal, false);
+    }
+    async codeActions(_path, _range, _signal) {
+      return [];
+    }
+    async findMatches(symbol, signal, definitionsOnly) {
+      const needle = symbol.trim();
+      if (!needle) return [];
+      const expression = new RegExp(
+        `\\b${escapeRegex(needle)}\\b`,
+        "g"
+      );
+      const result = [];
+      for (const file of await this.index(signal)) {
+        const lines = file.text.split("\n");
+        for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+          const line = lines[lineIndex];
+          for (const match of line.matchAll(expression)) {
+            if (definitionsOnly && !isDefinitionLine(line, needle)) {
+              continue;
+            }
+            const column = (match.index ?? 0) + 1;
+            result.push({
+              path: file.path,
+              symbol: needle,
+              range: {
+                startLine: lineIndex + 1,
+                startColumn: column,
+                endLine: lineIndex + 1,
+                endColumn: column + needle.length
+              }
+            });
+            if (result.length >= 1e3) return result;
+          }
+        }
+      }
+      return result;
+    }
+    async index(signal) {
+      const files = [];
+      for (const entry of await this.vfs.list("", {
+        recursive: true,
+        signal
+      })) {
+        if (signal?.aborted) throw new DOMException("Cancelled", "AbortError");
+        if (entry.kind !== "file" || entry.size > MAX_FILE_BYTES) continue;
+        const extension = entry.path.split(".").at(-1)?.toLowerCase();
+        if (!extension || !SOURCE_EXTENSIONS.has(extension)) continue;
+        try {
+          files.push({
+            path: entry.path,
+            text: new TextDecoder("utf-8", { fatal: false }).decode(
+              await this.vfs.read(entry.path, { signal })
+            )
+          });
+        } catch {
+        }
+      }
+      return files;
+    }
+  };
+  function extractSymbols(file) {
+    const result = [];
+    const expression = /\b(?:export\s+)?(?:async\s+)?(class|interface|type|enum|function|const|let|var|def|struct)\s+([A-Za-z_$][\w$]*)/g;
+    const lines = file.text.split("\n");
+    for (let index = 0; index < lines.length; index += 1) {
+      for (const match of lines[index].matchAll(expression)) {
+        const column = (match.index ?? 0) + 1;
+        result.push({
+          name: match[2],
+          kind: match[1],
+          path: file.path,
+          range: {
+            startLine: index + 1,
+            startColumn: column,
+            endLine: index + 1,
+            endColumn: column + match[0].length
+          }
+        });
+      }
+    }
+    return result;
+  }
+  function isDefinitionLine(line, symbol) {
+    return new RegExp(
+      `\\b(?:class|interface|type|enum|function|const|let|var|def|struct)\\s+${escapeRegex(symbol)}\\b`
+    ).test(line);
+  }
+  function escapeRegex(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  // src/runtime/code-intelligence-toolpack.ts
+  function createCodeIntelligenceTools(intelligence) {
+    return [
+      tool4(
+        "code_capabilities",
+        "Report available semantic code intelligence capabilities and limitations.",
+        schema3({}, []),
+        async () => await intelligence.capabilities()
+      ),
+      tool4(
+        "code_diagnostics",
+        "Return diagnostics for workspace-relative source paths.",
+        schema3({ paths: { type: "array", items: { type: "string" } } }, ["paths"]),
+        async (input, invocation) => await intelligence.diagnostics(
+          stringArray3(objectInput(input), "paths").map(normalizeVirtualPath),
+          invocation.signal
+        )
+      ),
+      tool4(
+        "code_symbols",
+        "Find symbols by name or substring using LSP or portable text fallback.",
+        schema3({ query: { type: "string" } }, ["query"]),
+        async (input, invocation) => await intelligence.symbols(
+          requiredString5(objectInput(input), "query"),
+          invocation.signal
+        )
+      ),
+      tool4(
+        "code_definition",
+        "Find definitions of a symbol using LSP or portable lexical fallback.",
+        schema3({ symbol: { type: "string" } }, ["symbol"]),
+        async (input, invocation) => await intelligence.definition(
+          requiredString5(objectInput(input), "symbol"),
+          invocation.signal
+        )
+      ),
+      tool4(
+        "code_references",
+        "Find references of a symbol using LSP or portable lexical fallback.",
+        schema3({ symbol: { type: "string" } }, ["symbol"]),
+        async (input, invocation) => await intelligence.references(
+          requiredString5(objectInput(input), "symbol"),
+          invocation.signal
+        )
+      ),
+      tool4(
+        "code_actions",
+        "Return provider code actions as WorkspaceEdit proposals without applying them.",
+        schema3(
+          {
+            path: { type: "string" },
+            range: { type: "object" }
+          },
+          ["path", "range"]
+        ),
+        async (input, invocation) => {
+          const object = objectInput(input);
+          const range = object.range;
+          if (!range || typeof range !== "object" || Array.isArray(range)) {
+            throw new AgentError(
+              "CODE_RANGE_INVALID",
+              "code_actions requires a code range"
+            );
+          }
+          return await intelligence.codeActions(
+            normalizeVirtualPath(requiredString5(object, "path")),
+            range,
+            invocation.signal
+          );
+        }
+      )
+    ];
+  }
+  function objectInput(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new AgentError(
+        "TOOL_ARGUMENTS_INVALID",
+        "Tool input must be an object"
+      );
+    }
+    return value;
+  }
+  function tool4(name, description, parameters, execute) {
+    return {
+      name,
+      description,
+      parameters,
+      risk: "read",
+      effect: "read",
+      capabilities: ["code-intelligence:read"],
+      executionMode: "parallel",
+      replay: "safe",
+      execute
+    };
+  }
+  function schema3(properties, required) {
+    return {
+      type: "object",
+      properties,
+      ...required.length ? { required } : {}
+    };
+  }
+  function requiredString5(input, key) {
+    const value = input[key];
+    if (typeof value !== "string" || !value.trim()) {
+      throw new AgentError(
+        "TOOL_ARGUMENTS_INVALID",
+        `${key} must be a non-empty string`
+      );
+    }
+    return value.trim();
+  }
+  function stringArray3(input, key) {
+    const value = input[key];
+    if (!Array.isArray(value)) {
+      throw new AgentError(
+        "TOOL_ARGUMENTS_INVALID",
+        `${key} must be an array of strings`
+      );
+    }
+    return value.map(String);
+  }
+
+  // src/runtime/workspace-capability-composition.ts
+  async function createWorkspaceCapabilityComposition(options) {
+    const includeVirtualShell = options.profile === "legacy";
+    const baseTools = createVirtualWorkspaceTools(options.workspace, {
+      includeVirtualShell
+    });
+    const codeIntelligence = options.codeIntelligence ?? new TextCodeIntelligence(options.workspace.fs);
+    const codeIntelligenceCapabilities = await codeIntelligence.capabilities();
+    const codeIntelligenceTools = createCodeIntelligenceTools(codeIntelligence);
+    const actionTools = options.actionRegistry && (await options.actionRegistry.list()).length > 0 ? await createHostActionTools(options.actionRegistry, {
+      ...options.workspace.workspaceId ? { workspaceId: options.workspace.workspaceId } : {},
+      ...options.workspacePath ? { workspacePath: options.workspacePath } : {},
+      ...options.environmentFingerprint ? { environmentFingerprint: options.environmentFingerprint } : {},
+      ...options.workspaceGeneration ? { workspaceGeneration: options.workspaceGeneration } : {},
+      ...options.testEvidence ? { testEvidence: options.testEvidence } : {},
+      ...options.actionBindingForInvocation ? {
+        bindingForInvocation: options.actionBindingForInvocation
+      } : {}
+    }) : [];
+    const applicationActions = actionTools.filter(
+      (tool6) => tool6.name.startsWith("action_")
+    );
+    const graph = new CapabilityGraph();
+    graph.setEnvironmentFingerprint(
+      options.environmentFingerprint ?? `${options.hostProfile ?? "portable"}-${options.profile}`
+    );
+    graph.register({
+      id: "filesystem",
+      version: "1",
+      state: options.hostBaseline?.tierState.workspace ?? "available",
+      limitations: options.hostBaseline?.tierState.workspace === "unavailable" ? ["Workspace baseline is unavailable"] : []
+    });
+    graph.register({
+      id: "code-intelligence",
+      version: "1",
+      state: codeIntelligenceCapabilities.provider === "text" ? "degraded" : "available",
+      limitations: [...codeIntelligenceCapabilities.limitations]
+    });
+    graph.register({
+      id: "git",
+      version: "1",
+      state: options.hostBaseline?.tierState["portable-coding"] ?? "available",
+      limitations: options.hostBaseline?.tierState["portable-coding"] === "unavailable" ? ["Portable coding baseline is unavailable"] : ["portable-common-subset"]
+    });
+    graph.register({
+      id: "actions",
+      version: "1",
+      state: applicationActions.length > 0 ? options.hostBaseline?.tierState["real-execution"] ?? "available" : "unavailable",
+      limitations: applicationActions.length > 0 ? [] : ["No application action provider is configured"]
+    });
+    if (includeVirtualShell) {
+      graph.register({
+        id: "virtual-shell",
+        version: "1",
+        state: "available",
+        limitations: ["restricted-builtins"]
+      });
+    }
+    const composer = new ToolPackComposer();
+    composer.register({
+      id: "workspace-coding",
+      requiredCapabilities: ["filesystem", "git"],
+      tools: baseTools
+    });
+    composer.register({
+      id: "code-intelligence",
+      requiredCapabilities: ["filesystem"],
+      optionalCapabilities: ["code-intelligence"],
+      tools: codeIntelligenceTools
+    });
+    if (applicationActions.length > 0) {
+      composer.register({
+        id: "application-actions",
+        requiredCapabilities: ["actions"],
+        tools: actionTools
+      });
+    }
+    const composition = composer.compose(graph);
+    return {
+      profile: options.profile,
+      tools: composition.tools,
+      baseTools,
+      actionTools: composition.tools.filter(
+        (tool6) => tool6.name.startsWith("action_") || tool6.name === "list_host_actions"
+      ),
+      applicationActions,
+      codeIntelligenceTools,
+      capabilityGraph: graph,
+      composition,
+      prompt: buildCapabilityPrompt({
+        profile: options.profile,
+        actions: applicationActions,
+        legacyShell: includeVirtualShell,
+        codeIntelligence: codeIntelligenceCapabilities
+      })
+    };
+  }
+  function buildCapabilityPrompt(input) {
+    const lines = [
+      "You are tinyai, a coding agent operating in a portable workspace.",
+      "Use Workspace-relative paths only. Never expose or depend on a host absolute path.",
+      "Workspace file, search, patch and Portable Git tools are available.",
+      "Use discover_tests to identify portable test files before choosing an execution Action."
+    ];
+    if (input.actions.length) {
+      lines.push(
+        `Application actions are available: ${input.actions.map((tool6) => tool6.name).join(", ")}. Use list_host_actions for their descriptions.`
+      );
+    } else {
+      lines.push(
+        "No application actions are available. Do not invent command or test execution."
+      );
+    }
+    if (input.legacyShell) {
+      lines.push(
+        "Legacy VirtualShell is enabled with restricted file and text builtins. It is not a host Bash or binary runner."
+      );
+    } else {
+      lines.push(
+        "There is no generic exec, Python, Node, shell or Git binary runner. Use declared application actions for execution."
+      );
+    }
+    lines.push(
+      `Code intelligence provider: ${input.codeIntelligence.provider}. ${input.codeIntelligence.limitations.length ? input.codeIntelligence.limitations.join("; ") : "Semantic capabilities are available."}`
+    );
+    lines.push(
+      "Inspect before editing. Keep changes focused and reversible.",
+      "Do not claim a check passed unless a current host Action or legacy execution result was observed.",
+      "Final answers must summarize changes, verification evidence and unresolved risks."
+    );
+    return lines.join("\n");
   }
 
   // src/core/extension-registry.ts
@@ -9296,6 +10997,47 @@ ${skillListing}` : ""
           });
           return;
         }
+        if (core.type === "serialize_capsule") {
+          if (!bundle.workspaceTransfer) {
+            throw new AgentError(
+              "WORKSPACE_TRANSFER_UNAVAILABLE",
+              "This runtime cannot export a Workspace Capsule"
+            );
+          }
+          const bytes = await bundle.workspaceTransfer.serializeCapsule();
+          this.reply(port, requestId, {
+            dataBase64: bytesToBase648(bytes),
+            bytes: bytes.byteLength
+          });
+          return;
+        }
+        if (core.type === "import_capsule") {
+          if (!bundle.workspaceTransfer) {
+            throw new AgentError(
+              "WORKSPACE_TRANSFER_UNAVAILABLE",
+              "This runtime cannot import a Workspace Capsule"
+            );
+          }
+          this.reply(
+            port,
+            requestId,
+            await bundle.workspaceTransfer.importCapsule(
+              base64ToBytes10(core.dataBase64)
+            )
+          );
+          return;
+        }
+        if (core.type === "get_capability_status") {
+          if (!bundle.capabilityStatus) {
+            throw new AgentError(
+              "CAPABILITY_STATUS_UNAVAILABLE",
+              "This runtime does not expose capability status"
+            );
+          }
+          const snapshot = await bundle.capabilityStatus(core.sessionId);
+          this.reply(port, requestId, toCapabilityStatus(snapshot));
+          return;
+        }
         throw new AgentError(
           "RUNTIME_REQUEST_UNSUPPORTED",
           `Unsupported runtime request: ${request.type}`
@@ -9365,6 +11107,36 @@ ${skillListing}` : ""
     for (const byte of value) binary += String.fromCharCode(byte);
     return btoa(binary);
   }
+  function base64ToBytes10(value) {
+    const binary = atob(value);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes;
+  }
+  function toCapabilityStatus(snapshot) {
+    return {
+      actions: snapshot.actions.inspected.map((entry) => ({
+        id: entry.descriptor.id,
+        version: entry.descriptor.version,
+        title: entry.descriptor.title,
+        description: entry.descriptor.description,
+        sourceId: entry.sourceId,
+        effects: [...entry.descriptor.effects],
+        risk: entry.descriptor.risk,
+        state: entry.probe.state,
+        ...entry.probe.reason ? { reason: entry.probe.reason } : {},
+        ...entry.probe.latencyMs !== void 0 ? { latencyMs: entry.probe.latencyMs } : {},
+        ...entry.descriptor.limitations ? { limitations: [...entry.descriptor.limitations] } : {},
+        ...snapshot.actionOutcomes?.[entry.descriptor.id] ? { lastOutcome: snapshot.actionOutcomes[entry.descriptor.id] } : {}
+      })),
+      diagnostics: snapshot.actions.diagnostics.map((diagnostic) => ({
+        ...diagnostic
+      })),
+      evidence: snapshot.evidence.map((record) => structuredClone(record))
+    };
+  }
   function isCoreRuntimeRequest(request) {
     return CORE_REQUEST_TYPES.has(request.type);
   }
@@ -9384,6 +11156,9 @@ ${skillListing}` : ""
     "list_skills",
     "reload_runtime",
     "read_artifact",
+    "serialize_capsule",
+    "import_capsule",
+    "get_capability_status",
     "approval_response",
     "handoff_response"
   ]);
@@ -9393,7 +11168,7 @@ ${skillListing}` : ""
     constructor(tools, approval, options = {}) {
       this.approval = approval;
       this.options = options;
-      this.tools = new Map([...tools].map((tool5) => [tool5.name, tool5]));
+      this.tools = new Map([...tools].map((tool6) => [tool6.name, tool6]));
     }
     approval;
     options;
@@ -9414,8 +11189,8 @@ ${skillListing}` : ""
     }
     async execute(invocation) {
       const base = { callId: invocation.call.id, name: invocation.call.name };
-      const tool5 = this.tools.get(invocation.call.name);
-      if (!tool5) {
+      const tool6 = this.tools.get(invocation.call.name);
+      if (!tool6) {
         return {
           ...base,
           status: "failed",
@@ -9425,7 +11200,7 @@ ${skillListing}` : ""
       let input;
       try {
         input = parseToolArguments(invocation.call.arguments);
-        validateToolInput(tool5.parameters, input);
+        validateToolInput(tool6.parameters, input);
         this.assertActive(invocation.signal);
       } catch (error2) {
         return { ...base, status: "failed", error: toStructuredError(error2, "TOOL_VALIDATION_FAILED") };
@@ -9437,7 +11212,7 @@ ${skillListing}` : ""
             sessionId: invocation.sessionId,
             taskId: invocation.taskId,
             callId: invocation.call.id,
-            toolName: tool5.name,
+            toolName: tool6.name,
             input
           },
           invocation.signal
@@ -9448,14 +11223,14 @@ ${skillListing}` : ""
             status: "denied",
             error: new AgentError(
               "TOOL_HOOK_DENIED",
-              hook.reason ?? `A pre-tool hook denied ${tool5.name}`
+              hook.reason ?? `A pre-tool hook denied ${tool6.name}`
             ).toStructured()
           };
         }
         hookRequiresApproval = hook.decision === "ask";
         input = hook.input;
         try {
-          validateToolInput(tool5.parameters, input);
+          validateToolInput(tool6.parameters, input);
         } catch (error2) {
           return {
             ...base,
@@ -9464,7 +11239,7 @@ ${skillListing}` : ""
           };
         }
       }
-      const failureKey = tool5.risk === "read" ? void 0 : this.failureKey(invocation, tool5.name, input);
+      const failureKey = tool6.risk === "read" ? void 0 : this.failureKey(invocation, tool6.name, input);
       const repeated = failureKey ? this.repeatedFailures.get(failureKey) : void 0;
       if (failureKey && repeated && repeated.count >= 3) {
         return {
@@ -9472,10 +11247,10 @@ ${skillListing}` : ""
           status: "failed",
           error: new AgentError(
             "TOOL_RETRY_BLOCKED",
-            `Blocked repeated ${tool5.name} call after ${repeated.count} identical failures. Re-read current state or change the request before retrying.`,
+            `Blocked repeated ${tool6.name} call after ${repeated.count} identical failures. Re-read current state or change the request before retrying.`,
             {
               details: {
-                tool: tool5.name,
+                tool: tool6.name,
                 retryCount: repeated.count,
                 lastCode: repeated.lastCode,
                 suggestion: "Re-read the current file and submit a smaller or corrected operation"
@@ -9487,9 +11262,9 @@ ${skillListing}` : ""
       let policyRequiresApproval = false;
       let actionDigest;
       let approvalContext;
-      if (tool5.approvalContext) {
+      if (tool6.approvalContext) {
         try {
-          approvalContext = await tool5.approvalContext(input, invocation);
+          approvalContext = await tool6.approvalContext(input, invocation);
         } catch (error2) {
           return {
             ...base,
@@ -9507,10 +11282,10 @@ ${skillListing}` : ""
             sessionId: invocation.sessionId,
             taskId: invocation.taskId,
             callId: invocation.call.id,
-            toolName: tool5.name,
-            capabilities: [...tool5.capabilities ?? []],
-            effect: tool5.effect ?? (tool5.risk === "read" ? "read" : "write"),
-            risk: tool5.risk,
+            toolName: tool6.name,
+            capabilities: [...tool6.capabilities ?? []],
+            effect: tool6.effect ?? (tool6.risk === "read" ? "read" : "write"),
+            risk: tool6.risk,
             input,
             ...approvalContext === void 0 ? {} : { approvalContext }
           },
@@ -9523,13 +11298,13 @@ ${skillListing}` : ""
             status: "denied",
             error: new AgentError(
               "TOOL_POLICY_DENIED",
-              decision.reason ?? `${tool5.name} is denied by policy`
+              decision.reason ?? `${tool6.name} is denied by policy`
             ).toStructured()
           };
         }
         policyRequiresApproval = decision.decision === "ask";
       }
-      if (tool5.risk !== "read" && !this.options.policy || hookRequiresApproval || policyRequiresApproval) {
+      if (tool6.risk !== "read" && !this.options.policy || hookRequiresApproval || policyRequiresApproval) {
         let approved = false;
         try {
           approved = await this.approval.requestApproval(
@@ -9537,8 +11312,8 @@ ${skillListing}` : ""
               sessionId: invocation.sessionId,
               taskId: invocation.taskId,
               callId: invocation.call.id,
-              toolName: tool5.name,
-              risk: tool5.risk === "read" ? "write" : tool5.risk,
+              toolName: tool6.name,
+              risk: tool6.risk === "read" ? "write" : tool6.risk,
               input,
               ...actionDigest ? { actionDigest } : {}
             },
@@ -9547,7 +11322,7 @@ ${skillListing}` : ""
         } catch (error2) {
           const receiptError2 = await this.recordApprovalReceipt(
             invocation,
-            tool5,
+            tool6,
             approvalContext,
             "cancelled",
             actionDigest
@@ -9564,7 +11339,7 @@ ${skillListing}` : ""
         if (!approved) {
           const receiptError2 = await this.recordApprovalReceipt(
             invocation,
-            tool5,
+            tool6,
             approvalContext,
             "denied",
             actionDigest
@@ -9579,12 +11354,12 @@ ${skillListing}` : ""
           return {
             ...base,
             status: "denied",
-            error: new AgentError("TOOL_DENIED", `User denied ${tool5.name}`).toStructured()
+            error: new AgentError("TOOL_DENIED", `User denied ${tool6.name}`).toStructured()
           };
         }
         const receiptError = await this.recordApprovalReceipt(
           invocation,
-          tool5,
+          tool6,
           approvalContext,
           "approved",
           actionDigest
@@ -9598,11 +11373,11 @@ ${skillListing}` : ""
         }
       }
       try {
-        const execution = await this.executeWithTimeout(tool5, input, invocation);
+        const execution = await this.executeWithTimeout(tool6, input, invocation);
         const executionStatus = execution.metadata?.status ?? "succeeded";
-        if (tool5.outputSchema && executionStatus === "succeeded") {
+        if (tool6.outputSchema && executionStatus === "succeeded") {
           validateToolInput(
-            tool5.outputSchema,
+            tool6.outputSchema,
             execution.value
           );
         }
@@ -9620,7 +11395,7 @@ ${skillListing}` : ""
             ...metadata ? { metadata } : {},
             error: new AgentError(
               executionStatus === "cancelled" ? "TOOL_CANCELLED" : "TOOL_EXECUTION_FAILED",
-              executionStatus === "cancelled" ? `${tool5.name} was cancelled` : `${tool5.name} failed`
+              executionStatus === "cancelled" ? `${tool6.name} was cancelled` : `${tool6.name} failed`
             ).toStructured()
           };
           if (failureKey) {
@@ -9674,8 +11449,8 @@ ${skillListing}` : ""
     assertActive(signal) {
       if (signal.aborted) throw new AgentError("TASK_CANCELLED", "Task was cancelled");
     }
-    async executeWithTimeout(tool5, input, invocation) {
-      const timeoutMs = tool5.timeoutMs ?? this.options.defaultTimeoutMs ?? 12e4;
+    async executeWithTimeout(tool6, input, invocation) {
+      const timeoutMs = tool6.timeoutMs ?? this.options.defaultTimeoutMs ?? 12e4;
       const controller = new AbortController();
       const abort = () => controller.abort();
       invocation.signal.addEventListener("abort", abort, { once: true });
@@ -9689,10 +11464,10 @@ ${skillListing}` : ""
       });
       try {
         return await Promise.race([
-          tool5.executeDetailed ? tool5.executeDetailed(input, {
+          tool6.executeDetailed ? tool6.executeDetailed(input, {
             ...invocation,
             signal: controller.signal
-          }) : tool5.execute(input, { ...invocation, signal: controller.signal }).then(
+          }) : tool6.execute(input, { ...invocation, signal: controller.signal }).then(
             (value) => ({ value })
           ),
           timeout
@@ -9752,7 +11527,7 @@ ${skillListing}` : ""
       );
       this.options.onPostToolUse?.(records);
     }
-    async recordApprovalReceipt(invocation, tool5, approvalContext, decision, actionDigest) {
+    async recordApprovalReceipt(invocation, tool6, approvalContext, decision, actionDigest) {
       if (!this.options.approvalReceipts) return void 0;
       try {
         await this.options.approvalReceipts.record({
@@ -9760,12 +11535,12 @@ ${skillListing}` : ""
           sessionId: invocation.sessionId,
           taskId: invocation.taskId,
           callId: invocation.call.id,
-          toolName: tool5.name,
-          risk: tool5.risk === "read" ? "write" : tool5.risk,
+          toolName: tool6.name,
+          risk: tool6.risk === "read" ? "write" : tool6.risk,
           decision,
           inputDigest: actionDigest ?? `fnv:${hashString(JSON.stringify({
             input: invocation.call.arguments,
-            tool: tool5.name
+            tool: tool6.name
           }))}`,
           ...actionDigest ? { actionDigest } : {},
           ...approvalContext === void 0 ? {} : { approvalContext },
@@ -12067,7 +13842,7 @@ ${lines.join("\n")}
   // src/adapters/browser-tools.ts
   function createBrowserTools(browser, dependencies = {}) {
     return [
-      tool4(
+      tool5(
         "list_tabs",
         "List inspectable Chrome tabs with stable ids, URLs, titles and current-session marker.",
         objectSchema({}),
@@ -12086,7 +13861,7 @@ ${lines.join("\n")}
           return tabs.map((tab) => ({ ...tab, current: tab.id === current }));
         }
       ),
-      tool4(
+      tool5(
         "list_frames",
         "List frames in the working tab, including frameId values usable by snapshot and frame-scoped tools.",
         objectSchema({}),
@@ -12100,14 +13875,14 @@ ${lines.join("\n")}
           return await browser.listFrames(tabId);
         }
       ),
-      tool4(
+      tool5(
         "switch_tab",
         "Make an existing tab the working tab for this session.",
         objectSchema({ tabId: { type: "string" } }, ["tabId"]),
         "write",
         ["browser:read"],
         async (input, invocation) => {
-          const tabId = requiredString5(input, "tabId");
+          const tabId = requiredString6(input, "tabId");
           if (dependencies.workspaceTabs) {
             await dependencies.workspaceTabs.switchTab(invocation.sessionId, tabId);
             return { tabId };
@@ -12122,7 +13897,7 @@ ${lines.join("\n")}
           return { tabId };
         }
       ),
-      tool4(
+      tool5(
         "new_tab",
         "Open a new tab and make it the working tab.",
         objectSchema({ url: { type: "string" } }),
@@ -12147,7 +13922,7 @@ ${lines.join("\n")}
           return tab;
         }
       ),
-      tool4(
+      tool5(
         "navigate",
         "Navigate the working tab to a URL and wait for readiness.",
         objectSchema({ url: { type: "string" } }, ["url"]),
@@ -12157,12 +13932,12 @@ ${lines.join("\n")}
           const tabId = await workingTab(browser, invocation.sessionId);
           return await browser.navigate(
             tabId,
-            requiredString5(input, "url"),
+            requiredString6(input, "url"),
             invocation.signal
           );
         }
       ),
-      tool4(
+      tool5(
         "snapshot",
         "Capture a compact accessibility snapshot with @eN refs for interactive elements.",
         objectSchema({
@@ -12180,7 +13955,7 @@ ${lines.join("\n")}
           });
         }
       ),
-      tool4(
+      tool5(
         "find",
         "Find accessibility nodes by name substring and return clickable refs where available.",
         objectSchema({
@@ -12195,11 +13970,11 @@ ${lines.join("\n")}
             signal: invocation.signal,
             frameId: optionalString4(input, "frameId")
           });
-          const query = requiredString5(input, "query").toLowerCase();
+          const query = requiredString6(input, "query").toLowerCase();
           return snapshot.nodes.filter((node) => node.name.toLowerCase().includes(query)).slice(0, 20);
         }
       ),
-      tool4(
+      tool5(
         "read_page",
         "Read visible text from the working tab.",
         objectSchema({ maxChars: { type: "integer" }, frameId: { type: "string" } }),
@@ -12217,7 +13992,7 @@ ${lines.join("\n")}
           };
         }
       ),
-      tool4(
+      tool5(
         "evaluate",
         "Evaluate JavaScript in the working tab. This is a high-risk capability.",
         objectSchema({
@@ -12228,14 +14003,14 @@ ${lines.join("\n")}
         ["browser:script"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const output = await browser.evaluate(tabId, requiredString5(input, "code"), {
+          const output = await browser.evaluate(tabId, requiredString6(input, "code"), {
             frameId: optionalString4(input, "frameId"),
             signal: invocation.signal
           });
           return output === void 0 ? null : output;
         }
       ),
-      tool4(
+      tool5(
         "click",
         "Click an element by @eN snapshot ref or CSS selector.",
         targetSchema(),
@@ -12247,7 +14022,7 @@ ${lines.join("\n")}
           return { clicked: true };
         }
       ),
-      tool4(
+      tool5(
         "mouse_click",
         "Click an element center with real CDP mouse events.",
         targetSchema(),
@@ -12258,7 +14033,7 @@ ${lines.join("\n")}
           return browser.mouseClick(tabId, targetFrom(input));
         }
       ),
-      tool4(
+      tool5(
         "hover",
         "Move the real mouse over an element to reveal hover content.",
         targetSchema(),
@@ -12269,7 +14044,7 @@ ${lines.join("\n")}
           return browser.hover(tabId, targetFrom(input));
         }
       ),
-      tool4(
+      tool5(
         "fill",
         "Fill an input, textarea or contentEditable element by ref or selector.",
         {
@@ -12286,11 +14061,11 @@ ${lines.join("\n")}
         ["browser:interact"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          await browser.fill(tabId, targetFrom(input), requiredString5(input, "value"));
+          await browser.fill(tabId, targetFrom(input), requiredString6(input, "value"));
           return { filled: true };
         }
       ),
-      tool4(
+      tool5(
         "type_text",
         "Insert text at the currently focused element.",
         objectSchema({ text: { type: "string" } }, ["text"]),
@@ -12301,13 +14076,13 @@ ${lines.join("\n")}
           await browser.cdp(
             tabId,
             "Input.insertText",
-            { text: requiredString5(input, "text") },
+            { text: requiredString6(input, "text") },
             invocation.signal
           );
           return { typed: true };
         }
       ),
-      tool4(
+      tool5(
         "select_option",
         "Select options in a native select control by value or visible label.",
         objectSchema({
@@ -12323,7 +14098,7 @@ ${lines.join("\n")}
           return await browser.selectOption(tabId, targetFrom(input), values);
         }
       ),
-      tool4(
+      tool5(
         "drag",
         "Drag one element to another using real mouse events.",
         objectSchema({
@@ -12339,18 +14114,18 @@ ${lines.join("\n")}
           await browser.drag(
             tabId,
             {
-              selector: requiredString5(input, "from"),
+              selector: requiredString6(input, "from"),
               ...frameId ? { frameId } : {}
             },
             {
-              selector: requiredString5(input, "to"),
+              selector: requiredString6(input, "to"),
               ...frameId ? { frameId } : {}
             }
           );
           return { dragged: true };
         }
       ),
-      tool4(
+      tool5(
         "scroll",
         "Scroll the page by one viewport, to an edge, selector or text target.",
         objectSchema({
@@ -12376,7 +14151,7 @@ ${lines.join("\n")}
           });
         }
       ),
-      tool4(
+      tool5(
         "send_keys",
         "Dispatch a keyboard key such as Enter, Tab or Escape.",
         objectSchema({ keys: { type: "string" } }, ["keys"]),
@@ -12384,12 +14159,12 @@ ${lines.join("\n")}
         ["browser:interact"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const keys = requiredString5(input, "keys").split(/\s+/).filter(Boolean);
+          const keys = requiredString6(input, "keys").split(/\s+/).filter(Boolean);
           for (const key of keys) await sendKey(browser, tabId, key, invocation.signal);
           return { sent: keys };
         }
       ),
-      tool4(
+      tool5(
         "wait",
         "Wait for text, text disappearance or a selector in the working tab.",
         objectSchema({
@@ -12418,7 +14193,7 @@ ${lines.join("\n")}
           };
         }
       ),
-      tool4(
+      tool5(
         "screenshot",
         "Capture the working tab viewport as a PNG data URL.",
         objectSchema({ format: { type: "string", enum: ["png", "jpeg"] } }),
@@ -12430,7 +14205,7 @@ ${lines.join("\n")}
           return await browser.screenshot(tabId, format);
         }
       ),
-      tool4(
+      tool5(
         "upload",
         "Place base64 files into a page file input.",
         objectSchema({
@@ -12445,16 +14220,16 @@ ${lines.join("\n")}
           const files = requiredArray(input, "files").map((entry) => {
             const file = isObject(entry);
             return {
-              name: requiredString5(file, "name"),
+              name: requiredString6(file, "name"),
               type: optionalString4(file, "type") ?? "application/octet-stream",
-              base64: requiredString5(file, "base64")
+              base64: requiredString6(file, "base64")
             };
           });
           const target = optionalString4(input, "ref") || optionalString4(input, "selector") ? targetFrom(input) : void 0;
           return { uploaded: await browser.upload(tabId, target, files) };
         }
       ),
-      tool4(
+      tool5(
         "save_as_pdf",
         "Render the current page as PDF and save it through the configured download port.",
         objectSchema({
@@ -12486,7 +14261,7 @@ ${lines.join("\n")}
           };
         }
       ),
-      tool4(
+      tool5(
         "dialog",
         "Inspect, accept or dismiss a blocking JavaScript dialog.",
         objectSchema({
@@ -12497,14 +14272,14 @@ ${lines.join("\n")}
         ["browser:interact"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const action = requiredString5(input, "action");
+          const action = requiredString6(input, "action");
           if (action !== "status" && action !== "accept" && action !== "dismiss") {
             throw new AgentError("TOOL_ARGUMENTS_INVALID", "dialog.action is invalid");
           }
           return await browser.dialog(tabId, action, optionalString4(input, "text"));
         }
       ),
-      tool4(
+      tool5(
         "network",
         "Start, stop, list or read captured network requests.",
         objectSchema({
@@ -12516,11 +14291,11 @@ ${lines.join("\n")}
         ["browser:network"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const cmd = requiredString5(input, "cmd");
+          const cmd = requiredString6(input, "cmd");
           if (cmd === "detail") {
             return await browser.network(tabId, {
               cmd: "detail",
-              requestId: requiredString5(input, "requestId")
+              requestId: requiredString6(input, "requestId")
             });
           }
           if (cmd !== "start" && cmd !== "stop" && cmd !== "list") {
@@ -12532,7 +14307,7 @@ ${lines.join("\n")}
           });
         }
       ),
-      tool4(
+      tool5(
         "close_tab",
         "Close the working tab and clear the session binding.",
         objectSchema({}),
@@ -12544,14 +14319,14 @@ ${lines.join("\n")}
           return { closed: tabId };
         }
       ),
-      tool4(
+      tool5(
         "find_tab",
         "Find an inspectable tab by URL/domain and make it the working tab.",
         objectSchema({ url: { type: "string" } }, ["url"]),
         "write",
         ["browser:read"],
         async (input, invocation) => {
-          const needle = requiredString5(input, "url").toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+          const needle = requiredString6(input, "url").toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
           const tab = (await browser.listTabs()).find((candidate) => {
             const value = String(candidate.url ?? "").toLowerCase();
             const domain = value.replace(/^https?:\/\//, "").split("/")[0];
@@ -12562,7 +14337,7 @@ ${lines.join("\n")}
           return tab;
         }
       ),
-      tool4(
+      tool5(
         "close_session",
         "Close browser resources owned by this task session.",
         objectSchema({}),
@@ -12573,7 +14348,7 @@ ${lines.join("\n")}
           return report;
         }
       ),
-      tool4(
+      tool5(
         "await_user_action",
         "Pause for a manual login, captcha or confirmation, then continue after explicit user action.",
         objectSchema({ reason: { type: "string" } }, ["reason"]),
@@ -12587,7 +14362,7 @@ ${lines.join("\n")}
             );
           }
           const result = await dependencies.handoff.requestHandoff(
-            requiredString5(input, "reason"),
+            requiredString6(input, "reason"),
             {
               sessionId: invocation.sessionId,
               taskId: invocation.taskId,
@@ -12603,7 +14378,7 @@ ${lines.join("\n")}
       )
     ];
   }
-  function tool4(name, description, parameters, risk, capabilities, execute) {
+  function tool5(name, description, parameters, risk, capabilities, execute) {
     return {
       name,
       description,
@@ -12627,7 +14402,7 @@ ${lines.join("\n")}
     }
     return value;
   }
-  function requiredString5(input, key) {
+  function requiredString6(input, key) {
     const value = input[key];
     if (typeof value !== "string" || !value.trim()) {
       throw new AgentError("TOOL_ARGUMENTS_INVALID", `${key} must be a non-empty string`);
@@ -12749,6 +14524,7 @@ ${lines.join("\n")}
       clock: options.clock,
       ids: options.ids,
       sessionStore: options.sessionStore,
+      completionGuard: options.completionGuard,
       permissionModes,
       trace: options.trace,
       maxSteps: options.maxSteps,
@@ -12979,24 +14755,24 @@ ${lines.join("\n")}
           instructions: stringValue(item.instructions),
           source,
           ...stringValue(item.sourceId) ? { sourceId: stringValue(item.sourceId) } : {},
-          skills: stringArray3(item.skills),
+          skills: stringArray4(item.skills),
           tools: {
-            ...Array.isArray(item.allowTools) ? { allow: stringArray3(item.allowTools) } : {},
-            ...Array.isArray(item.denyTools) ? { deny: stringArray3(item.denyTools) } : {}
+            ...Array.isArray(item.allowTools) ? { allow: stringArray4(item.allowTools) } : {},
+            ...Array.isArray(item.denyTools) ? { deny: stringArray4(item.denyTools) } : {}
           },
-          mcpServers: stringArray3(item.mcpServers),
+          mcpServers: stringArray4(item.mcpServers),
           permissions: {
-            capabilities: stringArray3(item.capabilities),
+            capabilities: stringArray4(item.capabilities),
             effects: ["read", "write", "execute", "network"].filter(
-              (effect) => stringArray3(item.effects).includes(effect)
+              (effect) => stringArray4(item.effects).includes(effect)
             ),
-            deniedCapabilities: stringArray3(item.deniedCapabilities),
-            deniedTools: stringArray3(item.deniedTools)
+            deniedCapabilities: stringArray4(item.deniedCapabilities),
+            deniedTools: stringArray4(item.deniedTools)
           },
           contextMode: item.contextMode === "fork" || item.contextMode === "artifacts" ? item.contextMode : "fresh",
           execution: {
             defaultMode: item.executionMode === "background" || item.executionMode === "isolated-worktree" || item.executionMode === "sandbox" ? item.executionMode : "foreground",
-            allowedModes: stringArray3(item.allowedModes).length > 0 ? stringArray3(item.allowedModes).filter(
+            allowedModes: stringArray4(item.allowedModes).length > 0 ? stringArray4(item.allowedModes).filter(
               (mode) => ["foreground", "background", "isolated-worktree", "sandbox"].includes(mode)
             ) : ["foreground", "background"]
           },
@@ -13047,7 +14823,7 @@ ${lines.join("\n")}
   function stringValue(value) {
     return typeof value === "string" ? value.trim() : "";
   }
-  function stringArray3(value) {
+  function stringArray4(value) {
     return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
   }
   function positiveInteger(value, fallback) {
@@ -13649,8 +15425,8 @@ ${lines.join("\n")}
       }
       if (request.type === "select_tab") {
         await this.browser.setWorkingTab(
-          requiredString6(request, "sessionId"),
-          requiredString6(request, "tabId")
+          requiredString7(request, "sessionId"),
+          requiredString7(request, "tabId")
         );
         return { handled: true, data: true };
       }
@@ -13663,7 +15439,7 @@ ${lines.join("\n")}
       if (request.type === "bind_tab_session") {
         const binding = await this.tabs.bind(
           activationContext(request),
-          requiredString6(request, "sessionId")
+          requiredString7(request, "sessionId")
         );
         return {
           handled: true,
@@ -13703,7 +15479,7 @@ ${lines.join("\n")}
   };
   function activationContext(request) {
     const windowId = Number(request.windowId);
-    const tabId = requiredString6(request, "tabId");
+    const tabId = requiredString7(request, "tabId");
     if (!Number.isFinite(windowId)) {
       throw new AgentError("TAB_CONTEXT_INVALID", "A valid windowId is required");
     }
@@ -13714,7 +15490,7 @@ ${lines.join("\n")}
       ...Number.isFinite(groupId) && groupId >= 0 ? { groupId } : {}
     };
   }
-  function requiredString6(request, key) {
+  function requiredString7(request, key) {
     const value = request[key];
     if (typeof value !== "string" || !value) {
       throw new AgentError(
@@ -14010,7 +15786,7 @@ ${lines.join("\n")}
   function canonicalJson(value) {
     return JSON.stringify(canonicalize(value));
   }
-  async function sha256Hex(value) {
+  async function sha256Hex2(value) {
     if (!globalThis.crypto?.subtle) {
       throw new AgentError(
         "CAPSULE_CRYPTO_UNAVAILABLE",
@@ -14034,11 +15810,11 @@ ${lines.join("\n")}
       if (value === void 0) continue;
       const bytes = encoder3.encode(canonicalJson(value));
       refs[name] = {
-        hash: await sha256Hex(bytes),
+        hash: await sha256Hex2(bytes),
         bytes: bytes.byteLength
       };
     }
-    const rootDigest = await sha256Hex(
+    const rootDigest = await sha256Hex2(
       encoder3.encode(canonicalJson(refs))
     );
     return {
@@ -14089,12 +15865,12 @@ ${lines.join("\n")}
       const ref = refs[name];
       if (!ref) throw invalidCapsule(`Partition reference is missing: ${name}`);
       const bytes = encoder3.encode(canonicalJson(value2));
-      const hash = await sha256Hex(bytes);
+      const hash = await sha256Hex2(bytes);
       if (hash !== ref.hash || bytes.byteLength !== ref.bytes) {
         throw invalidCapsule(`Partition integrity mismatch: ${name}`);
       }
     }
-    const expectedRoot = await sha256Hex(
+    const expectedRoot = await sha256Hex2(
       encoder3.encode(canonicalJson(refs))
     );
     if (expectedRoot !== candidate.manifest.integrity.rootDigest) {
@@ -14195,7 +15971,7 @@ ${lines.join("\n")}
         chunks.push({
           offset,
           bytes: chunk.byteLength,
-          hash: await sha256Hex(chunk)
+          hash: await sha256Hex2(chunk)
         });
         payloads.push(chunk);
       }
@@ -14203,7 +15979,7 @@ ${lines.join("\n")}
         name,
         rawBytes: raw.byteLength,
         compressedBytes: compressed.byteLength,
-        hash: await sha256Hex(raw),
+        hash: await sha256Hex2(raw),
         encoding: "gzip",
         chunks
       });
@@ -14216,7 +15992,7 @@ ${lines.join("\n")}
       encoding: partition.encoding,
       chunks: partition.chunks
     }));
-    const rootDigest = await sha256Hex(
+    const rootDigest = await sha256Hex2(
       new TextEncoder().encode(
         canonicalJson(partitionMetadata)
       )
@@ -14273,7 +16049,7 @@ ${lines.join("\n")}
         `Unsupported Capsule v2 header: ${String(header.schemaVersion)}`
       );
     }
-    const expectedRoot = await sha256Hex(
+    const expectedRoot = await sha256Hex2(
       new TextEncoder().encode(
         canonicalJson(
           header.partitions.map((partition) => ({
@@ -14300,13 +16076,13 @@ ${lines.join("\n")}
         requireBytes(input, cursor, chunk.bytes);
         const bytes = input.slice(cursor, cursor + chunk.bytes);
         cursor += chunk.bytes;
-        if (await sha256Hex(bytes) !== chunk.hash) {
+        if (await sha256Hex2(bytes) !== chunk.hash) {
           throw invalid4(`Capsule v2 chunk integrity mismatch: ${partition.name}`);
         }
         compressedChunks.push(bytes);
       }
       const raw = await gunzip(concatBytes2(compressedChunks));
-      if (raw.byteLength !== partition.rawBytes || await sha256Hex(raw) !== partition.hash) {
+      if (raw.byteLength !== partition.rawBytes || await sha256Hex2(raw) !== partition.hash) {
         throw invalid4(`Capsule v2 partition integrity mismatch: ${partition.name}`);
       }
       let value;
@@ -14463,10 +16239,10 @@ ${lines.join("\n")}
           pathChanges.push({ path: file.path, status: "added" });
           continue;
         }
-        const currentHash = await sha256Hex(
+        const currentHash = await sha256Hex2(
           await this.options.vfs.read(file.path)
         );
-        const incomingHash = await sha256Hex(base64ToBytes3(file.dataBase64));
+        const incomingHash = await sha256Hex2(base64ToBytes3(file.dataBase64));
         pathChanges.push({
           path: file.path,
           status: currentHash === incomingHash ? "unchanged" : "modified"
@@ -14699,7 +16475,7 @@ ${lines.join("\n")}
               current = false;
               break;
             }
-            const actual = await sha256Hex(await this.options.vfs.read(path));
+            const actual = await sha256Hex2(await this.options.vfs.read(path));
             if (actual !== expected) {
               current = false;
               break;
@@ -14801,6 +16577,21 @@ ${lines.join("\n")}
 
   // src/runtime/chrome-runtime.ts
   var KERNEL_PORT_NAME = "tinyai-runtime-v1";
+  var REMOTE_ACTIONS_KEY = "tinyai-remote-actions";
+  function parseRemoteActionConfig(raw) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return void 0;
+    const value = raw;
+    const endpoint = stringValue2(value.endpoint);
+    if (!/^https?:\/\//.test(endpoint)) return void 0;
+    return {
+      endpoint,
+      ...stringValue2(value.token) ? { token: stringValue2(value.token) } : {},
+      ...Array.isArray(value.allowedActionIds) ? {
+        allowedActionIds: value.allowedActionIds.map(String).filter(Boolean)
+      } : {},
+      ...typeof value.timeoutMs === "number" && value.timeoutMs > 0 ? { timeoutMs: value.timeoutMs } : {}
+    };
+  }
   function parseKernelConfig(raw) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
       throw new AgentError("MODEL_NOT_CONFIGURED", "No model configuration was found");
@@ -14842,16 +16633,13 @@ ${lines.join("\n")}
       host: chromeHost,
       storageKey: "tinyai:virtual-workspace:v1"
     });
-    assertHostBaseline(chromeHost, "chrome", {
-      workspaceStorage: "storage-backed",
-      availableActions: []
-    });
     const storage = options.storage ?? chromeLocalStorage();
     const sessionStore = new ChromeSessionStore({
       storage: chromeStorageForSessions(storage)
     });
     await migrateLegacyStorage(storage, sessionStore, systemClock.now());
     const stored = await storage.get(CONFIG_KEY);
+    const remoteActionStored = await storage.get(REMOTE_ACTIONS_KEY);
     const config = parseKernelConfig(stored[CONFIG_KEY]);
     const profiles = await storage.get("tinyai-agent-profiles");
     const mcpConfig = await storage.get("tinyai-mcp-servers");
@@ -14876,6 +16664,62 @@ ${lines.join("\n")}
     );
     const evidenceStore = new HostEvidenceStore(chromeHost.storage);
     const importJournal = new HostWorkspaceImportJournal(chromeHost.storage);
+    const actionRegistry = new HostActionRegistry();
+    const remoteActionConfig = parseRemoteActionConfig(
+      remoteActionStored[REMOTE_ACTIONS_KEY]
+    );
+    if (remoteActionConfig) {
+      actionRegistry.register(
+        "chrome-remote-actions",
+        new RemoteActionProvider(remoteActionConfig)
+      );
+    }
+    const actionReport = await actionRegistry.discover();
+    const hostBaseline = assertHostBaseline(chromeHost, "chrome", {
+      workspaceStorage: "storage-backed",
+      availableActions: actionReport.available,
+      actionDiagnostics: actionReport.diagnostics
+    });
+    const environmentFingerprint = [
+      "chrome-extension-v1",
+      ...Object.entries(hostBaseline.tierState).sort(([left], [right]) => left.localeCompare(right)).map(([tier, state]) => `${tier}:${state}`)
+    ].join("|");
+    const testEvidence = new TestEvidenceService({
+      store: evidenceStore,
+      artifacts: artifactStore,
+      vfs: virtualWorkspace.fs,
+      environmentFingerprint,
+      workspaceGeneration: () => virtualWorkspace.generation()
+    });
+    const completionGuard = createTestEvidenceCompletionGuard({
+      service: testEvidence,
+      store: evidenceStore,
+      actionVersions: async (actionId) => (await actionRegistry.list()).find(
+        (action) => action.descriptor.id === actionId
+      )?.descriptor.version
+    });
+    const sharedComposition = await createWorkspaceCapabilityComposition({
+      workspace: virtualWorkspace,
+      profile: "portable",
+      actionRegistry,
+      workspacePath: "",
+      hostProfile: "browser-agent",
+      environmentFingerprint,
+      hostBaseline,
+      workspaceGeneration: () => virtualWorkspace.generation(),
+      testEvidence,
+      ...actionReport.available.some(
+        (action) => action.descriptor.id === "code.lsp.query"
+      ) ? {
+        codeIntelligence: new LspActionCodeIntelligence(actionRegistry)
+      } : {},
+      actionBindingForInvocation: async () => ({
+        workspaceId: virtualWorkspace.workspaceId,
+        workspaceGeneration: await virtualWorkspace.generation(),
+        environmentFingerprint,
+        evidenceVfs: virtualWorkspace.fs
+      })
+    });
     let activeRuntime;
     const continuity = new WorkspaceContinuityService({
       workspaceId: "tinyai-browser-workspace",
@@ -14885,7 +16729,7 @@ ${lines.join("\n")}
       artifacts: artifactStore,
       environmentId: "chrome-extension-v1",
       hostProfile: "browser-agent",
-      agentVersion: "0.9.1",
+      agentVersion: "0.10.0",
       newId: () => `capsule_${crypto.randomUUID()}`,
       beforeExport: async () => {
         if (!activeRuntime) return;
@@ -14956,6 +16800,7 @@ ${lines.join("\n")}
         "browser:interact",
         "browser:script",
         "browser:network",
+        "action:invoke",
         "agent:spawn",
         "agent:manage",
         "extension:skills",
@@ -14978,10 +16823,13 @@ ${lines.join("\n")}
         artifactStore,
         trace,
         hooks,
-        systemPrompt: chromePromptProfile.build({
-          profile,
-          skills: initialSkills
-        }),
+        systemPrompt: [
+          sharedComposition.prompt,
+          chromePromptProfile.build({
+            profile,
+            skills: initialSkills
+          })
+        ].join("\n\n"),
         maxSteps: spec.budget.maxTurns,
         toolSelection: {
           allow: profile.tools.allow,
@@ -14989,6 +16837,11 @@ ${lines.join("\n")}
           capabilities: profile.effectivePermissions.capabilities
         },
         additionalTools: [
+          ...sharedComposition.tools.map((definition) => ({
+            definition,
+            source: "builtin",
+            sourceId: "workspace-shared"
+          })),
           ...skillTools.map((definition) => ({
             definition,
             source: "builtin",
@@ -15000,6 +16853,7 @@ ${lines.join("\n")}
             sourceId: "mcp"
           }))
         ],
+        completionGuard,
         tabScoped: true
       }).runtime
     });
@@ -15047,7 +16901,10 @@ ${lines.join("\n")}
       artifactStore,
       trace,
       hooks,
-      systemPrompt: chromePromptProfile.build({ skills: initialSkills }),
+      systemPrompt: [
+        sharedComposition.prompt,
+        chromePromptProfile.build({ skills: initialSkills })
+      ].join("\n\n"),
       download: async (name, mime, base64) => {
         await chrome.downloads.download({
           url: `data:${mime};base64,${base64}`,
@@ -15056,10 +16913,10 @@ ${lines.join("\n")}
         });
       },
       additionalTools: [
-        ...createVirtualWorkspaceTools(virtualWorkspace).map((definition) => ({
+        ...sharedComposition.tools.map((definition) => ({
           definition,
           source: "builtin",
-          sourceId: "virtual-workspace"
+          sourceId: "workspace-shared"
         })),
         ...subagentTools.map((definition) => ({
           definition,
@@ -15077,6 +16934,7 @@ ${lines.join("\n")}
           sourceId: "mcp"
         }))
       ],
+      completionGuard,
       workspaceTabs
     });
     activeRuntime = mainWorkspace.runtime;
@@ -15118,6 +16976,19 @@ ${lines.join("\n")}
           return continuity.commitImport(prepared, { replaceProject: true });
         }
       },
+      capabilityStatus: async (sessionId) => ({
+        actions: await actionRegistry.discover(),
+        evidence: await evidenceStore.list(
+          sessionId ? { sessionId } : {}
+        ),
+        actionOutcomes: sessionId ? actionOutcomesForSession(
+          activeRuntime,
+          sessionId,
+          actionReport.inspected.map(
+            (entry) => entry.descriptor.id
+          )
+        ) : void 0
+      }),
       async dispose() {
         await extension.dispose();
         unsubscribeChildren();
@@ -15128,6 +16999,31 @@ ${lines.join("\n")}
         await Promise.all(mcpClients.map((client) => client.close()));
       }
     };
+  }
+  function actionIdForToolName(toolName, actionIds) {
+    return actionIds.find(
+      (actionId) => toolNameForAction(actionId) === toolName
+    );
+  }
+  function actionOutcomesForSession(runtime, sessionId, actionIds) {
+    if (!runtime) return void 0;
+    let rows;
+    try {
+      rows = runtime.getProjection(sessionId).rows;
+    } catch {
+      return void 0;
+    }
+    return Object.fromEntries(
+      [...rows].reverse().filter(
+        (row) => row.kind === "tool" && row.toolName?.startsWith("action_") && row.status !== "streaming" && row.status !== "pending"
+      ).flatMap((row) => {
+        const actionId = actionIdForToolName(
+          row.toolName ?? "",
+          actionIds
+        );
+        return actionId ? [[actionId, row.status]] : [];
+      })
+    );
   }
   function installKernelRuntimeGateway(chromeApi = chrome) {
     const gateway = new RuntimeGateway(

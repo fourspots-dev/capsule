@@ -210,6 +210,8 @@ export function createTestEvidenceCompletionGuard(
   };
 }) => Promise<CompletionGuardDecision> {
   return async ({ sessionId, taskId, view }) => {
+    const lastWrite = latestWrite(view.rows);
+    if (lastWrite === undefined) return { ok: true };
     const records = await options.store.list({ sessionId, taskId });
     const latest = records.at(-1);
     if (!latest) {
@@ -250,11 +252,7 @@ export function createTestEvidenceCompletionGuard(
         };
       }
     }
-    const lastWrite = latestWrite(view.rows);
-    if (
-      lastWrite !== undefined &&
-      refreshed.createdAt < lastWrite
-    ) {
+    if (refreshed.createdAt < lastWrite) {
       return {
         ok: false,
         reason: 'Workspace changed after TestEvidence was recorded',

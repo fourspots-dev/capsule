@@ -101,10 +101,7 @@ export function checkRequirementTraceability(root = resolve(dirname(scriptPath),
         aliases.add(alias);
       }
     }
-    if (
-      requirement.status !== 'proposed' &&
-      requirement.status !== 'accepted'
-    ) {
+    if (requirement.status !== 'proposed') {
       requireDocument(requirement.design, `${label}: design`, root, errors);
       requireDocument(requirement.testDesign, `${label}: testDesign`, root, errors);
     }

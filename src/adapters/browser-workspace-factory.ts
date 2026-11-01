@@ -16,6 +16,7 @@ import { ToolRegistry, type ToolRegistration } from '../core/tool-registry';
 import type { ToolDefinition } from '../core/types';
 import type { TraceRecorder } from '../core/trace-recorder';
 import { WorkspaceRuntime, type WorkspaceRuntimeOptions } from '../core/workspace-runtime';
+import type { CompletionGuard } from '../core/session-runtime';
 import { createBrowserToolPack } from './browser-tool-pack';
 import type { WorkspaceTabControl } from './browser-tools';
 
@@ -44,6 +45,7 @@ export interface BrowserWorkspaceFactoryOptions {
   hooks?: HookRunner;
   tabScoped?: boolean;
   workspaceTabs?: WorkspaceTabControl;
+  completionGuard?: CompletionGuard;
 }
 
 export interface BrowserWorkspaceBundle {
@@ -92,6 +94,7 @@ export function createBrowserWorkspace(
     clock: options.clock,
     ids: options.ids,
     sessionStore: options.sessionStore,
+    completionGuard: options.completionGuard,
     permissionModes,
     trace: options.trace,
     maxSteps: options.maxSteps,

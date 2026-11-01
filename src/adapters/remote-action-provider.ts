@@ -38,6 +38,7 @@ export interface RemoteActionProviderOptions {
   fetch?: typeof fetch;
   headers?: Readonly<Record<string, string>>;
   timeoutMs?: number;
+  allowedActionIds?: readonly string[];
 }
 
 /**
@@ -47,10 +48,14 @@ export interface RemoteActionProviderOptions {
 export class RemoteActionProvider implements HostActionProvider {
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
+  private readonly allowedActionIds?: ReadonlySet<string>;
 
   constructor(private readonly options: RemoteActionProviderOptions) {
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.timeoutMs = options.timeoutMs ?? 300_000;
+    this.allowedActionIds = options.allowedActionIds
+      ? new Set(options.allowedActionIds)
+      : undefined;
   }
 
   async describe(signal?: AbortSignal): Promise<readonly HostActionDescriptor[]> {
@@ -64,9 +69,13 @@ export class RemoteActionProvider implements HostActionProvider {
         'Remote Action describe response is missing actions'
       );
     }
-    return response.actions.map((action) =>
-      remoteDescriptor(validateDescriptor(action))
-    );
+    return response.actions
+      .map((action) => remoteDescriptor(validateDescriptor(action)))
+      .filter(
+        (action) =>
+          !this.allowedActionIds ||
+          this.allowedActionIds.has(action.id)
+      );
   }
 
   async invoke(
@@ -74,6 +83,12 @@ export class RemoteActionProvider implements HostActionProvider {
     input: JsonValue,
     context: HostActionContext
   ): Promise<HostActionResult> {
+    if (this.allowedActionIds && !this.allowedActionIds.has(actionId)) {
+      throw new AgentError(
+        'ACTION_UNAVAILABLE',
+        `Remote Action is not allowlisted: ${actionId}`
+      );
+    }
     const response = await this.request(
       {
         type: 'invoke',

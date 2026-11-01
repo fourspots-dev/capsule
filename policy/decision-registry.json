@@ -152,6 +152,25 @@
       "supersedes": [],
       "supersededBy": null,
       "file": "docs/decisions/DEC-008-extension-version-sync.md"
+    },
+    {
+      "id": "DEC-009",
+      "title": "Authorize Chrome shared composition for 0.10.0",
+      "statement": "继续实现 Chrome 共享 Capability Composition、Remote Action 和 Capsule UI。",
+      "normalizedDecision": "Implement REQ-CHROME-001 using the shared workspace capability composition, separate browser ToolPack, Remote Action provider, current TestEvidence and Capsule transfer UI.",
+      "capturedAt": "2026-11-01",
+      "source": "request",
+      "scope": ["chrome", "capability-composition", "remote-action", "capsule"],
+      "status": "promoted",
+      "triage": {
+        "disposition": "requirement",
+        "adrs": [],
+        "requirements": ["REQ-CHROME-001"],
+        "rationale": "The shared composition and client isolation rules are already accepted in ADR-006."
+      },
+      "supersedes": [],
+      "supersededBy": null,
+      "file": "docs/decisions/DEC-009-chrome-composition-authorization.md"
     }
   ]
 }

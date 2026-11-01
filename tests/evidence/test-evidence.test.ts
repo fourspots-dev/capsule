@@ -105,7 +105,16 @@ describe('REQ-TEST-001 TestEvidence lifecycle', () => {
       await guard({
         sessionId: 'session',
         taskId: 'task',
-        view: { rows: [] },
+        view: {
+          rows: [
+            {
+              kind: 'tool',
+              status: 'completed',
+              toolName: 'write_file',
+              completedAt: 1,
+            },
+          ],
+        },
       })
     ).toMatchObject({ ok: false, reason: expect.stringContaining('No TestEvidence') });
 

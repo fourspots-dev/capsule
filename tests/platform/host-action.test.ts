@@ -11,6 +11,9 @@ import {
   type HostActionProvider,
 } from '../../src/platform/host-action';
 import { FakeApproval } from '../harness/fakes';
+import { createWorkspaceCapabilityComposition } from '../../src/runtime/workspace-capability-composition';
+import { MemoryHostBridge } from '../../src/host';
+import { VirtualWorkspace } from '../../src/virtual';
 
 function descriptor(
   overrides: Partial<HostActionDescriptor> = {}
@@ -460,5 +463,21 @@ describe('HostActionRegistry', () => {
       status: 'failed',
       error: { code: 'ACTION_APPROVAL_STALE' },
     });
+  });
+
+  it('keeps Chrome-style shared packs separate from browser-only tools', async () => {
+    const workspace = new VirtualWorkspace({ host: new MemoryHostBridge() });
+    const shared = await createWorkspaceCapabilityComposition({
+      workspace,
+      profile: 'portable',
+      hostProfile: 'browser-agent',
+    });
+    const names = shared.tools.map((tool) => tool.name);
+    expect(names).toEqual(
+      expect.arrayContaining(['read_file', 'apply_patch', 'git_status', 'code_symbols'])
+    );
+    expect(names).not.toEqual(
+      expect.arrayContaining(['list_tabs', 'switch_tab', 'open_page'])
+    );
   });
 });

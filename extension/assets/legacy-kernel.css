@@ -575,3 +575,118 @@ textarea.wb-editor {
 .wb-input-prompt {
   display: none;
 }
+
+.kernel-capability-card {
+  padding: 12px;
+}
+
+.kernel-capability-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.kernel-capability-summary b {
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.kernel-capability-refresh {
+  margin-left: auto;
+}
+
+.kernel-capability-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.kernel-capability-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.kernel-capability-dot[data-state="available"] {
+  background: #1b9a63;
+}
+
+.kernel-capability-dot[data-state="degraded"] {
+  background: #c18400;
+}
+
+.kernel-capability-dot[data-state="unavailable"] {
+  background: var(--danger, #b42318);
+}
+
+.kernel-capability-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.kernel-capability-title {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.kernel-capability-meta,
+.kernel-capability-reason {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kernel-capability-state {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--bg);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.kernel-capability-state[data-state="available"] {
+  color: #137a4b;
+}
+
+.kernel-capability-state[data-state="degraded"] {
+  color: #986100;
+}
+
+.kernel-capability-diagnostic,
+.kernel-capability-empty {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.kernel-remote-action-form {
+  margin: 0;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.kernel-remote-action-form input,
+.kernel-remote-action-form textarea {
+  font-size: 12px;
+}

@@ -10,7 +10,7 @@
 </style>
 </head>
 <body><div class="wrap">
-<header class="hero"><small>DETAILED DESIGN V3 / IMPLEMENTATION-READY SPECIFICATION</small><h1>Capability Completion<br>详细设计</h1><p>将 REQ-HOST-002、REQ-ACTION-001、REQ-TEST-001、REQ-WORKSPACE-002、REQ-LSP-001、REQ-SUBAGENT-001、REQ-CHROME-001、REQ-PLATFORM-001 和 REQ-EVAL-001 展开到模块、接口、状态机、交互、错误、持久化和分阶段验收。</p><div class="chips"><span class="chip">0.9.0 delivered</span><span class="chip">6 verified</span><span class="chip">Approved unreviewed</span><span class="chip">3 remaining review</span></div></header>
+<header class="hero"><small>DETAILED DESIGN V3 / IMPLEMENTATION-READY SPECIFICATION</small><h1>Capability Completion<br>详细设计</h1><p>将 REQ-HOST-002、REQ-ACTION-001、REQ-TEST-001、REQ-WORKSPACE-002、REQ-LSP-001、REQ-SUBAGENT-001、REQ-CHROME-001、REQ-PLATFORM-001 和 REQ-EVAL-001 展开到模块、接口、状态机、交互、错误、持久化和分阶段验收。</p><div class="chips"><span class="chip">0.10.0 delivered</span><span class="chip">7 verified</span><span class="chip">Approved unreviewed</span><span class="chip">2 remaining review</span></div></header>
 <nav><a href="#principles">四层架构</a><a href="#architecture-impact">影响面</a><a href="#req-host-002">Host基线</a><a href="#req-action-001">Action</a><a href="#req-test-001">Evidence</a><a href="#req-workspace-002">Capsule v2</a><a href="#req-lsp-001">LSP</a><a href="#req-subagent-001">子Agent</a><a href="#req-chrome-001">Chrome</a><a href="#req-platform-001">平台</a><a href="#req-eval-001">评测</a><a href="#review">确认门禁</a></nav>
 
 <section id="principles"><h2>1. 四层架构与总边界</h2>
@@ -241,7 +241,7 @@ Action call allowed if:
 <h3>实现证据</h3><p>Action ToolPack 支持 per-invocation Session/Workspace binding；root-only Action 在 child 被拒绝，审批后 generation 改变会使批准失效，ChildResult 回传自己的 Artifact/Evidence ID。证据：<code>tests/platform/host-action.test.ts</code>、<code>tests/evidence/action-evidence-integration.test.ts</code>、<code>tests/adapters/workspace-subagent-driver.test.ts</code>。</p>
 </section>
 
-<section id="req-chrome-001"><h2>9. REQ-CHROME-001：Chrome Composition</h2><p><span class="chip">Target 0.10.0</span> <span class="chip">Review</span></p>
+<section id="req-chrome-001"><h2>9. REQ-CHROME-001：Chrome Composition</h2><p><span class="chip">Target 0.10.0</span> <span class="chip">Verified</span></p>
 <h3>模块</h3><table><tbody><tr><td>修改</td><td><code>runtime/chrome-runtime.ts</code>、Chrome Browser Provider registration、Capsule UI、RemoteActionProvider</td></tr><tr><td>不得感知</td><td><code>src/node/actions/*</code>、本地绝对路径、Node child_process</td></tr></tbody></table>
 <pre>Chrome composition:
   ChromeHostBridge
@@ -257,6 +257,7 @@ No Action:
   TestEvidence unavailable</pre>
 <p>Remote provider 接受允许的 action IDs，workspace ID/generation，requestId，deadline；流事件和取消协议与 Action Runtime 保持一致。Browser DOM 工具不混入通用 Coding ToolPack。</p>
 <h3>验收</h3><ul><li>TUI/Headless/Chrome Tool Golden 一致。</li><li>Chrome 不出现 exec/job。</li><li>Remote disconnect 不假完成。</li><li>Capsule UI 恢复 Session。</li></ul>
+<h3>实现证据</h3><p><code>chrome-runtime.ts</code> 先探测 Host 与 Remote Action，再以 <code>profile=portable</code> 构建共享 Coding ToolPack；Browser ToolPack、主 Runtime 与子 Agent Runtime 保持分离。Runtime Gateway 只暴露可序列化的能力快照、当前 Session 最近 Action 结果、Capsule 字节和导入结果，Side Panel 不读取 Workspace 或 Provider 内部状态。证据：<code>tests/integration/runtime-gateway.test.ts</code>、<code>tests/runtime/workspace-capability-composition.test.ts</code>、<code>tests/action/remote-provider.test.ts</code>、<code>tests/e2e/kernel-extension.e2e.ts</code>。</p>
 </section>
 
 <section id="req-platform-001"><h2>10. REQ-PLATFORM-001：Platform Adapters</h2><p><span class="chip">Target 0.10.0</span> <span class="chip">Review</span></p>
@@ -284,8 +285,8 @@ No Action:
 </section>
 
 <section id="review"><h2>12. 确认门禁</h2><div class="grid"><div class="card"><h3>DESIGN-01</h3><p>是否接受 Host Baseline A/B/C/D 以及“底座不由 Action 提供”。</p></div><div class="card"><h3>DESIGN-02</h3><p>是否接受 Action Runtime 的可信 Provider、审批和 Local/Native/Remote 统一协议。</p></div><div class="card"><h3>DESIGN-03</h3><p>是否接受 TestEvidence 与 Capsule/Verifier 的状态规则。</p></div><div class="card"><h3>DESIGN-04</h3><p>是否接受后续 LSP、子 Agent、Chrome、平台与评测的模块边界。</p></div></div>
-<div class="warn rule"><code>REQ-HOST-002</code> 与 <code>REQ-ACTION-001</code> 已在 <code>approved_unreviewed</code> 前提下完成 0.6.0 实现和验证；其余章节保持 <code>designStatus: review</code>、<code>implementationAuthorized: false</code>。</div>
+<div class="warn rule">Host、Action、TestEvidence、Capsule v2、LSP、Subagent 与 Chrome Composition 已在 <code>approved_unreviewed</code> 前提下完成实现和验证。Platform Adapters 与 Production Evaluation 仍保持 review，不得开始实现。</div>
 <p><a href="capability-completion-detailed-testing-v3.html#architecture-completeness">查看实现级测试设计 →</a></p>
-<p class="foot">Detailed Design V3 · 6 verified under unreviewed approval · 3 review-only · 0.9.0 delivered</p>
+<p class="foot">Detailed Design V3 · 7 verified under unreviewed approval · 2 review-only · 0.10.0 delivered</p>
 </section>
 </div></body></html>

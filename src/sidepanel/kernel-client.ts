@@ -10,6 +10,9 @@ import type {
   RuntimeResponse,
 } from '../runtime/protocol';
 import type { ChromeRuntimeRequest } from '../adapters/chrome-protocol';
+import type {
+  RuntimeCapabilityStatus,
+} from '../runtime/runtime-gateway';
 
 interface Pending {
   resolve(value: unknown): void;
@@ -139,6 +142,37 @@ export class KernelClient {
       type: 'read_artifact',
       artifactId,
     })) as never;
+  }
+
+  async serializeCapsule(): Promise<{
+    dataBase64: string;
+    bytes: number;
+  }> {
+    return (await this.request({ type: 'serialize_capsule' })) as {
+      dataBase64: string;
+      bytes: number;
+    };
+  }
+
+  async importCapsule(dataBase64: string): Promise<{
+    workspaceId: string;
+    generation: number;
+    sessions: string[];
+    artifacts: number;
+    environmentChanged: boolean;
+    warnings: string[];
+  }> {
+    return (await this.request({
+      type: 'import_capsule',
+      dataBase64,
+    })) as never;
+  }
+
+  async capabilityStatus(sessionId?: string): Promise<RuntimeCapabilityStatus> {
+    return (await this.request({
+      type: 'get_capability_status',
+      ...(sessionId ? { sessionId } : {}),
+    })) as RuntimeCapabilityStatus;
   }
 
   async listTabs(): Promise<
