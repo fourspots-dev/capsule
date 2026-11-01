@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Planned
+
+- `REQ-ACTION-001`: trusted Application Action runtime with provider SDK,
+  local/native/remote execution, interactive approval and TestEvidence.
+
 ## 0.4.1
 
 ### Features

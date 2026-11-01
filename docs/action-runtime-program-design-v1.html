@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tinyai Application Action Runtime 与能力补全路线 V1</title>
+<style>
+:root{--bg:#f4f5f7;--paper:#fff;--text:#191a1e;--muted:#6f7179;--line:#e2e3e8;--accent:#6d3fd1;--accent-soft:#f1ecff;--ok:#137a4b;--ok-soft:#eef8f2;--warn:#986100;--warn-soft:#fff8e8;--danger:#b42318;--danger-soft:#fff1f0;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.72 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1240px;margin:auto;padding:36px 24px 100px}.hero{padding:40px;border-radius:27px;background:radial-gradient(circle at 88% 8%,#c8b8ff 0,transparent 25%),linear-gradient(135deg,#131019,#2f2456 58%,#5b3cae);color:#fff}.hero small{letter-spacing:.12em;opacity:.72}.hero h1{font-size:38px;line-height:1.18;margin:12px 0}.hero p{max-width:980px;margin:0;color:#f2edff}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}
+nav{position:sticky;top:0;z-index:5;display:flex;gap:14px;overflow:auto;margin:18px 0;padding:10px 14px;border:1px solid var(--line);border-radius:13px;background:#f4f5f7ed;backdrop-filter:blur(12px)}nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}section{margin:18px 0;padding:26px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:23px;margin:0 0 14px}h3{font-size:16px;margin:22px 0 8px}p{color:#44454c}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafafa}.card h3{margin:0 0 8px}.card p{margin:0}.card ul{margin:8px 0 0;padding-left:18px}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafafa;color:var(--muted)}code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{padding:17px;overflow:auto;border-radius:12px;background:#121118;color:#f0edff;font:12px/1.62 var(--mono);border:1px solid #302b40}.rule{padding:13px 15px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#f4f0ff}.warn{border-color:var(--warn);background:var(--warn-soft)}.danger{border-color:var(--danger);background:var(--danger-soft)}.phase{display:flex;align-items:center;gap:11px;margin:18px 0 8px;padding:10px 12px;border:1px solid var(--line);border-radius:11px;background:#fafafa}.phase-no{display:grid;place-items:center;min-width:44px;height:28px;padding:0 8px;border-radius:7px;background:var(--accent-soft);color:var(--accent);font:700 12px/1 var(--mono)}.pill{display:inline-block;padding:1px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:11px}.foot{color:var(--muted);font-size:12px}@media(max-width:820px){.grid,.grid3{grid-template-columns:1fr}.hero h1{font-size:28px}.wrap{padding:20px 12px 70px}section{padding:20px}table{display:block;overflow-x:auto}}
+</style>
+</head>
+<body><div class="wrap">
+<header class="hero"><small>REQ-ACTION-001 / APPLICATION ACTION RUNTIME / DESIGN V1</small><h1>应用 Action 执行平台<br>与能力补全路线</h1><p>把“真实执行”统一成可信 Provider 注册的具名 Action：可发现、可探测、可审批、可取消、可远程执行，并返回 TestReport、Artifact 和当前宿主 Evidence。不提供模型可直接调用的通用 shell。</p><div class="chips"><span class="chip">Target 0.5.0</span><span class="chip">Provider SDK</span><span class="chip">Trusted Loader</span><span class="chip">Interactive Approval</span><span class="chip">TestEvidence</span><span class="chip">Remote/Native</span></div></header>
+<nav><a href="#status">现状</a><a href="#goals">目标</a><a href="#requirements">需求</a><a href="#architecture-impact">影响面</a><a href="#architecture">架构</a><a href="#objects">对象</a><a href="#trust">可信注册</a><a href="#execution">执行</a><a href="#approval">审批</a><a href="#evidence">证据</a><a href="#surfaces">端接入</a><a href="#failure">失败恢复</a><a href="#roadmap">补全路线</a><a href="#acceptance">验收</a></nav>
+
+<section id="status"><h2>1. 当前能力基线与缺口</h2><table><thead><tr><th>能力</th><th>当前状态</th><th>缺口</th></tr></thead><tbody>
+<tr><td>具名 Action</td><td>已有 Descriptor、Registry、TUI/Headless ToolPack</td><td>Provider 主要来自 npm-script 与内嵌代码，缺少通用可信加载和动态更新</td></tr>
+<tr><td>真实本机执行</td><td><code>NpmScriptActionProvider</code> 可真实执行 npm script</td><td>Python/Xcode/Playwright/Remote 等需要各自实现 Provider</td></tr>
+<tr><td>审批</td><td>TUI 可显式 auto/deny</td><td>缺少 ask 交互、审批范围、审批过期和 UI</td></tr>
+<tr><td>ActionResult</td><td>当前返回泛化 value 或抛错</td><td>缺少统一 status、exitCode、TestReport、Artifact 和 metrics</td></tr>
+<tr><td>测试证据</td><td>Session rows 能看到 Action 结果</td><td>没有标准 TestReport、Evidence Store 和 stale 状态</td></tr>
+<tr><td>远程/Native 执行</td><td>存在传统 Remote Toolchain / Sandbox</td><td>没有统一远程 Action 协议与 iOS Native Bridge</td></tr>
+<tr><td>子 Agent Action</td><td>子 Workspace 有 fork</td><td>Action 默认仍绑定主 Workspace root</td></tr>
+<tr><td>Chrome 组合</td><td>Capsule 支持已加入</td><td>Chrome Runtime 仍使用旧工具拼接，Action 与 Composition 未完全对齐</td></tr>
+</tbody></table></section>
+
+<section id="goals"><h2>2. 目标与非目标</h2><div class="grid"><div class="card"><h3>目标</h3><ul><li>应用通过可信模块或嵌入 API 注册具体 Action。</li><li>Action 生命周期、版本和 Probe 可观察。</li><li>本机、原生桥和远程后端共享同一调用协议。</li><li>所有执行都可审批、取消、幂等和回收。</li><li>ActionResult 与 TestEvidence 成为完成门禁的权威证据。</li><li>TUI、Headless、Chrome 使用同一 Action ToolPack。</li></ul></div><div class="card"><h3>非目标</h3><ul><li>不提供默认通用 exec/Python/Bash 工具。</li><li>不允许从不可信 Workspace 自动 import 并执行 Provider 代码。</li><li>本需求不实现完整 LSP、Capsule v2、子 Agent fork Action 隔离；这些使用后续独立需求。</li><li>不保证任意命令跨平台完全相同。</li></ul></div></div></section>
+
+<section id="requirements"><h2>3. 功能需求</h2><table><thead><tr><th>ID</th><th>需求</th><th>验收</th></tr></thead><tbody>
+<tr><td><code>FR-ACTION-001</code></td><td>Provider SDK</td><td>describe/probe/invoke/cancel/dispose 生命周期稳定，Provider 版本显式</td></tr>
+<tr><td><code>FR-ACTION-002</code></td><td>Action Descriptor</td><td>ID、版本、Schema、effects、risk、timeout、workspace binding、limitations 完整</td></tr>
+<tr><td><code>FR-ACTION-003</code></td><td>可信注册</td><td>只从受信模块、嵌入 API或宿主配置加载；Workspace 代码不会自动执行</td></tr>
+<tr><td><code>FR-ACTION-004</code></td><td>本机执行后端</td><td>argv、cwd fence、env allowlist、timeout、Abort、进程树和输出上限</td></tr>
+<tr><td><code>FR-ACTION-005</code></td><td>远程/Native 后端</td><td>相同 Action ID 和 Schema；requestId、workspace generation、流事件、取消和重连</td></tr>
+<tr><td><code>FR-ACTION-006</code></td><td>审批</td><td>ask/auto/deny；展示输入、effects、risk 和 scope；批准绑定 Session/generation</td></tr>
+<tr><td><code>FR-ACTION-007</code></td><td>Workspace Binding</td><td>Action 声明 root/fork/remote；子 Agent 只能调用与自身 generation 兼容的 Action</td></tr>
+<tr><td><code>FR-ACTION-008</code></td><td>ActionResult</td><td>succeeded/failed/cancelled、exitCode、metrics、Artifact、environmentId 和错误稳定</td></tr>
+<tr><td><code>FR-ACTION-009</code></td><td>TestEvidence</td><td>标准 TestReport；文件 hash、Action/环境版本和 generation 可追踪</td></tr>
+<tr><td><code>FR-ACTION-010</code></td><td>动态生命周期</td><td>启动、宿主重连和环境变化后重新 Probe；工具集合可重新组合</td></tr>
+<tr><td><code>FR-ACTION-011</code></td><td>跨端 Composer</td><td>TUI/Headless/Chrome 同一 Capability Graph、Schema 和完成门禁</td></tr>
+<tr><td><code>FR-ACTION-012</code></td><td>可观测性</td><td>Trace 记录 actionId/version/requestId/耗时/状态，不记录 Secret 或无限输出</td></tr>
+</tbody></table></section>
+
+<section id="architecture-impact"><h2>4. Architecture Impact Map</h2><table><thead><tr><th>Surface</th><th>Action</th><th>Evidence</th></tr></thead><tbody>
+<tr><td>Core / platform</td><td>modify</td><td>Action invocation/result/evidence contracts and policy</td></tr>
+<tr><td>Node Host</td><td>modify</td><td>trusted module loader and local command executor</td></tr>
+<tr><td>TUI</td><td>modify</td><td>Provider loading, Action manager and ask approval overlay</td></tr>
+<tr><td>Headless</td><td>modify</td><td>same provider loader, result and evidence pipeline</td></tr>
+<tr><td>Chrome</td><td>modify</td><td>shared composition and Remote/Native Action Provider</td></tr>
+<tr><td>iOS future</td><td>protocol</td><td>Native Bridge request/stream/cancel protocol</td></tr>
+<tr><td>Session / Capsule</td><td>modify</td><td>Evidence records and Action version/environment requirements</td></tr>
+<tr><td>Prompt / UI / Verifier</td><td>modify</td><td>same availability and current evidence source</td></tr>
+<tr><td>Legacy unsupported</td><td>none</td><td>No generic exec fallback</td></tr>
+</tbody></table></section>
+
+<section id="architecture"><h2>5. 架构</h2><pre>Trusted app module / Native host / Remote endpoint
+                ↓
+ActionProviderModule
+  create(context) → HostActionProvider
+                ↓
+HostActionRegistry
+  describe → schema/version/effects/binding
+  probe    → available/degraded/unavailable
+                ↓
+WorkspaceCapabilityComposition
+  CapabilityGraph → ToolPackComposer
+  Action tools + generated Prompt + completion guard
+                ↓
+PolicyEngine → ApprovalBroker → ActionInvoker
+                ↓
+LocalExecutor | NativeBridgeExecutor | RemoteActionExecutor
+                ↓
+ActionResult → Artifact / TestReport / Evidence
+                ↓
+Verifier → Session / TUI / Capsule</pre>
+<div class="grid"><div class="card"><h3>模型看到</h3><p>稳定 Action ID 转成工具名、JSON Schema、说明、risk/effects 和当前 availability。看不到 shell、绝对路径、PID、远程 token。</p></div><div class="card"><h3>宿主应用控制</h3><p>用哪个解释器、哪个构建系统、哪个 Native/Remote endpoint，以及允许的 env、network、secret scope。</p></div></div></section>
+
+<section id="objects"><h2>6. 核心对象</h2><pre>interface ActionProviderModule {
+  apiVersion: 1;
+  id: string;
+  create(context: ProviderHostContext): Promise&lt;HostActionProvider&gt;;
+}
+
+interface HostActionDescriptor {
+  id: string;
+  version: string;
+  title: string;
+  description: string;
+  inputSchema: JsonValue;
+  outputSchema?: JsonValue;
+  effects: Array&lt;'read' | 'write' | 'execute' | 'network'&gt;;
+  risk: 'read' | 'write' | 'dangerous';
+  timeoutMs?: number;
+  workspaceBinding: 'root' | 'fork' | 'remote';
+  limitations?: string[];
+  probe(): Promise&lt;ActionProbe&gt;;
+}
+
+interface ActionResult {
+  status: 'succeeded' | 'failed' | 'cancelled';
+  value: JsonValue;
+  exitCode?: number;
+  artifactIds?: string[];
+  testReport?: TestReport;
+  environmentId: string;
+  metrics?: {
+    durationMs?: number;
+    queueMs?: number;
+    cpuMs?: number;
+    peakMemoryBytes?: number;
+  };
+}</pre>
+<table><thead><tr><th>对象</th><th>责任</th></tr></thead><tbody>
+<tr><td><code>ActionProviderModule</code></td><td>受信模块入口，创建 Provider；不能被 Workspace 自动加载</td></tr>
+<tr><td><code>HostActionRegistry</code></td><td>合并 Provider、检测冲突、Probe、合并版本和限额</td></tr>
+<tr><td><code>ActionToolPack</code></td><td>Descriptor 到 ToolDefinition/UI/Prompt 的唯一转换</td></tr>
+<tr><td><code>ApprovalBroker</code></td><td>创建绑定 Session/task/generation 的批准票据</td></tr>
+<tr><td><code>ActionInvoker</code></td><td>校验输入、选择执行后端、发布流事件、取消</td></tr>
+<tr><td><code>TestEvidence</code></td><td>验证报告与当前文件/环境/generation 的关系</td></tr>
+<tr><td><code>RemoteActionExecutor</code></td><td>远程调用、流、取消、重连和结果验证</td></tr>
+</tbody></table></section>
+
+<section id="trust"><h2>7. 可信注册与加载</h2><table><thead><tr><th>来源</th><th>规则</th></tr></thead><tbody>
+<tr><td>嵌入 API</td><td>桌面/iOS 应用直接创建 Provider 并注入 Runtime；最高优先级</td></tr>
+<tr><td>受信模块</td><td>例如 <code>--action-provider /opt/app/actions.mjs</code>；路径由宿主配置或 allowlist 固定</td></tr>
+<tr><td>Workspace 模块</td><td>默认禁止自动加载。开发模式需显式 <code>--allow-workspace-action-modules</code> 并逐次审批</td></tr>
+<tr><td>Remote</td><td>只注册 endpoint 和允许的 action IDs；Provider 不能把任意 URL/Tool Schema 注入模型</td></tr>
+<tr><td>Package scripts</td><td>只能通过宿主显式映射成 Action ID，不能自动枚举后全部注册</td></tr>
+</tbody></table>
+<div class="danger rule">禁止把“项目目录存在 actions.js”当成自动加载依据。项目内容不可信，加载其中代码等同于通用代码执行。</div></section>
+
+<section id="execution"><h2>8. 执行后端</h2><div class="grid3"><div class="card"><h3>Local</h3><p>Node Host 使用 argv 启动进程；cwd 必须 WorkspacePath；env allowlist；进程组取消；输出 Artifact。</p></div><div class="card"><h3>Native Bridge</h3><p>iOS/macOS App 根据 actionId 调用原生实现；requestId、stream、cancel、result 均 JSON 化。</p></div><div class="card"><h3>Remote</h3><p>Chrome/Web 通过 HTTPS Action endpoint；携带 workspace ID/generation/hash；支持上传和结果同步。</p></div></div>
+<h3>远程协议</h3><pre>POST /v1/actions/invoke
+{
+  requestId, actionId, actionVersion,
+  workspace: { id, generation, manifestHash },
+  input, deadlineMs
+}
+
+events:
+  accepted | log | artifact | test_progress | result | error
+POST /v1/actions/cancel { requestId }
+GET  /v1/actions/{requestId}</pre><p>远程 Action 不接受裸 command 字符串。取消和重连使用 requestId；非幂等 Action 不能自动重试。</p></section>
+
+<section id="approval"><h2>9. 审批</h2><pre>Invocation requested
+  → validate schema
+  → policy: allow | ask | deny
+  → ask: Approval Ticket
+      sessionId + taskId + generation + actionId/version
+      normalized input preview
+      effects + risk + workspace binding + network/secret scopes
+  → approve once | deny | cancel
+  → invoke</pre><ul><li>批准不能扩展到不同 Action、不同 generation 或不同输入 digest。</li><li>auto 模式仍然执行 PolicyEngine；network/secret 可单独要求审批。</li><li>宿主迁移、Capsule 导入和版本变化使旧批准失效。</li><li>TUI 审批弹层不阻塞其他 Session 的只读观察，但该 Task 进入 waiting。</li></ul></section>
+
+<section id="evidence"><h2>10. TestReport 与 Evidence</h2><pre>interface TestReport {
+  runner: string;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  durationMs: number;
+  failures: Array&lt;{
+    suite?: string;
+    test: string;
+    message: string;
+    artifactId?: string;
+  }&gt;;
+  fileHashes: Record&lt;string, string&gt;;
+}</pre><table><thead><tr><th>状态</th><th>条件</th></tr></thead><tbody>
+<tr><td>current</td><td>Action 成功、报告有效、文件 hash 与 environmentId 匹配</td></tr>
+<tr><td>stale</td><td>Workspace、Action 版本、环境或文件 hash 已变化</td></tr>
+<tr><td>failed</td><td>Action 失败、TestReport 有 failure 或退出异常</td></tr>
+<tr><td>invalid</td><td>报告缺字段、数量不一致或 Artifact 缺失</td></tr>
+</tbody></table><div class="rule">exitCode=0 不等于测试通过；必须存在有效 TestReport，且 0 个测试默认不能证明完成。</div></section>
+
+<section id="surfaces"><h2>11. TUI / Headless / Chrome / iOS 接入</h2><table><thead><tr><th>端</th><th>Provider 来源</th><th>UI</th></tr></thead><tbody>
+<tr><td>TUI</td><td>嵌入 API、受信模块、npm-script 映射</td><td>Action 列表、Probe、ask 审批、结果和失败详情</td></tr>
+<tr><td>Headless</td><td>嵌入 API 或受信模块</td><td>结构化日志和退出码</td></tr>
+<tr><td>Chrome</td><td>RemoteActionProvider / Browser ActionProvider</td><td>可用性、环境、stale evidence 和远程请求状态</td></tr>
+<tr><td>iOS</td><td>Native Bridge</td><td>原生审批确认、后台执行和取消</td></tr>
+</tbody></table></section>
+
+<section id="failure"><h2>12. 失败、取消、重试与恢复</h2><table><thead><tr><th>场景</th><th>行为</th></tr></thead><tbody>
+<tr><td>Probe 失败</td><td>Action unavailable；Prompt/UI/ToolRegistry 同步隐藏或标记</td></tr>
+<tr><td>Schema 不合法</td><td>不调用 Provider；返回 ACTION_INPUT_INVALID</td></tr>
+<tr><td>审批拒绝</td><td>返回 denied；可重新规划，不得换工具绕过</td></tr>
+<tr><td>Timeout/Abort</td><td>发送 cancel，等待资源回收；结果 cancelled</td></tr>
+<tr><td>进程/远端崩溃</td><td>状态 unknown；危险 Action 不自动重试</td></tr>
+<tr><td>宿主断连</td><td>requestId 可查询；重连后重新 Probe；旧审批失效</td></tr>
+<tr><td>报告 malformed</td><td>Evidence invalid；Verifier 阻止完成</td></tr>
+<tr><td>版本变化</td><td>旧 Schema/批准/证据标 stale；重新发现 Action</td></tr>
+</tbody></table></section>
+
+<section id="roadmap"><h2>13. 能力补全路线</h2><p>本需求只交付 Action Runtime。后续能力独立登记，避免巨型需求无法验收。</p>
+<div class="phase"><div class="phase-no">0.5</div><div><h3>Action Runtime P0</h3></div></div><ul><li>Provider SDK、可信加载、本机执行。</li><li>ask/auto/deny 审批。</li><li>ActionResult、TestReport、Evidence。</li><li>Remote/Native 协议和 TUI/Headless 接入。</li></ul>
+<div class="phase"><div class="phase-no">0.6</div><div><h3>TestEvidence 与 Capsule 深化</h3></div></div><ul><li><code>REQ-TEST-001</code>：TestDiscovery、报告适配与验证门禁。</li><li><code>REQ-WORKSPACE-002</code>：TUI 导入、流式 Capsule、增量与大 Workspace。</li></ul>
+<div class="phase"><div class="phase-no">0.7</div><div><h3>Code Intelligence</h3></div></div><ul><li><code>REQ-LSP-001</code>：LSP Actions、符号索引、diagnostics、references。</li><li>无 LSP Host 的文本/符号 fallback。</li></ul>
+<div class="phase"><div class="phase-no">0.8</div><div><h3>Subagent Action Isolation</h3></div></div><ul><li><code>REQ-SUBAGENT-001</code>：root/fork/remote binding、并行验证和合并证据。</li></ul>
+<div class="phase"><div class="phase-no">0.9</div><div><h3>Chrome Parity 与跨平台</h3></div></div><ul><li><code>REQ-CHROME-001</code>：Chrome 共享 Composition、Capsule UI、Remote Action。</li><li>Windows/Linux/iOS Adapter。</li></ul>
+<div class="phase"><div class="phase-no">1.0</div><div><h3>Evaluation 与生产加固</h3></div></div><ul><li><code>REQ-EVAL-001</code>：复杂任务 Benchmark、故障注入、Soak、成本与误完成指标。</li></ul>
+</section>
+
+<section id="acceptance"><h2>14. 确认项与完成定义</h2><div class="grid"><div class="card"><h3>DECISION-01</h3><p>真实执行只通过具名 Provider Action；不新增通用 exec。</p></div><div class="card"><h3>DECISION-02</h3><p>Provider 模块必须来自受信来源；Workspace 代码默认不可自动加载。</p></div><div class="card"><h3>DECISION-03</h3><p>本地、Native、Remote 后端共享 ActionResult 和 TestReport。</p></div><div class="card"><h3>DECISION-04</h3><p>后续 LSP、Capsule v2、子 Agent 隔离拆成独立需求。</p></div></div><table><thead><tr><th>维度</th><th>完成标准</th></tr></thead><tbody><tr><td>Provider</td><td>生命周期、版本、Probe、重连和 dispose 有测试</td></tr><tr><td>执行</td><td>Local/Native/Remote 统一协议，取消和输出上限通过</td></tr><tr><td>审批</td><td>ask/auto/deny 与 generation 绑定，旧批准失效</td></tr><tr><td>证据</td><td>TestReport、Artifact、environmentId、file hash 可用</td></tr><tr><td>跨端</td><td>TUI/Headless/Chrome 使用同一 Action ToolPack</td></tr><tr><td>安全</td><td>不可信模块、Secret、网络和路径边界通过</td></tr><tr><td>追踪</td><td>需求、设计、测试、提交和发布关联完整</td></tr></tbody></table><p><a href="action-runtime-program-testing-v1.html#architecture-completeness">查看测试方案 →</a></p><p class="foot">REQ-ACTION-001 · Target 0.5.0 · architectureImpact: true · Status: accepted</p></section>
+</div></body></html>

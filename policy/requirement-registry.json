@@ -136,6 +136,19 @@
       "acceptance": "An idle TUI can export a flushed, non-empty Workspace Capsule with Ctrl+X or a fixed --capsule-export path; running sessions reject export without being silently stopped and failures remain visible and non-fatal.",
       "legacyAliases": [],
       "architectureImpact": true
+    },
+    {
+      "id": "REQ-ACTION-001",
+      "title": "Trusted application Action runtime with evidence",
+      "type": "feature",
+      "priority": "P0",
+      "status": "accepted",
+      "targetVersion": "0.5.0",
+      "design": "docs/action-runtime-program-design-v1.html#architecture-impact",
+      "testDesign": "docs/action-runtime-program-testing-v1.html#architecture-completeness",
+      "acceptance": "Trusted local, native and remote providers expose stable named actions with schemas, probe state, approval, cancellation and structured results; TestReports and artifacts become current evidence only when bound to the active workspace generation and environment.",
+      "legacyAliases": [],
+      "architectureImpact": true
     }
   ]
 }
