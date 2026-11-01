@@ -66,6 +66,7 @@ describe('TUI keymap', () => {
     expect(mapKey('\x03', conversation)).toEqual({ type: 'stop' });
     expect(mapKey('\x0b', conversation)).toEqual({ type: 'sessions' });
     expect(mapKey('\x14', conversation)).toEqual({ type: 'reasoning-mode' });
+    expect(mapKey('\x18', conversation)).toEqual({ type: 'export-capsule' });
     expect(mapKey('\x1b[D', conversation)).toEqual({ type: 'left' });
     expect(mapKey('\x1b[C', conversation)).toEqual({ type: 'right' });
     expect(mapKey('\x1b[H', conversation)).toEqual({ type: 'home' });

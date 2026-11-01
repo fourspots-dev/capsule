@@ -1010,6 +1010,7 @@ function renderHelp(width: number, height: number): StyledLine[] {
     ['Ctrl+I', 'full status'],
     ['Ctrl+O', 'review'],
     ['Ctrl+P', 'commands / help'],
+    ['Ctrl+X', 'export Workspace Capsule'],
     ['Esc', 'back'],
   ];
   const body = keys.map(([key, description]) =>

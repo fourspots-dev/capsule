@@ -86,7 +86,7 @@ class ModelHandler(BaseHTTPRequestHandler):
         return
 
 
-def read_available(fd, output, timeout):
+def read_available(fd, output, timeout, marker=None):
     end = time.time() + timeout
     while time.time() < end:
         ready, _, _ = select.select([fd], [], [], 0.1)
@@ -96,7 +96,7 @@ def read_available(fd, output, timeout):
             output.extend(os.read(fd, 65536))
         except OSError:
             return
-        if b"TUI capability completed" in bytes(output):
+        if marker is not None and marker in bytes(output):
             return
 
 
@@ -146,13 +146,17 @@ def main():
                 "mock",
                 "--action-script",
                 "app.game.check:check:Run TUI smoke check",
+                "--capsule-export",
+                str(root / "tui-workspace.capsule"),
             ],
         )
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 44, 128, 0, 0))
     output = bytearray()
     read_available(fd, output, 1.5)
     os.write(fd, b"Write and verify through portable tools\r")
-    read_available(fd, output, 15)
+    read_available(fd, output, 15, b"TUI capability completed")
+    os.write(fd, b"\x18")
+    read_available(fd, output, 5, b"Capsule exported:")
     os.write(fd, b"\x03")
     time.sleep(0.3)
     os.write(fd, b"\x03")
@@ -181,6 +185,10 @@ def main():
         "containsAction": "action_app_game_check" in text,
         "legacyShellAdvertised": "Virtual Shell only provides" in text,
         "verifiedFile": verified_file.read_text() if verified_file.exists() else None,
+        "capsuleExists": (root / "tui-workspace.capsule").exists(),
+        "capsuleBytes": (root / "tui-workspace.capsule").stat().st_size
+        if (root / "tui-workspace.capsule").exists()
+        else 0,
         "tail": text[-1800:],
     }
     print(json.dumps(result, indent=2))
@@ -189,6 +197,8 @@ def main():
         or not result["containsAction"]
         or result["legacyShellAdvertised"]
         or result["verifiedFile"] != "verified by portable TUI\n"
+        or not result["capsuleExists"]
+        or result["capsuleBytes"] <= 0
     ):
         raise SystemExit(2)
 

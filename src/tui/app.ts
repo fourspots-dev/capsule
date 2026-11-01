@@ -40,6 +40,7 @@ export interface TuiAppOptions {
   processAvailable?: boolean;
   review?: TuiReviewProvider;
   agentWorkspace?: TuiAgentWorkspacePort;
+  capsuleExport?: () => Promise<{ path: string }>;
   now?: () => number;
 }
 
@@ -117,6 +118,10 @@ export class TuiApp {
   }
 
   async action(intent: TuiIntent): Promise<void> {
+    if (intent.type === 'export-capsule') {
+      await this.exportCapsule();
+      return;
+    }
     if (this.confirmation) {
       await this.handleConfirmation(intent);
       return;
@@ -205,6 +210,25 @@ export class TuiApp {
     }
     if (this.routes.current.kind !== 'conversation') return;
     await this.handleConversationIntent(intent);
+  }
+
+  private async exportCapsule(): Promise<void> {
+    if (!this.options.capsuleExport) {
+      this.statusMessage = 'Workspace Capsule export is unavailable';
+      this.notifyRender();
+      return;
+    }
+    try {
+      this.statusMessage = 'Exporting Workspace Capsule…';
+      this.notifyRender();
+      const result = await this.options.capsuleExport();
+      this.statusMessage = `Capsule exported: ${result.path}`;
+    } catch (error) {
+      this.statusMessage = `Capsule export failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+    }
+    this.notifyRender();
   }
 
   render(width: number, height: number): string[] {

@@ -11,7 +11,7 @@
 </head>
 <body><div class="wrap">
 <header class="hero"><small>REQ-TUI-002 / HOST CAPABILITY INTEGRATION / DESIGN V1</small><h1>TUI 能力组合与架构完整性</h1><p>让 TUI 与 Headless Agent 共用 Capability Graph、ToolPack Composer、应用 Action Provider、动态 Prompt 和完成门禁；Portable Profile 默认不暴露通用 shell，Legacy Profile 仅显式选择。</p><div class="chips"><span class="chip">Target 0.4.0</span><span class="chip">Shared Composition</span><span class="chip">Portable Default</span><span class="chip">Legacy Opt-in</span><span class="chip">Architecture Impact</span></div></header>
-<nav><a href="#scope">范围</a><a href="#architecture-impact">影响面</a><a href="#architecture">架构</a><a href="#profiles">Profile</a><a href="#prompt">Prompt</a><a href="#verification">完成门禁</a><a href="#cli">CLI</a><a href="#invariants">不变量</a><a href="#acceptance">验收</a></nav>
+<nav><a href="#scope">范围</a><a href="#architecture-impact">影响面</a><a href="#architecture">架构</a><a href="#profiles">Profile</a><a href="#prompt">Prompt</a><a href="#verification">完成门禁</a><a href="#cli">CLI</a><a href="#capsule-export">Capsule导出</a><a href="#invariants">不变量</a><a href="#acceptance">验收</a></nav>
 
 <section id="scope"><h2>1. 问题与范围</h2><p>0.3.0 已实现 Action Provider、Portable Git 和 Workspace Capsule，但 TUI 仍使用独立的工具拼接、硬编码 Prompt 和 <code>exec/job_read</code> 完成门禁。它虽然可以启动，却没有完整消费新的架构能力。</p><div class="grid"><div class="card"><h3>本次必须完成</h3><ul><li>TUI 与 Headless 共用一个能力组合模块。</li><li>TUI 支持注册应用 npm-script Actions。</li><li>Portable 默认排除通用 VirtualShell。</li><li>Prompt 根据真实工具集合生成。</li><li>CompletionGuard 识别 Action 证据。</li><li>旧工具模式保留为显式 Legacy Profile。</li></ul></div><div class="card"><h3>非目标</h3><ul><li>新增图形审批弹窗；本轮 auto/deny 策略显式配置。</li><li>新增 TUI Capsule 专用按钮；继续复用 transfer CLI。</li><li>改变 TUI 的会话、子 Agent 和 Rich Render 布局。</li></ul></div></div></section>
 
@@ -55,8 +55,18 @@ example:
   tinyai-tui ./game \
     --action-script app.game.check:check:Run game validation</pre></section>
 
-<section id="invariants"><h2>8. 架构不变量与禁止状态</h2><ul><li>TUI 与 Headless 只能通过共享组合函数生成 Coding ToolPack。</li><li>Prompt 工具与 ToolRegistry 激活集合一致。</li><li>Portable Profile 不得注册 exec/job。</li><li>Action 缺失必须显示 unavailable，不得隐式回退 shell。</li><li>Action 失败、denied、absent 不得完成需要验证的写入任务。</li><li>Session 历史证据不能验证当前宿主或后续修改。</li></ul><div class="warn rule">禁止只在 Headless 修复能力或只在 TUI 硬编码 Action。任何 Consumer 未接通都视为需求未完成。</div></section>
+<section id="capsule-export"><h2>8. Workspace Capsule 导出</h2>
+<p>TUI 在空闲状态下使用 <code>Ctrl+X</code> 导出当前 Workspace。导出前 flush 所有 Session，写入 Project、Portable Git、AgentState、Artifact、Evidence 和 Environment；有 queued/running/waiting Session 时拒绝导出，避免把运行中资源伪装成已封存状态。</p>
+<pre>default:
+  &lt;workspace&gt;/.tinyai/exports/workspace-&lt;timestamp&gt;.capsule
 
-<section id="acceptance"><h2>9. 验收</h2><table><tbody><tr><td>共享组合</td><td>TUI 与 Headless 的工具集合来自同一函数并通过 Golden</td></tr><tr><td>Portable</td><td>默认工具不含 exec/job，包含 git_*</td></tr><tr><td>Actions</td><td>CLI 注册后模型可见并可调用</td></tr><tr><td>Prompt</td><td>与实际工具一致且无宿主绝对路径</td></tr><tr><td>Verifier</td><td>成功 Action 验证写后完成；失败/denied 阻断</td></tr><tr><td>Session</td><td>迁移 Session 在 auto/deny 模式下行为明确</td></tr><tr><td>E2E</td><td>伪终端 TUI 完成真实模型/模拟模型闭环</td></tr></tbody></table></section>
+fixed:
+  --capsule-export /path/to/workspace.capsule</pre>
+<p>导出成功后状态栏显示完整路径；失败显示结构化状态消息，不终止 TUI。</p>
+</section>
+
+<section id="invariants"><h2>9. 架构不变量与禁止状态</h2><ul><li>TUI 与 Headless 只能通过共享组合函数生成 Coding ToolPack。</li><li>Prompt 工具与 ToolRegistry 激活集合一致。</li><li>Portable Profile 不得注册 exec/job。</li><li>Action 缺失必须显示 unavailable，不得隐式回退 shell。</li><li>Action 失败、denied、absent 不得完成需要验证的写入任务。</li><li>Session 历史证据不能验证当前宿主或后续修改。</li></ul><div class="warn rule">禁止只在 Headless 修复能力或只在 TUI 硬编码 Action。任何 Consumer 未接通都视为需求未完成。</div></section>
+
+<section id="acceptance"><h2>10. 验收</h2><table><tbody><tr><td>共享组合</td><td>TUI 与 Headless 的工具集合来自同一函数并通过 Golden</td></tr><tr><td>Portable</td><td>默认工具不含 exec/job，包含 git_*</td></tr><tr><td>Actions</td><td>CLI 注册后模型可见并可调用</td></tr><tr><td>Prompt</td><td>与实际工具一致且无宿主绝对路径</td></tr><tr><td>Verifier</td><td>成功 Action 验证写后完成；失败/denied 阻断</td></tr><tr><td>Session</td><td>迁移 Session 在 auto/deny 模式下行为明确</td></tr><tr><td>Capsule</td><td>Ctrl+X 产生可导入的非空 Capsule</td></tr><tr><td>E2E</td><td>伪终端 TUI 完成真实模型/模拟模型闭环</td></tr></tbody></table></section>
 <p><a href="tui-capability-integration-testing-v1.html#architecture-completeness">查看测试方案 →</a></p><p class="foot">REQ-TUI-002 · Target 0.4.0 · architectureImpact: true · Status: verified</p>
 </div></body></html>

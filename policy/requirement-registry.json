@@ -123,6 +123,19 @@
       "acceptance": "TUI and Headless share one workspace capability composition; Portable is the default shell-free Coding profile, Legacy is explicit, application Actions are configurable, Prompt derives from the actual registry, and completion requires current action or legacy execution evidence.",
       "legacyAliases": [],
       "architectureImpact": true
+    },
+    {
+      "id": "REQ-TUI-003",
+      "title": "TUI workspace capsule export",
+      "type": "feature",
+      "priority": "P0",
+      "status": "verified",
+      "targetVersion": "0.4.1",
+      "design": "docs/tui-capability-integration-design-v1.html#capsule-export",
+      "testDesign": "docs/tui-capability-integration-testing-v1.html#capsule-export-tests",
+      "acceptance": "An idle TUI can export a flushed, non-empty Workspace Capsule with Ctrl+X or a fixed --capsule-export path; running sessions reject export without being silently stopped and failures remain visible and non-fatal.",
+      "legacyAliases": [],
+      "architectureImpact": true
     }
   ]
 }

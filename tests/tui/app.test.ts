@@ -200,6 +200,19 @@ describe('TuiApp and renderer', () => {
     await app.dispose();
   });
 
+  it('exports a workspace capsule from the TUI and reports its path', async () => {
+    const capsuleExport = vi.fn(async () => ({
+      path: '/tmp/tinyai-test.capsule',
+    }));
+    const { app } = await appWithAnswer('ready', { capsuleExport });
+    await app.handleInput('\x18');
+    expect(capsuleExport).toHaveBeenCalledTimes(1);
+    expect(app.render(100, 24).join('\n')).toContain(
+      'Capsule exported: /tmp/tinyai-test.capsule'
+    );
+    await app.dispose();
+  });
+
   it('shows a generic child agent and navigates into its live session', async () => {
     const { app, runtime } = await appWithAnswer('parent done');
     await app.handleInput('coordinate work\r');

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.1
+
+### Features
+
+- `REQ-TUI-003`: export a flushed Workspace Capsule from TUI with `Ctrl+X` or
+  `--capsule-export`, including Project, Portable Git, Session, Artifact,
+  evidence and environment state.
+
+### Verification
+
+- `npm run check`
+- `npm run verify:tui`
+- `npm run test:e2e`
+
 ## 0.4.0
 
 ### Features

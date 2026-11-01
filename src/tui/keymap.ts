@@ -13,6 +13,7 @@ export type TuiIntent =
   | { type: 'review' }
   | { type: 'commands' }
   | { type: 'reasoning-mode' }
+  | { type: 'export-capsule' }
   | { type: 'back' }
   | { type: 'help' }
   | { type: 'up' }
@@ -43,6 +44,7 @@ export function mapKey(
   if (key === '\x0f') return { type: 'review' };
   if (key === '\x10') return { type: 'commands' };
   if (key === '\x14') return { type: 'reasoning-mode' };
+  if (key === '\x18') return { type: 'export-capsule' };
   if (key === '\x1b[A' || key === '\x1bOA') return { type: 'up' };
   if (key === '\x1b[B' || key === '\x1bOB') return { type: 'down' };
   if (key === '\x1b[D' || key === '\x1bOD') return { type: 'left' };

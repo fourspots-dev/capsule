@@ -1,4 +1,5 @@
-import { resolve } from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 import { OpenAIModelTransport } from '../adapters/openai-model';
 import { HostArtifactStore } from '../adapters/host-artifact-store';
 import { HostSessionStore } from '../adapters/host-session-store';
@@ -23,6 +24,7 @@ import type { JsonValue, ToolDefinition } from '../core/types';
 import { WorkspaceRuntime } from '../core/workspace-runtime';
 import { NodeHostBridge } from '../node/node-host';
 import { NodeHostFileSystem } from '../node/host-fs';
+import { PortableGitBackend } from '../git/backend';
 import { runNodeTui } from '../node/run-tui';
 import { WorkspaceSubagentDriver } from '../runtime/workspace-subagent-driver';
 import {
@@ -38,6 +40,8 @@ import {
   ViewStateStore,
 } from '../tui';
 import { VirtualWorkspace } from '../virtual';
+import { serializeWorkspaceCapsule } from '../workspace/codec';
+import { WorkspaceContinuityService } from '../workspace/continuity';
 
 interface TuiCliOptions {
   workspace: string;
@@ -48,6 +52,7 @@ interface TuiCliOptions {
   toolProfile: WorkspaceToolProfile;
   approval: 'auto' | 'deny';
   actionScripts: NpmScriptActionDefinition[];
+  capsuleExportPath?: string;
 }
 
 async function main(): Promise<void> {
@@ -283,6 +288,58 @@ async function main(): Promise<void> {
     systemPrompt: [capability.prompt, workspaceEditPrompt].join('\n'),
     maxSteps: Number(process.env.TINYAI_MAX_STEPS ?? 120),
   });
+  const continuity = new WorkspaceContinuityService({
+    workspaceId: 'tinyai-tui-workspace',
+    vfs: workspace.fs,
+    git: new PortableGitBackend(workspace.fs),
+    sessions: sessionStore,
+    artifacts: artifactStore,
+    environmentId: `tui-${options.workspaceMode}-${options.toolProfile}`,
+    hostProfile:
+      options.workspaceMode === 'host' ? 'local-coding' : 'portable',
+    agentVersion: '0.4.0',
+    environment: {
+      manifestVersion: 1,
+      requiredActions: options.actionScripts.map((script) => ({
+        id: script.id,
+        versionRange: '1.0.0',
+        required: false,
+      })),
+      requiredCapabilities: [
+        'filesystem',
+        'git',
+        ...(options.actionScripts.length ? ['actions'] : []),
+      ],
+    },
+    beforeExport: async () => {
+      const sessions = await runtime.listSessions();
+      const active = sessions.find((session) =>
+        ['queued', 'running', 'waiting'].includes(session.taskStatus)
+      );
+      if (active) {
+        throw new Error(
+          `Cannot export while Session ${active.sessionId} is ${active.taskStatus}`
+        );
+      }
+      for (const session of sessions) {
+        await runtime.flush(session.sessionId);
+      }
+    },
+  });
+  const exportCapsule = async () => {
+    const capsule = await continuity.exportCapsule();
+    const path =
+      options.capsuleExportPath ??
+      resolve(
+        options.workspace,
+        '.tinyai',
+        'exports',
+        `workspace-${new Date().toISOString().replace(/[:.]/g, '-')}.capsule`
+      );
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, serializeWorkspaceCapsule(capsule));
+    return { path };
+  };
   const unsubscribeChildren = coordinator.subscribe((child) => {
     runtime.updateChildTask(child.parentTaskId, {
       taskId: child.taskId,
@@ -315,6 +372,7 @@ async function main(): Promise<void> {
       options.toolProfile,
       applicationActions.length ? `${applicationActions.length}-actions` : 'no-actions',
     ].join('/'),
+    capsuleExport: exportCapsule,
     ...(baseline
       ? {
           review: async () => {
@@ -411,6 +469,7 @@ function parseArgs(args: string[]): TuiCliOptions {
         '--workspace-mode',
         '--tool-profile',
         '--approval',
+        '--capsule-export',
       ].includes(arg)
     ) {
       const value = args[++index];
@@ -456,6 +515,9 @@ function parseArgs(args: string[]): TuiCliOptions {
     toolProfile: toolProfile as WorkspaceToolProfile,
     approval: approval as TuiCliOptions['approval'],
     actionScripts,
+    ...(values.get('--capsule-export')
+      ? { capsuleExportPath: resolve(values.get('--capsule-export')!) }
+      : {}),
   };
 }
 
@@ -472,6 +534,7 @@ function usage(): void {
       '  --tool-profile       portable | legacy (default: portable)',
       '  --approval           auto | deny (default: auto)',
       '  --action-script      id:script:title (repeatable)',
+      '  --capsule-export     Fixed output path for Ctrl+X Capsule export',
       '',
       'Environment: DEEPSEEK_API_KEY / TINYAI_API_KEY / OPENAI_API_KEY',
       '',
