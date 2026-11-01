@@ -146,6 +146,8 @@ def main():
                 "mock",
                 "--action-script",
                 "app.game.check:check:Run TUI smoke check",
+                "--test-action",
+                "app.game.check",
                 "--capsule-export",
                 str(root / "tui-workspace.capsule"),
             ],

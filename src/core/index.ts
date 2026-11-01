@@ -30,4 +30,6 @@ export * from './tool-schema';
 export * from './trace-recorder';
 export * from './types';
 export * from './verifier';
+export * from './test-report';
+export * from './evidence-store';
 export * from './workspace-runtime';

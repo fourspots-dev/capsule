@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { HostArtifactStore } from '../adapters/host-artifact-store';
 import { HostApprovalReceiptStore } from '../adapters/host-approval-receipt-store';
+import { HostEvidenceStore } from '../adapters/host-evidence-store';
+import { HostWorkspaceImportJournal } from '../adapters/host-workspace-import-journal';
 import { HostSessionStore } from '../adapters/host-session-store';
 import { NpmScriptActionProvider, type NpmScriptActionDefinition } from '../adapters/npm-action-provider';
 import { RemoteActionProvider } from '../adapters/remote-action-provider';
@@ -18,11 +19,19 @@ import { SequentialIdGenerator, systemClock } from '../core/ports';
 import { PermissionModeRegistry, PolicyEngine } from '../core/policy';
 import { SubagentCoordinator } from '../core/subagent-coordinator';
 import { ToolExecutor } from '../core/tool-executor';
+import {
+  TestEvidenceService,
+  createTestEvidenceCompletionGuard,
+} from '../evidence';
 import type { JsonValue, ToolDefinition } from '../core/types';
 import { WorkspaceRuntime } from '../core/workspace-runtime';
 import { PortableGitBackend } from '../git/backend';
 import { NodeHostFileSystem } from '../node/host-fs';
 import { NodeHostBridge } from '../node/node-host';
+import {
+  readWorkspaceCapsuleFile,
+  writeWorkspaceCapsuleFile,
+} from '../node/capsule-file';
 import {
   TrustedActionModuleLoader,
   type TrustedActionModuleSpec,
@@ -33,10 +42,8 @@ import { workspaceEditPrompt } from '../platform/workspace-edit-prompt';
 import { WorkspaceSubagentDriver } from '../runtime/workspace-subagent-driver';
 import {
   createWorkspaceCapabilityComposition,
-  createWorkspaceCompletionGuard,
 } from '../runtime/workspace-capability-composition';
 import { VirtualWorkspace } from '../virtual';
-import { parseWorkspaceCapsule, serializeWorkspaceCapsule } from '../workspace/codec';
 import { WorkspaceContinuityService } from '../workspace/continuity';
 
 interface WorkspaceAgentOptions {
@@ -49,6 +56,7 @@ interface WorkspaceAgentOptions {
   exportCapsule?: string;
   scripts: NpmScriptActionDefinition[];
   actionModules: TrustedActionModuleSpec[];
+  testActions: string[];
   maxSteps: number;
   approval: 'auto' | 'ask';
 }
@@ -82,6 +90,8 @@ async function main(): Promise<void> {
   const sessions = new HostSessionStore(host.storage);
   const artifacts = new HostArtifactStore(host.storage);
   const approvalReceipts = new HostApprovalReceiptStore(host.storage);
+  const evidenceStore = new HostEvidenceStore(host.storage);
+  const importJournal = new HostWorkspaceImportJournal(host.storage);
   const npmActions = new NpmScriptActionProvider({
     workspaceRoot: options.workspace,
     scripts: options.scripts,
@@ -115,20 +125,29 @@ async function main(): Promise<void> {
     availableActions: actionReport.available,
     actionDiagnostics: actionReport.diagnostics,
   });
+  const environmentFingerprint = [
+    `local-${process.platform}-${process.arch}`,
+    ...Object.entries(hostBaseline.tierState)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([tier, state]) => `${tier}:${state}`),
+  ].join('|');
+  const testEvidence = new TestEvidenceService({
+    store: evidenceStore,
+    artifacts,
+    vfs: fs,
+    environmentFingerprint,
+    workspaceGeneration: () => workspace.generation(),
+  });
   const capability = await createWorkspaceCapabilityComposition({
     workspace,
     profile: 'portable',
     actionRegistry,
     workspacePath: '',
     hostProfile: 'local-coding',
-    environmentFingerprint: [
-      `local-${process.platform}-${process.arch}`,
-      ...Object.entries(hostBaseline.tierState)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([tier, state]) => `${tier}:${state}`),
-    ].join('|'),
+    environmentFingerprint,
     hostBaseline,
     workspaceGeneration: () => workspace.generation(),
+    testEvidence,
   });
   const actionTools = capability.actionTools;
   const applicationActions = capability.applicationActions;
@@ -140,7 +159,7 @@ async function main(): Promise<void> {
     artifacts,
     environmentId: `local-${process.platform}-${process.arch}`,
     hostProfile: 'local-coding',
-    agentVersion: '0.6.0',
+    agentVersion: '0.7.0',
     newId: () => `capsule_${randomUUID()}`,
     environment: {
       manifestVersion: 1,
@@ -151,12 +170,16 @@ async function main(): Promise<void> {
       })),
       requiredCapabilities: ['filesystem', 'git', 'actions'],
     },
+    importJournal,
+    evidence: () => evidenceStore.list(),
+    restoreEvidence: async (records) => {
+      for (const record of records) await evidenceStore.save(record);
+    },
   });
+  await continuity.recoverInterruptedImport();
 
   if (options.importCapsule) {
-    const capsule = await parseWorkspaceCapsule(
-      await readFile(options.importCapsule)
-    );
+    const capsule = await readWorkspaceCapsuleFile(options.importCapsule);
     const prepared = await continuity.prepareImport(capsule, {
       availableActions: await actionRegistry.list(),
     });
@@ -282,10 +305,14 @@ async function main(): Promise<void> {
     sessionStore: sessions,
     permissionModes: modes,
     maxSteps: options.maxSteps,
-    completionGuard: createWorkspaceCompletionGuard(
-      'portable',
-      applicationActions
-    ),
+    completionGuard: createTestEvidenceCompletionGuard({
+      service: testEvidence,
+      store: evidenceStore,
+      actionVersions: async (actionId) =>
+        (await actionRegistry.list()).find(
+          (action) => action.descriptor.id === actionId
+        )?.descriptor.version,
+    }),
     systemPrompt: [capability.prompt, workspaceEditPrompt].join('\n'),
   });
   const unsubscribe = coordinator.subscribe((child) => {
@@ -344,9 +371,7 @@ async function main(): Promise<void> {
     }
     if (options.exportCapsule) {
       const capsule = await continuity.exportCapsule();
-      await import('node:fs/promises').then(({ writeFile }) =>
-        writeFile(options.exportCapsule!, serializeWorkspaceCapsule(capsule))
-      );
+      await writeWorkspaceCapsuleFile(options.exportCapsule, capsule);
     }
   } finally {
     unsubscribe();
@@ -360,6 +385,7 @@ async function main(): Promise<void> {
 function parseArgs(args: string[]): WorkspaceAgentOptions {
   const values = new Map<string, string>();
   const scriptSpecs: string[] = [];
+  const testActions: string[] = [];
   const actionModules: TrustedActionModuleSpec[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -373,6 +399,12 @@ function parseArgs(args: string[]): WorkspaceAgentOptions {
       const value = args[++index];
       if (!value) throw new Error('--action-module requires a path');
       actionModules.push({ path: resolve(value) });
+      continue;
+    }
+    if (arg === '--test-action') {
+      const value = args[++index];
+      if (!value) throw new Error('--test-action requires an Action id');
+      testActions.push(value);
       continue;
     }
     if (
@@ -404,6 +436,7 @@ function parseArgs(args: string[]): WorkspaceAgentOptions {
       script,
       title: title.join(':') || script,
       description: `Run the application npm script "${script}".`,
+      ...(testActions.includes(id) ? { testRunner: id } : {}),
     };
   });
   return {
@@ -428,6 +461,7 @@ function parseArgs(args: string[]): WorkspaceAgentOptions {
       : {}),
     scripts,
     actionModules,
+    testActions,
     maxSteps: Number(values.get('--max-steps') ?? 120),
     approval:
       values.get('--approval') === 'ask'

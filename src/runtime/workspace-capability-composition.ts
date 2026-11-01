@@ -5,6 +5,7 @@ import type { SessionView, ToolDefinition } from '../core/types';
 import { CapabilityGraph } from '../platform/capability';
 import type { HostActionRegistry } from '../platform/host-action';
 import type { HostBaselineReport } from '../host';
+import type { TestEvidenceService } from '../evidence';
 import { ToolPackComposer } from '../platform/tool-pack';
 import type { VirtualWorkspace } from '../virtual';
 
@@ -19,6 +20,7 @@ export interface WorkspaceCapabilityCompositionOptions {
   environmentFingerprint?: string;
   hostBaseline?: HostBaselineReport;
   workspaceGeneration?: () => number | Promise<number>;
+  testEvidence?: TestEvidenceService;
 }
 
 export interface WorkspaceCapabilityComposition {
@@ -54,6 +56,9 @@ export async function createWorkspaceCapabilityComposition(
             : {}),
           ...(options.workspaceGeneration
             ? { workspaceGeneration: options.workspaceGeneration }
+            : {}),
+          ...(options.testEvidence
+            ? { testEvidence: options.testEvidence }
             : {}),
         })
       : [];
@@ -199,6 +204,7 @@ function buildCapabilityPrompt(input: {
     'You are tinyai, a coding agent operating in a portable workspace.',
     'Use Workspace-relative paths only. Never expose or depend on a host absolute path.',
     'Workspace file, search, patch and Portable Git tools are available.',
+    'Use discover_tests to identify portable test files before choosing an execution Action.',
   ];
   if (input.actions.length) {
     lines.push(

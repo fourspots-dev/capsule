@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.7.0
+
+### Features
+
+- `REQ-TEST-001`: add portable test discovery, JSON/JUnit TestReport parsing,
+  durable TestEvidence and completion guards bound to current file hashes,
+  Workspace generation, environment fingerprint and Action version.
+- Reject zero tests, malformed reports, stale evidence, changed files and
+  failed reports without failure Artifacts.
+- `REQ-WORKSPACE-002`: add compressed, chunked, content-addressed Capsule v2
+  with backward-compatible v1 import.
+- Add explicit TUI `--import-capsule` preflight with replace/merge modes,
+  sessions/artifacts/evidence counts, missing Actions and path changes.
+- Persist TestEvidence in Capsule, invalidate it across environment changes, and recover interrupted imports through a durable HostStorage journal.
+
+### Verification
+
+- `npm run check`: 416 tests passed, 3 skipped.
+- `npm run test:e2e`: 5 Chrome extension tests passed.
+- `npm run verify:tui`: real PTY Action + current TestEvidence + Capsule v2 export.
+- Manual Capsule v2 export/import with byte-equal project restoration.
+
 ## 0.6.1
 
 ### Fixes

@@ -14,10 +14,18 @@ import { createWorkspaceBundle, type WorkspaceBundle } from '../virtual/archive-
 import type { VirtualFileSystem } from '../virtual/types';
 import {
   buildWorkspaceCapsule,
-  parseWorkspaceCapsule,
   sha256Hex,
-  serializeWorkspaceCapsule,
 } from './codec';
+import {
+  parseWorkspaceCapsuleAuto,
+  serializeWorkspaceCapsuleV2,
+} from './capsule-v2';
+import type {
+  PendingWorkspaceImport,
+  WorkspaceImportBackup,
+  WorkspaceImportJournal,
+  WorkspaceImportStage,
+} from './import-journal';
 import type {
   PreparedWorkspaceImport,
   WorkspaceArtifactRecord,
@@ -38,6 +46,10 @@ export interface WorkspaceContinuityOptions {
   environment: WorkspaceEnvironmentManifest;
   clientState?: WorkspaceClientState;
   evidence?: () => Promise<WorkspaceEvidenceRecord[]>;
+  restoreEvidence?: (
+    records: readonly WorkspaceEvidenceRecord[]
+  ) => Promise<void>;
+  importJournal?: WorkspaceImportJournal;
   beforeExport?: () => Promise<void>;
   now?: () => number;
   newId?: () => string;
@@ -108,7 +120,9 @@ export class WorkspaceContinuityService {
       );
     }
     const capsule = await this.exportCapsule();
-    await host.workspace.exportWorkspace(serializeWorkspaceCapsule(capsule));
+    await host.workspace.exportWorkspace(
+      await serializeWorkspaceCapsuleV2(capsule)
+    );
     return capsule;
   }
 
@@ -118,7 +132,7 @@ export class WorkspaceContinuityService {
       availableActions?: readonly AvailableHostAction[];
     } = {}
   ): Promise<PreparedWorkspaceImport> {
-    const capsule = await parseWorkspaceCapsule(input);
+    const capsule = await parseWorkspaceCapsuleAuto(input);
     const actions = new Map(
       (options.availableActions ?? []).map((action) => [
         action.descriptor.id,
@@ -145,11 +159,35 @@ export class WorkspaceContinuityService {
         }
       }
     }
+    const pathChanges: PreparedWorkspaceImport['pathChanges'] = [];
+    for (const file of capsule.partitions.project.files) {
+      const info = await this.options.vfs.stat(file.path);
+      if (!info || info.kind !== 'file') {
+        pathChanges.push({ path: file.path, status: 'added' });
+        continue;
+      }
+      const currentHash = await sha256Hex(
+        await this.options.vfs.read(file.path)
+      );
+      const incomingHash = await sha256Hex(base64ToBytes(file.dataBase64));
+      pathChanges.push({
+        path: file.path,
+        status: currentHash === incomingHash ? 'unchanged' : 'modified',
+      });
+    }
     return {
       capsule,
       actionsMissing,
       environmentChanged:
         capsule.manifest.producer.environmentId !== this.options.environmentId,
+      pathChanges: pathChanges.sort((left, right) =>
+        left.path.localeCompare(right.path)
+      ),
+      sessions: capsule.partitions.agentState.sessions.map(
+        (session) => session.sessionId
+      ),
+      artifactCount: capsule.partitions.artifacts.records.length,
+      evidenceCount: capsule.partitions.evidence.records.length,
     };
   }
 
@@ -183,11 +221,14 @@ export class WorkspaceContinuityService {
       (actionId) => `Application action unavailable: ${actionId}`
     );
     const backup = await this.captureBackup();
+    const journalId = await this.options.importJournal?.begin(backup);
     try {
+      await this.stageImport(journalId, 'project');
       await this.materializeProject(
         capsule.partitions.project,
         options.replaceProject === true
       );
+      await this.stageImport(journalId, 'repository');
       if (capsule.partitions.repository && this.options.git?.importRepository) {
         if (await this.options.vfs.stat('.git')) {
           await this.options.vfs.remove('.git', { recursive: true });
@@ -196,6 +237,7 @@ export class WorkspaceContinuityService {
           base64ToBytes(capsule.partitions.repository.dataBase64)
         );
       }
+      await this.stageImport(journalId, 'sessions');
       const sessions = capsule.partitions.agentState.sessions.map((snapshot) =>
         reconcileSession(
           snapshot,
@@ -207,11 +249,15 @@ export class WorkspaceContinuityService {
       if (this.options.sessions) {
         for (const session of sessions) await this.options.sessions.save(session);
       }
+      await this.stageImport(journalId, 'artifacts');
       await this.restoreArtifacts(capsule.partitions.artifacts.records);
+      await this.stageImport(journalId, 'evidence');
       this.evidenceRecords = await this.reconcileEvidence(
         capsule.partitions.evidence.records,
         prepared.environmentChanged
       );
+      await this.options.restoreEvidence?.(this.evidenceRecords);
+      await this.stageImport(journalId, 'metadata');
       this.generation = Math.max(
         this.generation + 1,
         capsule.manifest.generation + 1
@@ -227,6 +273,7 @@ export class WorkspaceContinuityService {
           ...capsule.partitions.environment.requiredCapabilities,
         ]),
       ].sort();
+      if (journalId) await this.options.importJournal?.complete(journalId);
       return {
         workspaceId: capsule.manifest.workspaceId,
         generation: this.generation,
@@ -237,8 +284,17 @@ export class WorkspaceContinuityService {
       };
     } catch (error) {
       await this.restoreBackup(backup);
+      if (journalId) await this.options.importJournal?.fail(journalId);
       throw error;
     }
+  }
+
+  async recoverInterruptedImport(): Promise<PendingWorkspaceImport | undefined> {
+    const pending = await this.options.importJournal?.pending();
+    if (!pending) return undefined;
+    await this.restoreBackup(pending.backup);
+    await this.options.importJournal?.fail(pending.id);
+    return pending;
   }
 
   currentGeneration(): number {
@@ -368,6 +424,12 @@ export class WorkspaceContinuityService {
     const result: WorkspaceEvidenceRecord[] = [];
     for (const record of records) {
       let current = !environmentChanged && record.status === 'current';
+      if (
+        current &&
+        record.environmentFingerprint !== this.options.environmentId
+      ) {
+        current = false;
+      }
       if (current) {
         for (const [path, expected] of Object.entries(record.fileHashes)) {
           const info = await this.options.vfs.stat(path);
@@ -384,7 +446,12 @@ export class WorkspaceContinuityService {
       }
       result.push({
         ...record,
-        status: record.status === 'failed' ? 'failed' : current ? 'current' : 'stale',
+        status:
+          record.status === 'failed' || record.status === 'invalid'
+            ? record.status
+            : current
+              ? 'current'
+              : 'stale',
         fileHashes: { ...record.fileHashes },
         ...(record.data === undefined ? {} : { data: structuredClone(record.data) }),
       });
@@ -392,12 +459,7 @@ export class WorkspaceContinuityService {
     return result;
   }
 
-  private async captureBackup(): Promise<{
-    project: WorkspaceBundle;
-    repository?: Uint8Array;
-    sessions: SessionSnapshot[];
-    artifacts: WorkspaceArtifactRecord[];
-  }> {
+  private async captureBackup(): Promise<WorkspaceImportBackup> {
     const repository =
       this.options.git?.exportRepository &&
       (await this.options.git.repository?.())
@@ -408,15 +470,19 @@ export class WorkspaceContinuityService {
       ...(repository ? { repository } : {}),
       sessions: await this.collectSessions(),
       artifacts: await this.collectArtifacts(),
+      evidence:
+        (await this.options.evidence?.()) ?? this.evidence(),
     };
   }
 
-  private async restoreBackup(backup: {
-    project: WorkspaceBundle;
-    repository?: Uint8Array;
-    sessions: SessionSnapshot[];
-    artifacts: WorkspaceArtifactRecord[];
-  }): Promise<void> {
+  private async stageImport(
+    id: string | undefined,
+    stage: WorkspaceImportStage
+  ): Promise<void> {
+    if (id) await this.options.importJournal?.stage(id, stage);
+  }
+
+  private async restoreBackup(backup: WorkspaceImportBackup): Promise<void> {
     await this.materializeProject(backup.project, true);
     if (backup.repository && this.options.git?.importRepository) {
       if (await this.options.vfs.stat('.git')) {
@@ -430,6 +496,10 @@ export class WorkspaceContinuityService {
       }
     }
     await this.restoreArtifacts(backup.artifacts);
+    this.evidenceRecords = backup.evidence.map((record) =>
+      structuredClone(record)
+    );
+    await this.options.restoreEvidence?.(this.evidenceRecords);
   }
 }
 

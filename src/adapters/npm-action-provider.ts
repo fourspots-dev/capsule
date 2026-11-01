@@ -1,4 +1,3 @@
-import { AgentError } from '../core/errors';
 import { LocalActionExecutor } from '../node/actions/local-action-executor';
 import type {
   HostActionContext,
@@ -14,6 +13,7 @@ export interface NpmScriptActionDefinition {
   description: string;
   script: string;
   timeoutMs?: number;
+  testRunner?: string;
 }
 
 export interface NpmActionProviderOptions {
@@ -63,6 +63,9 @@ export class NpmScriptActionProvider implements HostActionProvider {
       },
       effects: ['execute', 'read'],
       risk: 'dangerous',
+      ...(script.testRunner
+        ? { test: { runner: script.testRunner } }
+        : {}),
       timeoutMs: script.timeoutMs ?? 300_000,
       probe: async () => ({ state: 'available' }),
     }));
@@ -81,21 +84,7 @@ export class NpmScriptActionProvider implements HostActionProvider {
       timeoutMs: action.timeoutMs ?? 300_000,
       signal: context.signal,
     });
-    if (result.exitCode !== 0) {
-      throw new AgentError(
-        'ACTION_FAILED',
-        `npm script ${action.script} failed with exit code ${result.exitCode}`,
-        {
-          details: {
-            actionId,
-            exitCode: result.exitCode,
-            stdout: result.stdout,
-            stderr: result.stderr,
-            truncated: result.truncated,
-          },
-        }
-      );
-    }
+    const includeArtifacts = result.exitCode !== 0 || result.truncated;
     return {
       value: {
         actionId,
@@ -105,8 +94,10 @@ export class NpmScriptActionProvider implements HostActionProvider {
         stderr: result.stderr,
         truncated: result.truncated,
       },
+      status: result.exitCode === 0 ? 'succeeded' : 'failed',
+      exitCode: result.exitCode,
       truncated: result.truncated,
-      ...(result.truncated
+      ...(includeArtifacts
         ? {
             artifacts: [
               {

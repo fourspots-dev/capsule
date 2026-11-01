@@ -1,5 +1,6 @@
 import type { JsonValue, ToolDefinition, ToolInvocation } from '../core/types';
 import { AgentError } from '../core/errors';
+import type { TestEvidenceService } from '../evidence';
 import {
   HostActionRegistry,
   toolNameForAction,
@@ -15,6 +16,7 @@ export async function createHostActionTools(
     workspaceId?: string;
     workspaceGeneration?: number | (() => number | Promise<number>);
     environmentFingerprint?: string;
+    testEvidence?: TestEvidenceService;
     signal?: AbortSignal;
   } = {}
 ): Promise<ToolDefinition[]> {
@@ -59,6 +61,7 @@ function actionTool(
     workspaceId?: string;
     workspaceGeneration?: number | (() => number | Promise<number>);
     environmentFingerprint?: string;
+    testEvidence?: TestEvidenceService;
   }
 ): ToolDefinition {
   const descriptor = action.descriptor;
@@ -125,6 +128,25 @@ function actionTool(
         input,
         invocation
       );
+      const evidence =
+        descriptor.test && options.testEvidence
+          ? await options.testEvidence.recordActionTest({
+              sessionId: invocation.sessionId,
+              taskId: invocation.taskId,
+              action: {
+                id: descriptor.id,
+                version: descriptor.version,
+              },
+              runner: descriptor.test.runner,
+              result,
+            })
+          : undefined;
+      const attachmentArtifacts = evidence
+        ? []
+        : result.artifacts ?? [];
+      const artifactIds = evidence
+        ? evidence.artifactIds
+        : result.artifactIds ?? [];
       return {
         value: result.value,
         metadata: {
@@ -146,13 +168,21 @@ function actionTool(
           ...(result.replayed === undefined
             ? {}
             : { replayed: result.replayed }),
-          ...(result.artifactIds?.length
-            ? { artifactIds: [...result.artifactIds] }
+          ...(artifactIds.length
+            ? { artifactIds: [...artifactIds] }
+            : {}),
+          ...(evidence
+            ? {
+                evidence: {
+                  id: evidence.id,
+                  status: evidence.status,
+                },
+              }
             : {}),
         },
-        ...(result.artifacts?.length
+        ...(attachmentArtifacts.length
           ? {
-              attachments: result.artifacts.map((artifact) => ({
+              attachments: attachmentArtifacts.map((artifact) => ({
                 name: artifact.name,
                 mimeType: artifact.mimeType,
                 kind: artifact.kind,
@@ -173,6 +203,7 @@ async function runAction(
     workspaceId?: string;
     workspaceGeneration?: number | (() => number | Promise<number>);
     environmentFingerprint?: string;
+    testEvidence?: TestEvidenceService;
   },
   input: JsonValue,
   invocation: ToolInvocation

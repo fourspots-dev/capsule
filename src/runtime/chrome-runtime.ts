@@ -1,5 +1,7 @@
 import { ChromeBrowserProvider } from '../adapters/chrome-browser';
 import { ChromeArtifactStore } from '../adapters/chrome-artifact-store';
+import { HostEvidenceStore } from '../adapters/host-evidence-store';
+import { HostWorkspaceImportJournal } from '../adapters/host-workspace-import-journal';
 import { HttpMcpClient, HttpMcpTransport } from '../adapters/mcp-http';
 import { ChromeSessionStore } from '../adapters/chrome-session-store';
 import { ChromeSkillStore } from '../adapters/chrome-skill-store';
@@ -34,7 +36,7 @@ import { ChromeRuntimeExtension } from '../adapters/chrome-runtime-extension';
 import { CONFIG_KEY, migrateLegacyStorage } from './storage-migration';
 import { PortableGitBackend } from '../git/backend';
 import { WorkspaceContinuityService } from '../workspace/continuity';
-import { serializeWorkspaceCapsule } from '../workspace/codec';
+import { serializeWorkspaceCapsuleV2 } from '../workspace/capsule-v2';
 
 export const KERNEL_PORT_NAME = 'tinyai-runtime-v1';
 
@@ -156,6 +158,8 @@ export async function createChromeRuntimeBundle(
       get(keys: string | string[] | null): Promise<Record<string, unknown>>;
     }
   );
+  const evidenceStore = new HostEvidenceStore(chromeHost.storage);
+  const importJournal = new HostWorkspaceImportJournal(chromeHost.storage);
   let activeRuntime: WorkspaceRuntime | undefined;
   const continuity = new WorkspaceContinuityService({
     workspaceId: 'tinyai-browser-workspace',
@@ -165,7 +169,7 @@ export async function createChromeRuntimeBundle(
     artifacts: artifactStore,
     environmentId: 'chrome-extension-v1',
     hostProfile: 'browser-agent',
-    agentVersion: '0.6.0',
+    agentVersion: '0.7.0',
     newId: () => `capsule_${crypto.randomUUID()}`,
     beforeExport: async () => {
       if (!activeRuntime) return;
@@ -178,7 +182,13 @@ export async function createChromeRuntimeBundle(
       requiredActions: [],
       requiredCapabilities: ['filesystem', 'git', 'storage'],
     },
+    importJournal,
+    evidence: () => evidenceStore.list(),
+    restoreEvidence: async (records) => {
+      for (const record of records) await evidenceStore.save(record);
+    },
   });
+  await continuity.recoverInterruptedImport();
   if (options.initialCapsule) {
     const prepared = await continuity.prepareImport(options.initialCapsule);
     await continuity.commitImport(prepared, { replaceProject: true });
@@ -391,7 +401,7 @@ export async function createChromeRuntimeBundle(
     workspaceTransfer: {
       exportCapsule: () => continuity.exportCapsule(),
       serializeCapsule: async () =>
-        serializeWorkspaceCapsule(await continuity.exportCapsule()),
+        serializeWorkspaceCapsuleV2(await continuity.exportCapsule()),
       importCapsule: async (capsule) => {
         const prepared = await continuity.prepareImport(capsule);
         return continuity.commitImport(prepared, { replaceProject: true });

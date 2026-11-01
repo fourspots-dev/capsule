@@ -7,9 +7,9 @@ import { ChromeSessionStore } from '../../src/adapters/chrome-session-store';
 import { PortableGitBackend } from '../../src/git/backend';
 import { VirtualWorkspace } from '../../src/virtual';
 import {
-  parseWorkspaceCapsule,
-  serializeWorkspaceCapsule,
-} from '../../src/workspace/codec';
+  parseWorkspaceCapsuleAuto,
+  serializeWorkspaceCapsuleV2,
+} from '../../src/workspace/capsule-v2';
 import { WorkspaceContinuityService } from '../../src/workspace/continuity';
 
 class MemoryChromeStorage implements ChromeStorageArea {
@@ -61,7 +61,7 @@ async function importAndStage(capsuleBase64: string, environmentId: string) {
     artifacts,
     environmentId,
     hostProfile: 'browser-agent',
-    agentVersion: '0.3.0',
+    agentVersion: '0.7.0',
     newId: () => `capsule_${crypto.randomUUID()}`,
     environment: {
       manifestVersion: 1,
@@ -69,7 +69,7 @@ async function importAndStage(capsuleBase64: string, environmentId: string) {
       requiredCapabilities: ['filesystem', 'git', 'storage'],
     },
   });
-  const capsule = await parseWorkspaceCapsule(base64ToBytes(capsuleBase64));
+  const capsule = await parseWorkspaceCapsuleAuto(base64ToBytes(capsuleBase64));
   const prepared = await continuity.prepareImport(capsule);
   const imported = await continuity.commitImport(prepared, {
     replaceProject: true,
@@ -84,7 +84,9 @@ async function importAndStage(capsuleBase64: string, environmentId: string) {
   }
   return {
     imported,
-    exportedCapsuleBase64: bytesToBase64(serializeWorkspaceCapsule(exported)),
+    exportedCapsuleBase64: bytesToBase64(
+      await serializeWorkspaceCapsuleV2(exported)
+    ),
     sessions: await sessions.list(),
     gitLog: await git.log({ maxCount: 20 }),
     capability: host.descriptor,

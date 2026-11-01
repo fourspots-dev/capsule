@@ -23,6 +23,9 @@ export interface HostActionDescriptor {
   risk: ToolRisk;
   workspaceBinding?: 'root' | 'fork' | 'remote';
   idempotency?: 'safe' | 'required' | 'never';
+  test?: {
+    runner: string;
+  };
   timeoutMs?: number;
   limitations?: readonly string[];
   probe(): Promise<HostActionProbe>;

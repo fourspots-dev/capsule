@@ -308,6 +308,10 @@
   // src/workspace/codec.ts
   var encoder3 = new TextEncoder();
 
+  // src/workspace/capsule-v2.ts
+  var CAPSULE_V2_MAGIC = new TextEncoder().encode("TNYCAP2\n");
+  var DEFAULT_CHUNK_BYTES = 256 * 1024;
+
   // src/runtime/chrome-runtime.ts
   var KERNEL_PORT_NAME = "tinyai-runtime-v1";
 

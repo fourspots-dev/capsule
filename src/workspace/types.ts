@@ -1,6 +1,7 @@
 import type {
   ArtifactMetadata,
 } from '../core/artifact-store';
+import type { EvidenceRecord } from '../core/evidence-store';
 import type { SessionSnapshot } from '../core/session-store';
 import type { JsonValue } from '../core/types';
 import type { WorkspaceBundle } from '../virtual/archive-fs';
@@ -20,17 +21,7 @@ export interface WorkspaceEnvironmentManifest {
   requiredCapabilities: string[];
 }
 
-export interface WorkspaceEvidenceRecord {
-  id: string;
-  kind: 'command' | 'test' | 'review';
-  actionId?: string;
-  actionVersion?: string;
-  environmentId?: string;
-  status: 'current' | 'stale' | 'failed';
-  fileHashes: Record<string, string>;
-  createdAt: number;
-  data?: JsonValue;
-}
+export type WorkspaceEvidenceRecord = EvidenceRecord;
 
 export interface WorkspaceArtifactRecord {
   metadata: ArtifactMetadata;
@@ -96,6 +87,13 @@ export interface PreparedWorkspaceImport {
   capsule: WorkspaceCapsule;
   actionsMissing: string[];
   environmentChanged: boolean;
+  pathChanges: Array<{
+    path: string;
+    status: 'added' | 'modified' | 'unchanged';
+  }>;
+  sessions: string[];
+  artifactCount: number;
+  evidenceCount: number;
 }
 
 export interface WorkspaceImportResult {

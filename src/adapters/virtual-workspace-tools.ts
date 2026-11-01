@@ -1,5 +1,6 @@
 import { AgentError } from '../core/errors';
 import type { JsonValue, ToolDefinition, ToolInvocation } from '../core/types';
+import { discoverTests } from '../evidence';
 import { PortableGitBackend } from '../git/backend';
 import { createGitTools } from '../git/tools';
 import type { VirtualWorkspace } from '../virtual';
@@ -65,6 +66,16 @@ export function createVirtualWorkspaceTools(
             : { text: new TextDecoder().decode(data) }),
         };
       }
+    ),
+    tool(
+      'discover_tests',
+      'Discover portable test files and test projects in the workspace without executing them.',
+      schema({}),
+      'read',
+      'read',
+      async () => ({
+        candidates: await discoverTests(workspace.fs),
+      })
     ),
     tool(
       'write_file',

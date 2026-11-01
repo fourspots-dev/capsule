@@ -199,6 +199,7 @@ Application operations are exposed as named Actions:
 ```bash
 node dist/tinyai-tui.cjs --workspace ./app \
   --action-script app.test:test:"Run application tests" \
+  --test-action app.test \
   --approval ask
 
 node dist/tinyai-tui.cjs --workspace ./app \
@@ -220,6 +221,27 @@ export TINYAI_REMOTE_ACTIONS_TOKEN='...'
 
 `--approval ask` shows a blocking TUI prompt for dangerous Actions. Enter
 approves the current input/environment digest; Escape denies it.
+
+Only Actions marked with `--test-action` produce completion evidence. A task
+cannot complete without a current TestReport whose file hashes, Workspace
+generation, environment fingerprint and Action version still match. Zero tests,
+malformed reports and failures without Artifacts are rejected. Portable test
+discovery is exposed through the read-only `discover_tests` tool.
+
+Use `Ctrl+Y` to inspect the read-only Action Manager, including available,
+degraded and unavailable Actions with version, effects, risk and limitations.
+
+Capsules are exported as compressed, chunked and content-addressed Capsule v2;
+v1 capsules remain importable:
+
+```bash
+node dist/tinyai-tui.cjs --workspace ./restored \
+  --import-capsule ./workspace.capsule \
+  --import-mode replace
+```
+
+`replace` or `merge` is required before import. The preflight plan reports
+sessions, evidence, artifacts, missing Actions and per-path changes.
 
 The default screen contains one status line, the conversation and the composer.
 Useful keys:

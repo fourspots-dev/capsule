@@ -190,6 +190,10 @@ export interface ToolExecutionMetadata {
   exitCode?: number;
   truncated?: boolean;
   replayed?: boolean;
+  evidence?: {
+    id: string;
+    status: 'current' | 'stale' | 'failed' | 'invalid';
+  };
   artifactIds?: string[];
   artifacts?: ToolArtifactRef[];
 }

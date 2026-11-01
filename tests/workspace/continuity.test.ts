@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   InMemoryArtifactStore,
+  InMemoryEvidenceStore,
   InMemorySessionStore,
   type SessionSnapshot,
 } from '../../src/core';
+import { workspaceFileHashes } from '../../src/evidence';
 import { PortableGitBackend } from '../../src/git/backend';
 import { MemoryHostBridge, type HostBridge } from '../../src/host';
 import { MemoryFileSystem } from '../../src/virtual';
@@ -63,6 +65,13 @@ describe('WorkspaceContinuityService', () => {
     expect(decoder.decode(await target.artifacts.read(artifacts[0].id))).toBe(
       'test report'
     );
+    expect(await target.evidence.list()).toMatchObject([
+      {
+        id: 'evidence_game',
+        status: 'stale',
+        environmentFingerprint: 'node-local-v1',
+      },
+    ]);
     const reExported = await target.service.exportCapsule();
     expect(reExported.manifest.workspaceId).toBe('game-workspace');
     expect(reExported.partitions.environment.requiredActions).toEqual([
@@ -139,6 +148,27 @@ async function sourceFixture(requireBrowserAction = false) {
     sessionId: 'session_game',
     data: encoder.encode('test report'),
   });
+  await fixture.evidence.save({
+    id: 'evidence_game',
+    sessionId: 'session_game',
+    taskId: 'task_1',
+    workspaceGeneration: 3,
+    environmentFingerprint: 'node-local-v1',
+    action: { id: 'app.tests.run', version: '1.0.0' },
+    fileHashes: await workspaceFileHashes(fixture.vfs),
+    report: {
+      schemaVersion: 1,
+      runner: 'vitest',
+      total: 1,
+      passed: 1,
+      failed: 0,
+      skipped: 0,
+      failures: [],
+    },
+    status: 'current',
+    artifactIds: [],
+    createdAt: 1_700_000_000_000,
+  });
   return fixture;
 }
 
@@ -149,6 +179,7 @@ async function emptyFixture(environmentId: string, requireBrowserAction = false)
   });
   const sessions = new InMemorySessionStore();
   const artifacts = new InMemoryArtifactStore();
+  const evidence = new InMemoryEvidenceStore();
   const service = new WorkspaceContinuityService({
     workspaceId: 'game-workspace',
     generation: 3,
@@ -156,6 +187,10 @@ async function emptyFixture(environmentId: string, requireBrowserAction = false)
     git,
     sessions,
     artifacts,
+    evidence: () => evidence.list(),
+    restoreEvidence: async (records) => {
+      for (const record of records) await evidence.save(record);
+    },
     environmentId,
     hostProfile: environmentId === 'node-local-v1' ? 'local-coding' : 'portable',
     now: () => 1_700_000_000_000,
@@ -172,7 +207,7 @@ async function emptyFixture(environmentId: string, requireBrowserAction = false)
       requiredCapabilities: ['filesystem', 'git'],
     },
   });
-  return { vfs, git, sessions, artifacts, service };
+  return { vfs, git, sessions, artifacts, evidence, service };
 }
 
 function sessionSnapshot(): SessionSnapshot {

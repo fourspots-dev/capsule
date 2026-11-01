@@ -1025,6 +1025,116 @@
     return bytes;
   }
 
+  // src/adapters/host-evidence-store.ts
+  var HostEvidenceStore = class {
+    constructor(storage, prefix = "tinyai:evidence:v1:") {
+      this.storage = storage;
+      this.prefix = prefix;
+    }
+    storage;
+    prefix;
+    async save(record) {
+      await this.storage.set(
+        `${this.prefix}${encodeURIComponent(record.id)}`,
+        record
+      );
+    }
+    async list(filter = {}) {
+      const keys = await this.storage.list?.(this.prefix) ?? [];
+      const records = [];
+      for (const key of keys) {
+        const raw = await this.storage.get(key);
+        if (!isEvidence(raw)) continue;
+        if (filter.sessionId && raw.sessionId !== filter.sessionId) continue;
+        if (filter.taskId && raw.taskId !== filter.taskId) continue;
+        records.push(structuredClone(raw));
+      }
+      return records.sort((left, right) => left.createdAt - right.createdAt);
+    }
+  };
+  function isEvidence(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const record = value;
+    return Boolean(
+      typeof record.id === "string" && typeof record.sessionId === "string" && typeof record.taskId === "string" && typeof record.workspaceGeneration === "number" && typeof record.environmentFingerprint === "string" && record.action && typeof record.action.id === "string" && typeof record.action.version === "string" && record.fileHashes && typeof record.fileHashes === "object" && ["current", "stale", "failed", "invalid"].includes(
+        String(record.status)
+      ) && Array.isArray(record.artifactIds) && typeof record.createdAt === "number"
+    );
+  }
+
+  // src/adapters/host-workspace-import-journal.ts
+  var HostWorkspaceImportJournal = class {
+    constructor(storage, key = "tinyai:workspace-import:v1") {
+      this.storage = storage;
+      this.key = key;
+    }
+    storage;
+    key;
+    async begin(backup) {
+      const id = `import_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      await this.save({
+        schemaVersion: 1,
+        id,
+        stage: "planned",
+        backup: {
+          project: structuredClone(backup.project),
+          ...backup.repository ? { repositoryBase64: bytesToBase642(backup.repository) } : {},
+          sessions: structuredClone(backup.sessions),
+          artifacts: structuredClone(backup.artifacts),
+          evidence: structuredClone(backup.evidence)
+        }
+      });
+      return id;
+    }
+    async stage(id, stage) {
+      const current = await this.load();
+      if (!current || current.id !== id) return;
+      await this.save({ ...current, stage });
+    }
+    async complete(id) {
+      const current = await this.load();
+      if (current?.id === id) await this.storage.remove(this.key);
+    }
+    async fail(id) {
+      await this.complete(id);
+    }
+    async pending() {
+      const current = await this.load();
+      if (!current) return void 0;
+      return {
+        id: current.id,
+        stage: current.stage,
+        backup: {
+          project: structuredClone(current.backup.project),
+          ...current.backup.repositoryBase64 ? { repository: base64ToBytes2(current.backup.repositoryBase64) } : {},
+          sessions: structuredClone(current.backup.sessions),
+          artifacts: structuredClone(current.backup.artifacts),
+          evidence: structuredClone(current.backup.evidence)
+        }
+      };
+    }
+    async save(value) {
+      await this.storage.set(this.key, value);
+    }
+    async load() {
+      const value = await this.storage.get(this.key);
+      return value && typeof value === "object" && !Array.isArray(value) ? structuredClone(value) : void 0;
+    }
+  };
+  function bytesToBase642(data) {
+    let binary = "";
+    for (const byte of data) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  }
+  function base64ToBytes2(value) {
+    const binary = atob(value);
+    const result = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      result[index] = binary.charCodeAt(index);
+    }
+    return result;
+  }
+
   // src/adapters/mcp-http.ts
   var HttpMcpTransport = class {
     constructor(options) {
@@ -1903,12 +2013,12 @@
   }
   function assertHostCapabilities(host, required) {
     const report = inspectHostCapabilities(host);
-    const invalid4 = report.diagnostics.find(
+    const invalid5 = report.diagnostics.find(
       (diagnostic) => diagnostic.severity === "error"
     );
-    if (invalid4) {
-      throw new AgentError(invalid4.code, invalid4.message, {
-        details: { capability: invalid4.capability }
+    if (invalid5) {
+      throw new AgentError(invalid5.code, invalid5.message, {
+        details: { capability: invalid5.capability }
       });
     }
     const missing = required.filter(
@@ -2320,6 +2430,37 @@
     }
   }
 
+  // src/evidence/test-discovery.ts
+  async function discoverTests(vfs) {
+    const files = await vfs.list("", { recursive: true });
+    const candidates = [];
+    for (const file of files) {
+      if (file.kind !== "file") continue;
+      if (/(^|\/)(?:[^/]+\.)?(?:test|spec)\.[cm]?[jt]sx?$/.test(file.path)) {
+        candidates.push({
+          path: file.path,
+          framework: /\.spec\./.test(file.path) ? "jest" : "vitest",
+          kind: "file"
+        });
+      } else if (/(^|\/)test_[^/]+\.py$/.test(file.path) || /(^|\/)[^/]+_test\.py$/.test(file.path)) {
+        candidates.push({
+          path: file.path,
+          framework: "pytest",
+          kind: "file"
+        });
+      } else if (file.path.endsWith(".xcodeproj/project.pbxproj")) {
+        candidates.push({
+          path: file.path.replace(/\/project\.pbxproj$/, ""),
+          framework: "xcode",
+          kind: "project"
+        });
+      }
+    }
+    return candidates.sort(
+      (left, right) => left.path.localeCompare(right.path)
+    );
+  }
+
   // src/git/binary.ts
   var encoder = new TextEncoder();
   async function sha1(data) {
@@ -2424,12 +2565,12 @@
     new DataView(result.buffer).setUint32(0, value >>> 0, false);
     return result;
   }
-  function bytesToBase642(data) {
+  function bytesToBase643(data) {
     let binary = "";
     for (const byte of data) binary += String.fromCharCode(byte);
     return btoa(binary);
   }
-  function base64ToBytes2(value) {
+  function base64ToBytes3(value) {
     try {
       const binary = atob(value);
       const result = new Uint8Array(binary.length);
@@ -3682,7 +3823,7 @@
       }
       if (object.type === "blob") {
         const text = decodeTextStrict(object.data);
-        return text === void 0 ? { type: "blob", oid, bytes: object.data.byteLength, dataBase64: bytesToBase642(object.data) } : { type: "blob", oid, bytes: object.data.byteLength, text };
+        return text === void 0 ? { type: "blob", oid, bytes: object.data.byteLength, dataBase64: bytesToBase643(object.data) } : { type: "blob", oid, bytes: object.data.byteLength, text };
       }
       return { type: "tag", oid, data: decodeText(object.data) };
     }
@@ -3787,7 +3928,7 @@
         if (entry.kind !== "file") continue;
         files.push({
           path: entry.path.slice(this.gitDir.length + 1),
-          dataBase64: bytesToBase642(await this.fs.read(entry.path)),
+          dataBase64: bytesToBase643(await this.fs.read(entry.path)),
           mode: entry.mode
         });
       }
@@ -3817,7 +3958,7 @@
         const path = `.git/${normalizeGitPath(file.path)}`;
         const parent = path.slice(0, path.lastIndexOf("/"));
         if (parent) await this.fs.mkdir(parent, { recursive: true });
-        await this.fs.write(path, base64ToBytes2(file.dataBase64), {
+        await this.fs.write(path, base64ToBytes3(file.dataBase64), {
           ...file.mode === void 0 ? {} : { mode: file.mode }
         });
       }
@@ -4810,7 +4951,7 @@
       }
       for (const file of manifest.files ?? []) {
         const path = normalizeVirtualPath(file.path);
-        await this.memory.write(path, base64ToBytes3(file.data), {
+        await this.memory.write(path, base64ToBytes4(file.data), {
           mode: file.mode
         });
       }
@@ -4826,7 +4967,7 @@
         if (item.kind !== "file") continue;
         manifest.files.push({
           path: item.path,
-          data: bytesToBase643(await this.memory.read(item.path)),
+          data: bytesToBase644(await this.memory.read(item.path)),
           mode: item.mode,
           modifiedAt: item.modifiedAt,
           version: item.version
@@ -4835,12 +4976,12 @@
       await this.storage.set(this.storageKey, manifest);
     }
   };
-  function bytesToBase643(value) {
+  function bytesToBase644(value) {
     let binary = "";
     for (const byte of value) binary += String.fromCharCode(byte);
     return btoa(binary);
   }
-  function base64ToBytes3(value) {
+  function base64ToBytes4(value) {
     const binary = atob(value);
     const result = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) {
@@ -4901,7 +5042,7 @@
       for (const file of this.bundle.files) {
         await this.source.write(
           file.path,
-          base64ToBytes4(file.dataBase64, file.path),
+          base64ToBytes5(file.dataBase64, file.path),
           { ...file.mode === void 0 ? {} : { mode: file.mode } }
         );
       }
@@ -4961,7 +5102,7 @@
       }
       paths.add(path);
       const mode = file.mode === void 0 ? void 0 : Number.isInteger(file.mode) && file.mode >= 0 ? file.mode : invalidBundle(`Invalid file mode: ${path}`);
-      base64ToBytes4(file.dataBase64, path);
+      base64ToBytes5(file.dataBase64, path);
       return {
         path,
         dataBase64: file.dataBase64,
@@ -5037,7 +5178,7 @@
     }
     return result;
   }
-  function base64ToBytes4(value, path) {
+  function base64ToBytes5(value, path) {
     try {
       const binary = atob(value);
       const result = new Uint8Array(binary.length);
@@ -5205,7 +5346,7 @@
       this.head = state.head;
       for (const snapshot of state.snapshots) this.snapshots.set(snapshot.id, snapshot);
       for (const [id, encoded] of Object.entries(state.objects)) {
-        this.objects.set(id, base64ToBytes5(encoded));
+        this.objects.set(id, base64ToBytes6(encoded));
       }
     }
     async persist() {
@@ -5221,7 +5362,7 @@
           )
         })),
         objects: Object.fromEntries(
-          [...this.objects].map(([id, data]) => [id, bytesToBase644(data)])
+          [...this.objects].map(([id, data]) => [id, bytesToBase645(data)])
         )
       };
       await this.storage.set(this.storageKey, state);
@@ -5324,12 +5465,12 @@
     if (left.byteLength !== right.byteLength) return false;
     return left.every((byte, index) => byte === right[index]);
   }
-  function bytesToBase644(value) {
+  function bytesToBase645(value) {
     let binary = "";
     for (const byte of value) binary += String.fromCharCode(byte);
     return btoa(binary);
   }
-  function base64ToBytes5(value) {
+  function base64ToBytes6(value) {
     const binary = atob(value);
     const result = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) {
@@ -6989,7 +7130,7 @@
         if (file) {
           await this.vfs.write(
             normalizeVirtualPath(file.path),
-            base64ToBytes6(file.dataBase64),
+            base64ToBytes7(file.dataBase64),
             {
               ...file.mode === void 0 ? {} : { mode: file.mode },
               signal: options.signal
@@ -7032,9 +7173,9 @@
     return result;
   }
   function hashBase64(value) {
-    return hashVirtualBytes(base64ToBytes6(value));
+    return hashVirtualBytes(base64ToBytes7(value));
   }
-  function base64ToBytes6(value) {
+  function base64ToBytes7(value) {
     const binary = atob(value);
     const result = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) {
@@ -7293,7 +7434,7 @@
       }
       files.push({
         path: entry.path,
-        dataBase64: bytesToBase645(await vfs.read(entry.path)),
+        dataBase64: bytesToBase646(await vfs.read(entry.path)),
         mode: entry.mode,
         modifiedAt: entry.modifiedAt
       });
@@ -7320,18 +7461,18 @@
       await vfs.mkdir(directory, { recursive: true });
     }
     for (const file of bundle.files) {
-      await vfs.write(file.path, base64ToBytes7(file.dataBase64), {
+      await vfs.write(file.path, base64ToBytes8(file.dataBase64), {
         ...file.mode === void 0 ? {} : { mode: file.mode }
       });
     }
     return cloneBundle(bundle);
   }
-  function bytesToBase645(value) {
+  function bytesToBase646(value) {
     let binary = "";
     for (const byte of value) binary += String.fromCharCode(byte);
     return btoa(binary);
   }
-  function base64ToBytes7(value) {
+  function base64ToBytes8(value) {
     const binary = atob(value);
     const result = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) {
@@ -7466,9 +7607,19 @@
           return {
             path,
             bytes: data.byteLength,
-            ...input.encoding === "base64" ? { dataBase64: bytesToBase646(data) } : { text: new TextDecoder().decode(data) }
+            ...input.encoding === "base64" ? { dataBase64: bytesToBase647(data) } : { text: new TextDecoder().decode(data) }
           };
         }
+      ),
+      tool3(
+        "discover_tests",
+        "Discover portable test files and test projects in the workspace without executing them.",
+        schema2({}),
+        "read",
+        "read",
+        async () => ({
+          candidates: await discoverTests(workspace.fs)
+        })
       ),
       tool3(
         "write_file",
@@ -7498,7 +7649,7 @@
           const expected = optionalNumber(input, "expected_version");
           return workspace.fs.write(
             path,
-            base64 === void 0 ? new TextEncoder().encode(text) : base64ToBytes8(base64),
+            base64 === void 0 ? new TextEncoder().encode(text) : base64ToBytes9(base64),
             {
               signal: invocation.signal,
               ...expected === void 0 ? {} : { expectedVersion: expected },
@@ -7789,12 +7940,12 @@
   function stringArray2(value) {
     return Array.isArray(value) ? value.filter((item) => typeof item === "string") : void 0;
   }
-  function bytesToBase646(value) {
+  function bytesToBase647(value) {
     let binary = "";
     for (const byte of value) binary += String.fromCharCode(byte);
     return btoa(binary);
   }
-  function base64ToBytes8(value) {
+  function base64ToBytes9(value) {
     const binary = atob(value);
     const result = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) {
@@ -8337,7 +8488,7 @@
           try {
             validateJsonValue(profile.resultSchema, result.output ?? result.summary, "result");
           } catch (error2) {
-            const invalid4 = {
+            const invalid5 = {
               ...result,
               status: "failed",
               summary: "Child result failed schema validation",
@@ -8351,8 +8502,8 @@
                 retryable: false
               }
             };
-            this.finish(task, invalid4);
-            return completionCopy(invalid4);
+            this.finish(task, invalid5);
+            return completionCopy(invalid5);
           }
         }
         this.finish(task, result);
@@ -9141,7 +9292,7 @@ ${skillListing}` : ""
           }
           this.reply(port, requestId, {
             metadata,
-            dataBase64: bytesToBase647(data)
+            dataBase64: bytesToBase648(data)
           });
           return;
         }
@@ -9209,7 +9360,7 @@ ${skillListing}` : ""
       return this.runtime;
     }
   };
-  function bytesToBase647(value) {
+  function bytesToBase648(value) {
     let binary = "";
     for (const byte of value) binary += String.fromCharCode(byte);
     return btoa(binary);
@@ -13894,9 +14045,6 @@ ${lines.join("\n")}
       partitions
     };
   }
-  function serializeWorkspaceCapsule(capsule) {
-    return encoder3.encode(canonicalJson(capsule));
-  }
   async function parseWorkspaceCapsule(input) {
     let value = input;
     if (input instanceof Uint8Array) {
@@ -14012,6 +14160,207 @@ ${lines.join("\n")}
     ]);
   }
 
+  // src/workspace/capsule-v2.ts
+  var CAPSULE_V2_MAGIC = new TextEncoder().encode("TNYCAP2\n");
+  var CAPSULE_V2_FORMAT = "tinyai.workspace.capsule.v2";
+  var CAPSULE_V2_SCHEMA_VERSION = 2;
+  var DEFAULT_CHUNK_BYTES = 256 * 1024;
+  async function* encodeWorkspaceCapsuleV2Chunks(capsule, options = {}) {
+    const chunkBytes = Math.max(1, options.chunkBytes ?? DEFAULT_CHUNK_BYTES);
+    const partitions = [];
+    const payloads = [];
+    for (const [name, value] of Object.entries(capsule.partitions)) {
+      if (value === void 0) continue;
+      const raw = new TextEncoder().encode(
+        canonicalJson(value)
+      );
+      const compressed = await gzip(raw);
+      const chunks = [];
+      for (let offset = 0; offset < compressed.byteLength; offset += chunkBytes) {
+        const chunk = compressed.slice(
+          offset,
+          Math.min(compressed.byteLength, offset + chunkBytes)
+        );
+        chunks.push({
+          offset,
+          bytes: chunk.byteLength,
+          hash: await sha256Hex(chunk)
+        });
+        payloads.push(chunk);
+      }
+      partitions.push({
+        name,
+        rawBytes: raw.byteLength,
+        compressedBytes: compressed.byteLength,
+        hash: await sha256Hex(raw),
+        encoding: "gzip",
+        chunks
+      });
+    }
+    const partitionMetadata = partitions.map((partition) => ({
+      name: partition.name,
+      rawBytes: partition.rawBytes,
+      compressedBytes: partition.compressedBytes,
+      hash: partition.hash,
+      encoding: partition.encoding,
+      chunks: partition.chunks
+    }));
+    const rootDigest = await sha256Hex(
+      new TextEncoder().encode(
+        canonicalJson(partitionMetadata)
+      )
+    );
+    const header = {
+      format: CAPSULE_V2_FORMAT,
+      schemaVersion: CAPSULE_V2_SCHEMA_VERSION,
+      manifest: capsule.manifest,
+      chunkBytes,
+      partitions,
+      integrity: { algorithm: "sha256", rootDigest }
+    };
+    const headerBytes = new TextEncoder().encode(JSON.stringify(header));
+    const length = new Uint8Array(4);
+    new DataView(length.buffer).setUint32(0, headerBytes.byteLength);
+    yield concatBytes2([CAPSULE_V2_MAGIC, length, headerBytes]);
+    for (const payload of payloads) yield payload;
+  }
+  async function serializeWorkspaceCapsuleV2(capsule, options = {}) {
+    const chunks = [];
+    for await (const chunk of encodeWorkspaceCapsuleV2Chunks(
+      capsule,
+      options
+    )) {
+      chunks.push(chunk);
+    }
+    return concatBytes2(chunks);
+  }
+  async function parseWorkspaceCapsuleV2(input) {
+    if (!startsWith(input, CAPSULE_V2_MAGIC)) {
+      throw invalid4("Workspace capsule is not Capsule v2");
+    }
+    let cursor = CAPSULE_V2_MAGIC.byteLength;
+    requireBytes(input, cursor, 4);
+    const headerLength = new DataView(
+      input.buffer,
+      input.byteOffset + cursor,
+      4
+    ).getUint32(0);
+    cursor += 4;
+    requireBytes(input, cursor, headerLength);
+    let header;
+    try {
+      header = JSON.parse(
+        new TextDecoder().decode(input.slice(cursor, cursor + headerLength))
+      );
+    } catch {
+      throw invalid4("Capsule v2 header is not valid JSON");
+    }
+    cursor += headerLength;
+    if (header.format !== CAPSULE_V2_FORMAT || header.schemaVersion !== CAPSULE_V2_SCHEMA_VERSION || !Array.isArray(header.partitions)) {
+      throw new AgentError(
+        "CAPSULE_SCHEMA_UNSUPPORTED",
+        `Unsupported Capsule v2 header: ${String(header.schemaVersion)}`
+      );
+    }
+    const expectedRoot = await sha256Hex(
+      new TextEncoder().encode(
+        canonicalJson(
+          header.partitions.map((partition) => ({
+            name: partition.name,
+            rawBytes: partition.rawBytes,
+            compressedBytes: partition.compressedBytes,
+            hash: partition.hash,
+            encoding: partition.encoding,
+            chunks: partition.chunks
+          }))
+        )
+      )
+    );
+    if (expectedRoot !== header.integrity.rootDigest) {
+      throw invalid4("Capsule v2 metadata digest mismatch");
+    }
+    const capsule = {
+      manifest: header.manifest,
+      partitions: {}
+    };
+    for (const partition of header.partitions) {
+      const compressedChunks = [];
+      for (const chunk of partition.chunks) {
+        requireBytes(input, cursor, chunk.bytes);
+        const bytes = input.slice(cursor, cursor + chunk.bytes);
+        cursor += chunk.bytes;
+        if (await sha256Hex(bytes) !== chunk.hash) {
+          throw invalid4(`Capsule v2 chunk integrity mismatch: ${partition.name}`);
+        }
+        compressedChunks.push(bytes);
+      }
+      const raw = await gunzip(concatBytes2(compressedChunks));
+      if (raw.byteLength !== partition.rawBytes || await sha256Hex(raw) !== partition.hash) {
+        throw invalid4(`Capsule v2 partition integrity mismatch: ${partition.name}`);
+      }
+      let value;
+      try {
+        value = JSON.parse(new TextDecoder().decode(raw));
+      } catch {
+        throw invalid4(`Capsule v2 partition is not JSON: ${partition.name}`);
+      }
+      capsule.partitions[partition.name] = value;
+    }
+    if (cursor !== input.byteLength) {
+      throw invalid4("Capsule v2 contains trailing bytes");
+    }
+    return parseWorkspaceCapsule(capsule);
+  }
+  async function parseWorkspaceCapsuleAuto(input) {
+    if (input instanceof Uint8Array && startsWith(input, CAPSULE_V2_MAGIC)) {
+      return parseWorkspaceCapsuleV2(input);
+    }
+    return parseWorkspaceCapsule(input);
+  }
+  async function gzip(data) {
+    return transform(data, new CompressionStream("gzip"));
+  }
+  async function gunzip(data) {
+    return transform(data, new DecompressionStream("gzip"));
+  }
+  async function transform(data, stream) {
+    const writer = stream.writable.getWriter();
+    const copy = new Uint8Array(data.byteLength);
+    copy.set(data);
+    const writing = writer.write(copy).then(() => writer.close());
+    const chunks = [];
+    const reader = stream.readable.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) chunks.push(new Uint8Array(value));
+    }
+    await writing;
+    return concatBytes2(chunks);
+  }
+  function requireBytes(input, offset, length) {
+    if (offset + length > input.byteLength) {
+      throw invalid4("Capsule v2 is truncated");
+    }
+  }
+  function startsWith(input, prefix) {
+    if (input.byteLength < prefix.byteLength) return false;
+    return prefix.every((value, index) => input[index] === value);
+  }
+  function concatBytes2(chunks) {
+    const length = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+    const output = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      output.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return output;
+  }
+  function invalid4(message) {
+    return new AgentError("CAPSULE_INVALID", message);
+  }
+
   // src/workspace/continuity.ts
   var WorkspaceContinuityService = class {
     constructor(options) {
@@ -14034,7 +14383,7 @@ ${lines.join("\n")}
       this.evidenceRecords = await this.options.evidence?.() ?? this.evidenceRecords;
       const repository = this.options.git?.exportRepository && await this.options.git.repository?.() ? {
         format: "tinyai.git.repository",
-        dataBase64: bytesToBase642(await this.options.git.exportRepository())
+        dataBase64: bytesToBase643(await this.options.git.exportRepository())
       } : void 0;
       return buildWorkspaceCapsule({
         capsuleId: this.options.newId?.() ?? `capsule_${this.now()}`,
@@ -14067,11 +14416,13 @@ ${lines.join("\n")}
         );
       }
       const capsule = await this.exportCapsule();
-      await host.workspace.exportWorkspace(serializeWorkspaceCapsule(capsule));
+      await host.workspace.exportWorkspace(
+        await serializeWorkspaceCapsuleV2(capsule)
+      );
       return capsule;
     }
     async prepareImport(input, options = {}) {
-      const capsule = await parseWorkspaceCapsule(input);
+      const capsule = await parseWorkspaceCapsuleAuto(input);
       const actions = new Map(
         (options.availableActions ?? []).map((action) => [
           action.descriptor.id,
@@ -14094,10 +14445,34 @@ ${lines.join("\n")}
           }
         }
       }
+      const pathChanges = [];
+      for (const file of capsule.partitions.project.files) {
+        const info2 = await this.options.vfs.stat(file.path);
+        if (!info2 || info2.kind !== "file") {
+          pathChanges.push({ path: file.path, status: "added" });
+          continue;
+        }
+        const currentHash = await sha256Hex(
+          await this.options.vfs.read(file.path)
+        );
+        const incomingHash = await sha256Hex(base64ToBytes3(file.dataBase64));
+        pathChanges.push({
+          path: file.path,
+          status: currentHash === incomingHash ? "unchanged" : "modified"
+        });
+      }
       return {
         capsule,
         actionsMissing,
-        environmentChanged: capsule.manifest.producer.environmentId !== this.options.environmentId
+        environmentChanged: capsule.manifest.producer.environmentId !== this.options.environmentId,
+        pathChanges: pathChanges.sort(
+          (left, right) => left.path.localeCompare(right.path)
+        ),
+        sessions: capsule.partitions.agentState.sessions.map(
+          (session) => session.sessionId
+        ),
+        artifactCount: capsule.partitions.artifacts.records.length,
+        evidenceCount: capsule.partitions.evidence.records.length
       };
     }
     async importFromHost(host, options = {}) {
@@ -14120,19 +14495,23 @@ ${lines.join("\n")}
         (actionId) => `Application action unavailable: ${actionId}`
       );
       const backup = await this.captureBackup();
+      const journalId = await this.options.importJournal?.begin(backup);
       try {
+        await this.stageImport(journalId, "project");
         await this.materializeProject(
           capsule.partitions.project,
           options.replaceProject === true
         );
+        await this.stageImport(journalId, "repository");
         if (capsule.partitions.repository && this.options.git?.importRepository) {
           if (await this.options.vfs.stat(".git")) {
             await this.options.vfs.remove(".git", { recursive: true });
           }
           await this.options.git.importRepository(
-            base64ToBytes2(capsule.partitions.repository.dataBase64)
+            base64ToBytes3(capsule.partitions.repository.dataBase64)
           );
         }
+        await this.stageImport(journalId, "sessions");
         const sessions = capsule.partitions.agentState.sessions.map(
           (snapshot) => reconcileSession(
             snapshot,
@@ -14144,11 +14523,15 @@ ${lines.join("\n")}
         if (this.options.sessions) {
           for (const session of sessions) await this.options.sessions.save(session);
         }
+        await this.stageImport(journalId, "artifacts");
         await this.restoreArtifacts(capsule.partitions.artifacts.records);
+        await this.stageImport(journalId, "evidence");
         this.evidenceRecords = await this.reconcileEvidence(
           capsule.partitions.evidence.records,
           prepared.environmentChanged
         );
+        await this.options.restoreEvidence?.(this.evidenceRecords);
+        await this.stageImport(journalId, "metadata");
         this.generation = Math.max(
           this.generation + 1,
           capsule.manifest.generation + 1
@@ -14164,6 +14547,7 @@ ${lines.join("\n")}
             ...capsule.partitions.environment.requiredCapabilities
           ])
         ].sort();
+        if (journalId) await this.options.importJournal?.complete(journalId);
         return {
           workspaceId: capsule.manifest.workspaceId,
           generation: this.generation,
@@ -14174,8 +14558,16 @@ ${lines.join("\n")}
         };
       } catch (error2) {
         await this.restoreBackup(backup);
+        if (journalId) await this.options.importJournal?.fail(journalId);
         throw error2;
       }
+    }
+    async recoverInterruptedImport() {
+      const pending = await this.options.importJournal?.pending();
+      if (!pending) return void 0;
+      await this.restoreBackup(pending.backup);
+      await this.options.importJournal?.fail(pending.id);
+      return pending;
     }
     currentGeneration() {
       return this.generation;
@@ -14212,7 +14604,7 @@ ${lines.join("\n")}
         else {
           files.push({
             path: entry.path,
-            dataBase64: bytesToBase642(await this.options.vfs.read(entry.path)),
+            dataBase64: bytesToBase643(await this.options.vfs.read(entry.path)),
             mode: entry.mode,
             modifiedAt: entry.modifiedAt
           });
@@ -14247,7 +14639,7 @@ ${lines.join("\n")}
         }
         records.push({
           metadata: { ...metadata },
-          dataBase64: bytesToBase642(data)
+          dataBase64: bytesToBase643(data)
         });
       }
       return records;
@@ -14262,7 +14654,7 @@ ${lines.join("\n")}
         await this.options.vfs.mkdir(directory, { recursive: true });
       }
       for (const file of project.files) {
-        await this.options.vfs.write(file.path, base64ToBytes2(file.dataBase64), {
+        await this.options.vfs.write(file.path, base64ToBytes3(file.dataBase64), {
           ...file.mode === void 0 ? {} : { mode: file.mode }
         });
       }
@@ -14278,7 +14670,7 @@ ${lines.join("\n")}
       for (const record of records) {
         await this.options.artifacts.restore(
           record.metadata,
-          base64ToBytes2(record.dataBase64)
+          base64ToBytes3(record.dataBase64)
         );
       }
     }
@@ -14286,6 +14678,9 @@ ${lines.join("\n")}
       const result = [];
       for (const record of records) {
         let current = !environmentChanged && record.status === "current";
+        if (current && record.environmentFingerprint !== this.options.environmentId) {
+          current = false;
+        }
         if (current) {
           for (const [path, expected] of Object.entries(record.fileHashes)) {
             const info2 = await this.options.vfs.stat(path);
@@ -14302,7 +14697,7 @@ ${lines.join("\n")}
         }
         result.push({
           ...record,
-          status: record.status === "failed" ? "failed" : current ? "current" : "stale",
+          status: record.status === "failed" || record.status === "invalid" ? record.status : current ? "current" : "stale",
           fileHashes: { ...record.fileHashes },
           ...record.data === void 0 ? {} : { data: structuredClone(record.data) }
         });
@@ -14315,8 +14710,12 @@ ${lines.join("\n")}
         project: await this.collectProject(),
         ...repository ? { repository } : {},
         sessions: await this.collectSessions(),
-        artifacts: await this.collectArtifacts()
+        artifacts: await this.collectArtifacts(),
+        evidence: await this.options.evidence?.() ?? this.evidence()
       };
+    }
+    async stageImport(id, stage) {
+      if (id) await this.options.importJournal?.stage(id, stage);
     }
     async restoreBackup(backup) {
       await this.materializeProject(backup.project, true);
@@ -14332,6 +14731,10 @@ ${lines.join("\n")}
         }
       }
       await this.restoreArtifacts(backup.artifacts);
+      this.evidenceRecords = backup.evidence.map(
+        (record) => structuredClone(record)
+      );
+      await this.options.restoreEvidence?.(this.evidenceRecords);
     }
   };
   function reconcileSession(input, environmentChanged, environmentId, now) {
@@ -14460,6 +14863,8 @@ ${lines.join("\n")}
     const artifactStore = new ChromeArtifactStore(
       storage
     );
+    const evidenceStore = new HostEvidenceStore(chromeHost.storage);
+    const importJournal = new HostWorkspaceImportJournal(chromeHost.storage);
     let activeRuntime;
     const continuity = new WorkspaceContinuityService({
       workspaceId: "tinyai-browser-workspace",
@@ -14469,7 +14874,7 @@ ${lines.join("\n")}
       artifacts: artifactStore,
       environmentId: "chrome-extension-v1",
       hostProfile: "browser-agent",
-      agentVersion: "0.6.0",
+      agentVersion: "0.7.0",
       newId: () => `capsule_${crypto.randomUUID()}`,
       beforeExport: async () => {
         if (!activeRuntime) return;
@@ -14481,8 +14886,14 @@ ${lines.join("\n")}
         manifestVersion: 1,
         requiredActions: [],
         requiredCapabilities: ["filesystem", "git", "storage"]
+      },
+      importJournal,
+      evidence: () => evidenceStore.list(),
+      restoreEvidence: async (records) => {
+        for (const record of records) await evidenceStore.save(record);
       }
     });
+    await continuity.recoverInterruptedImport();
     if (options.initialCapsule) {
       const prepared = await continuity.prepareImport(options.initialCapsule);
       await continuity.commitImport(prepared, { replaceProject: true });
@@ -14690,7 +15101,7 @@ ${lines.join("\n")}
       artifacts: artifactStore,
       workspaceTransfer: {
         exportCapsule: () => continuity.exportCapsule(),
-        serializeCapsule: async () => serializeWorkspaceCapsule(await continuity.exportCapsule()),
+        serializeCapsule: async () => serializeWorkspaceCapsuleV2(await continuity.exportCapsule()),
         importCapsule: async (capsule) => {
           const prepared = await continuity.prepareImport(capsule);
           return continuity.commitImport(prepared, { replaceProject: true });

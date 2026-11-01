@@ -1,12 +1,16 @@
 import { randomUUID } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { HostArtifactStore } from '../adapters/host-artifact-store';
+import { HostEvidenceStore } from '../adapters/host-evidence-store';
 import { HostSessionStore } from '../adapters/host-session-store';
+import { HostWorkspaceImportJournal } from '../adapters/host-workspace-import-journal';
 import { PortableGitBackend } from '../git/backend';
 import { NodeHostFileSystem } from '../node/host-fs';
 import { NodeHostBridge } from '../node/node-host';
-import { parseWorkspaceCapsule, serializeWorkspaceCapsule } from '../workspace/codec';
+import {
+  readWorkspaceCapsuleFile,
+  writeWorkspaceCapsuleFile,
+} from '../node/capsule-file';
 import { WorkspaceContinuityService } from '../workspace/continuity';
 
 interface TransferOptions {
@@ -29,6 +33,8 @@ async function main(): Promise<void> {
   const git = new PortableGitBackend(fs);
   const sessions = new HostSessionStore(host.storage);
   const artifacts = new HostArtifactStore(host.storage);
+  const evidence = new HostEvidenceStore(host.storage);
+  const importJournal = new HostWorkspaceImportJournal(host.storage);
   const continuity = new WorkspaceContinuityService({
     workspaceId: 'tinyai-workspace',
     vfs: fs,
@@ -37,18 +43,24 @@ async function main(): Promise<void> {
     artifacts,
     environmentId: options.environmentId,
     hostProfile: 'local-coding',
-    agentVersion: '0.6.0',
+    agentVersion: '0.7.0',
     newId: () => `capsule_${randomUUID()}`,
     environment: {
       manifestVersion: 1,
       requiredActions: [],
       requiredCapabilities: ['filesystem', 'git'],
     },
+    importJournal,
+    evidence: () => evidence.list(),
+    restoreEvidence: async (records) => {
+      for (const record of records) await evidence.save(record);
+    },
   });
+  await continuity.recoverInterruptedImport();
 
   if (options.mode === 'export') {
     const capsule = await continuity.exportCapsule();
-    await writeFile(options.capsule, serializeWorkspaceCapsule(capsule));
+    await writeWorkspaceCapsuleFile(options.capsule, capsule);
     process.stdout.write(
       `${JSON.stringify({
         status: 'exported',
@@ -63,7 +75,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const capsule = await parseWorkspaceCapsule(await readFile(options.capsule));
+  const capsule = await readWorkspaceCapsuleFile(options.capsule);
   const prepared = await continuity.prepareImport(capsule);
   const result = await continuity.commitImport(prepared, {
     replaceProject: options.replaceProject,

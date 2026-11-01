@@ -1,8 +1,9 @@
-import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { OpenAIModelTransport } from '../adapters/openai-model';
 import { HostArtifactStore } from '../adapters/host-artifact-store';
 import { HostApprovalReceiptStore } from '../adapters/host-approval-receipt-store';
+import { HostEvidenceStore } from '../adapters/host-evidence-store';
+import { HostWorkspaceImportJournal } from '../adapters/host-workspace-import-journal';
 import { HostSessionStore } from '../adapters/host-session-store';
 import {
   NpmScriptActionProvider,
@@ -23,10 +24,18 @@ import { assertHostBaseline } from '../host';
 import { PermissionModeRegistry, PolicyEngine } from '../core/policy';
 import { SubagentCoordinator } from '../core/subagent-coordinator';
 import { ToolExecutor } from '../core/tool-executor';
+import {
+  TestEvidenceService,
+  createTestEvidenceCompletionGuard,
+} from '../evidence';
 import type { JsonValue, ToolDefinition } from '../core/types';
 import { WorkspaceRuntime } from '../core/workspace-runtime';
 import { NodeHostBridge } from '../node/node-host';
 import { NodeHostFileSystem } from '../node/host-fs';
+import {
+  readWorkspaceCapsuleFile,
+  writeWorkspaceCapsuleFile,
+} from '../node/capsule-file';
 import {
   TrustedActionModuleLoader,
   type TrustedActionModuleSpec,
@@ -47,7 +56,6 @@ import {
   ViewStateStore,
 } from '../tui';
 import { VirtualWorkspace } from '../virtual';
-import { serializeWorkspaceCapsule } from '../workspace/codec';
 import { WorkspaceContinuityService } from '../workspace/continuity';
 
 interface TuiCliOptions {
@@ -60,7 +68,10 @@ interface TuiCliOptions {
   approval: 'auto' | 'ask' | 'deny';
   actionScripts: NpmScriptActionDefinition[];
   actionModules: TrustedActionModuleSpec[];
+  testActions: string[];
   capsuleExportPath?: string;
+  importCapsule?: string;
+  importMode?: 'replace' | 'merge';
 }
 
 async function main(): Promise<void> {
@@ -137,6 +148,8 @@ async function main(): Promise<void> {
   const sessionStore = new HostSessionStore(host.storage);
   const artifactStore = new HostArtifactStore(host.storage);
   const approvalReceipts = new HostApprovalReceiptStore(host.storage);
+  const evidenceStore = new HostEvidenceStore(host.storage);
+  const importJournal = new HostWorkspaceImportJournal(host.storage);
   const actionRegistry = new HostActionRegistry();
   if (host.actions) {
     actionRegistry.register(host.descriptor.id, host.actions);
@@ -178,20 +191,29 @@ async function main(): Promise<void> {
     availableActions: actionReport.available,
     actionDiagnostics: actionReport.diagnostics,
   });
+  const environmentFingerprint = [
+    `tui-${options.workspaceMode}-${options.toolProfile}`,
+    ...Object.entries(hostBaseline.tierState)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([tier, state]) => `${tier}:${state}`),
+  ].join('|');
+  const testEvidence = new TestEvidenceService({
+    store: evidenceStore,
+    artifacts: artifactStore,
+    vfs: workspace.fs,
+    environmentFingerprint,
+    workspaceGeneration: () => workspace.generation(),
+  });
   const capability = await createWorkspaceCapabilityComposition({
     workspace,
     profile: options.toolProfile,
     actionRegistry,
     workspacePath: '',
     hostProfile: options.workspaceMode === 'host' ? 'local-coding' : 'portable',
-    environmentFingerprint: [
-      `tui-${options.workspaceMode}-${options.toolProfile}`,
-      ...Object.entries(hostBaseline.tierState)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([tier, state]) => `${tier}:${state}`),
-    ].join('|'),
+    environmentFingerprint,
     hostBaseline,
     workspaceGeneration: () => workspace.generation(),
+    testEvidence,
   });
   const actionTools = capability.actionTools;
   const applicationActions = capability.applicationActions;
@@ -332,10 +354,20 @@ async function main(): Promise<void> {
         mode: options.approval === 'auto' ? 'sandbox-auto' : 'guarded',
       });
     },
-    completionGuard: createWorkspaceCompletionGuard(
-      options.toolProfile,
-      applicationActions
-    ),
+    completionGuard:
+      options.toolProfile === 'portable'
+        ? createTestEvidenceCompletionGuard({
+            service: testEvidence,
+            store: evidenceStore,
+            actionVersions: async (actionId) =>
+              (await actionRegistry.list()).find(
+                (action) => action.descriptor.id === actionId
+              )?.descriptor.version,
+          })
+        : createWorkspaceCompletionGuard(
+            options.toolProfile,
+            applicationActions
+          ),
     systemPrompt: [capability.prompt, workspaceEditPrompt].join('\n'),
     maxSteps: Number(process.env.TINYAI_MAX_STEPS ?? 120),
   });
@@ -348,7 +380,7 @@ async function main(): Promise<void> {
     environmentId: `tui-${options.workspaceMode}-${options.toolProfile}`,
     hostProfile:
       options.workspaceMode === 'host' ? 'local-coding' : 'portable',
-    agentVersion: '0.6.0',
+    agentVersion: '0.7.0',
     environment: {
       manifestVersion: 1,
       requiredActions: options.actionScripts.map((script) => ({
@@ -361,6 +393,11 @@ async function main(): Promise<void> {
         'git',
         ...(options.actionScripts.length ? ['actions'] : []),
       ],
+    },
+    importJournal,
+    evidence: () => evidenceStore.list(),
+    restoreEvidence: async (records) => {
+      for (const record of records) await evidenceStore.save(record);
     },
     beforeExport: async () => {
       const sessions = await runtime.listSessions();
@@ -377,6 +414,16 @@ async function main(): Promise<void> {
       }
     },
   });
+  const recoveredImport = await continuity.recoverInterruptedImport();
+  if (recoveredImport) {
+    process.stderr.write(
+      `${JSON.stringify({
+        type: 'capsule_import_recovered',
+        importId: recoveredImport.id,
+        stage: recoveredImport.stage,
+      })}\n`
+    );
+  }
   const exportCapsule = async () => {
     const capsule = await continuity.exportCapsule();
     const path =
@@ -387,10 +434,37 @@ async function main(): Promise<void> {
         'exports',
         `workspace-${new Date().toISOString().replace(/[:.]/g, '-')}.capsule`
       );
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, serializeWorkspaceCapsule(capsule));
+    await writeWorkspaceCapsuleFile(path, capsule);
     return { path };
   };
+  if (options.importCapsule) {
+    const capsule = await readWorkspaceCapsuleFile(options.importCapsule);
+    const prepared = await continuity.prepareImport(capsule, {
+      availableActions: await actionRegistry.list(),
+    });
+    process.stderr.write(
+      `${JSON.stringify({
+        type: 'capsule_import_planned',
+        mode: options.importMode,
+        actionsMissing: prepared.actionsMissing,
+        pathChanges: prepared.pathChanges,
+        sessions: prepared.sessions,
+        artifactCount: prepared.artifactCount,
+        evidenceCount: prepared.evidenceCount,
+        environmentChanged: prepared.environmentChanged,
+      })}\n`
+    );
+    const result = await continuity.commitImport(prepared, {
+      replaceProject: options.importMode === 'replace',
+    });
+    process.stderr.write(
+      `${JSON.stringify({
+        type: 'capsule_imported',
+        mode: options.importMode,
+        ...result,
+      })}\n`
+    );
+  }
   const unsubscribeChildren = coordinator.subscribe((child) => {
     runtime.updateChildTask(child.parentTaskId, {
       taskId: child.taskId,
@@ -465,6 +539,7 @@ async function main(): Promise<void> {
           review: async () => {
             const current = await workspace.checkpoint('tui-review');
             const diff = await workspace.diff(baseline.id, current.id);
+            const evidence = await evidenceStore.list();
             return {
               from: diff.from,
               to: diff.to,
@@ -481,6 +556,19 @@ async function main(): Promise<void> {
                   (file.patch?.split('\n').filter((line) => line.startsWith('-')).length ?? 0),
                 0
               ),
+              verification: evidence.slice(-10).map((record) => ({
+                name: record.report
+                  ? `${record.report.runner} ${record.report.passed}/${record.report.total}`
+                  : record.action.id,
+                status:
+                  record.status === 'current'
+                    ? ('passed' as const)
+                    : record.status === 'stale' ||
+                        record.status === 'invalid'
+                      ? ('skipped' as const)
+                      : ('failed' as const),
+                detail: record.reason ?? record.status,
+              })),
               risks: [],
             };
           },
@@ -531,7 +619,10 @@ function parseArgs(args: string[]): TuiCliOptions {
   const values = new Map<string, string>();
   const positional: string[] = [];
   const actionScripts: NpmScriptActionDefinition[] = [];
+  const testActionIds: string[] = [];
   const actionModules: TrustedActionModuleSpec[] = [];
+  let importCapsule: string | undefined;
+  let importMode: 'replace' | 'merge' | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === '--action-script') {
@@ -555,6 +646,12 @@ function parseArgs(args: string[]): TuiCliOptions {
       actionModules.push({ path: resolve(value) });
       continue;
     }
+    if (arg === '--test-action') {
+      const value = args[++index];
+      if (!value) throw new Error('--test-action requires an Action id');
+      testActionIds.push(value);
+      continue;
+    }
     if (
       [
         '--workspace',
@@ -565,6 +662,8 @@ function parseArgs(args: string[]): TuiCliOptions {
         '--tool-profile',
         '--approval',
         '--capsule-export',
+        '--import-capsule',
+        '--import-mode',
       ].includes(arg)
     ) {
       const value = args[++index];
@@ -576,6 +675,17 @@ function parseArgs(args: string[]): TuiCliOptions {
     } else {
       positional.push(arg);
     }
+  }
+  importCapsule = values.get('--import-capsule')
+    ? resolve(values.get('--import-capsule')!)
+    : undefined;
+  const rawImportMode = values.get('--import-mode');
+  if (rawImportMode && rawImportMode !== 'replace' && rawImportMode !== 'merge') {
+    throw new Error('--import-mode must be replace or merge');
+  }
+  importMode = rawImportMode as 'replace' | 'merge' | undefined;
+  if (importCapsule && !importMode) {
+    throw new Error('--import-mode is required with --import-capsule');
   }
   const imported = values.get('--import') ?? 'auto';
   if (!['auto', 'always', 'never'].includes(imported)) {
@@ -592,6 +702,9 @@ function parseArgs(args: string[]): TuiCliOptions {
   const approval = values.get('--approval') ?? 'auto';
   if (!['auto', 'ask', 'deny'].includes(approval)) {
     throw new Error('--approval must be auto, ask or deny');
+  }
+  for (const script of actionScripts) {
+    if (testActionIds.includes(script.id)) script.testRunner = script.id;
   }
   return {
     workspace: resolve(values.get('--workspace') ?? positional[0] ?? process.cwd()),
@@ -611,9 +724,12 @@ function parseArgs(args: string[]): TuiCliOptions {
     approval: approval as TuiCliOptions['approval'],
     actionScripts,
     actionModules,
+    testActions: testActionIds,
     ...(values.get('--capsule-export')
       ? { capsuleExportPath: resolve(values.get('--capsule-export')!) }
       : {}),
+    ...(importCapsule ? { importCapsule } : {}),
+    ...(importMode ? { importMode } : {}),
   };
 }
 
@@ -631,7 +747,10 @@ function usage(): void {
       '  --approval           auto | ask | deny (default: auto)',
       '  --action-script      id:script:title (repeatable)',
       '  --action-module      absolute trusted provider module (repeatable)',
+      '  --test-action        Action id that emits completion TestEvidence',
       '  --capsule-export     Fixed output path for Ctrl+X Capsule export',
+      '  --import-capsule     Capsule v1/v2 file to import before the TUI starts',
+      '  --import-mode        replace | merge (explicit approval for import)',
       '',
       'Environment: DEEPSEEK_API_KEY / TINYAI_API_KEY / OPENAI_API_KEY',
       '',
