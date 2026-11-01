@@ -192,7 +192,7 @@ GET  /v1/actions/{requestId}</pre><p>远程 Action 不接受裸 command 字符�
 <tr><td>版本变化</td><td>旧 Schema/批准/证据标 stale；重新发现 Action</td></tr>
 </tbody></table></section>
 
-<section id="roadmap"><h2>13. 能力补全路线</h2><p>本需求只交付 Action Runtime。后续能力独立登记，避免巨型需求无法验收。</p>
+<section id="roadmap"><h2>13. 能力补全路线</h2><p>本需求只交付 Action Runtime。后续能力独立登记，避免巨型需求无法验收。完整依赖矩阵见 <a href="capability-completion-program-v2.html">Capability Completion Program V2</a>。</p>
 <div class="phase"><div class="phase-no">0.5</div><div><h3>Action Runtime P0</h3></div></div><ul><li>Provider SDK、可信加载、本机执行。</li><li>ask/auto/deny 审批。</li><li>ActionResult、TestReport、Evidence。</li><li>Remote/Native 协议和 TUI/Headless 接入。</li></ul>
 <div class="phase"><div class="phase-no">0.6</div><div><h3>TestEvidence 与 Capsule 深化</h3></div></div><ul><li><code>REQ-TEST-001</code>：TestDiscovery、报告适配与验证门禁。</li><li><code>REQ-WORKSPACE-002</code>：TUI 导入、流式 Capsule、增量与大 Workspace。</li></ul>
 <div class="phase"><div class="phase-no">0.7</div><div><h3>Code Intelligence</h3></div></div><ul><li><code>REQ-LSP-001</code>：LSP Actions、符号索引、diagnostics、references。</li><li>无 LSP Host 的文本/符号 fallback。</li></ul>

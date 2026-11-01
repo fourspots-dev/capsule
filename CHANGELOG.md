@@ -6,6 +6,14 @@
 
 - `REQ-ACTION-001`: trusted Application Action runtime with provider SDK,
   local/native/remote execution, interactive approval and TestEvidence.
+- `REQ-HOST-002`: normative Host Baseline Matrix and startup capability probes.
+- `REQ-TEST-001`: portable TestDiscovery, TestReport and current-evidence gate.
+- `REQ-WORKSPACE-002`: TUI Capsule import and streaming crash-safe Capsule v2.
+- `REQ-LSP-001`: LSP-backed semantic code intelligence and portable fallback.
+- `REQ-SUBAGENT-001`: fork-bound Action isolation and merge evidence.
+- `REQ-CHROME-001`: shared Chrome capability composition and remote Actions.
+- `REQ-PLATFORM-001`: Windows, Linux and iOS baseline adapters.
+- `REQ-EVAL-001`: production coding benchmarks, fault injection and soak.
 
 ## 0.4.1
 

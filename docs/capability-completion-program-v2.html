@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tinyai 能力补全 Program V2</title>
+<style>
+:root{--bg:#f4f5f7;--paper:#fff;--text:#191a1e;--muted:#6f7179;--line:#e2e3e8;--accent:#116c65;--accent-soft:#e8f7f4;--ok:#137a4b;--ok-soft:#eef8f2;--warn:#986100;--warn-soft:#fff8e8;--danger:#b42318;--danger-soft:#fff1f0;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.72 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1240px;margin:auto;padding:36px 24px 100px}.hero{padding:40px;border-radius:27px;background:radial-gradient(circle at 88% 8%,#bcefe5 0,transparent 24%),linear-gradient(135deg,#101819,#173c3a 58%,#1d7168);color:#fff}.hero small{letter-spacing:.12em;opacity:.72}.hero h1{font-size:38px;line-height:1.18;margin:12px 0}.hero p{max-width:980px;margin:0;color:#edf9f6}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}nav{position:sticky;top:0;z-index:5;display:flex;gap:14px;overflow:auto;margin:18px 0;padding:10px 14px;border:1px solid var(--line);border-radius:13px;background:#f4f5f7ed;backdrop-filter:blur(12px)}nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}section{margin:18px 0;padding:26px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:23px;margin:0 0 14px}h3{font-size:17px;margin:22px 0 8px}h4{font-size:14px;margin:18px 0 6px}p{color:#44454c}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafafa}.card h3,.card h4{margin:0 0 8px}.card p{margin:0}.card ul{margin:8px 0 0;padding-left:18px}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafafa;color:var(--muted)}code{font-family:var(--mono);font-size:.92em;background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{padding:16px;overflow:auto;border-radius:11px;background:#101718;color:#edf8f6;font:12px/1.6 var(--mono)}.rule{padding:13px 15px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#edf9f7}.warn{border-color:var(--warn);background:var(--warn-soft)}.danger{border-color:var(--danger);background:var(--danger-soft)}.tag{display:inline-block;padding:1px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:11px}.foot{color:var(--muted);font-size:12px}@media(max-width:820px){.grid,.grid3{grid-template-columns:1fr}.hero h1{font-size:28px}.wrap{padding:20px 12px 70px}section{padding:20px}table{display:block;overflow-x:auto}}
+</style>
+</head>
+<body><div class="wrap">
+<header class="hero"><small>CAPABILITY COMPLETION PROGRAM / DESIGN V2</small><h1>受限 Coding Agent<br>能力补全 Program</h1><p>把 Host Baseline、TestEvidence、Capsule v2、Code Intelligence、Subagent 隔离、Chrome 对齐、跨平台 Adapter 和生产评测拆分成分阶段、可独立验收的修改需求。Action 只承担应用叶子能力，不替代 Host 底座。</p><div class="chips"><span class="chip">0.5 → 1.0</span><span class="chip">8 new requirements</span><span class="chip">Baseline before Actions</span><span class="chip">Architecture Impact</span></div></header>
+<nav><a href="#principles">原则</a><a href="#requirements">需求总表</a><a href="#architecture-impact">影响面</a><a href="#req-host-002">Host基线</a><a href="#req-test-001">TestEvidence</a><a href="#req-workspace-002">Capsule v2</a><a href="#req-lsp-001">LSP</a><a href="#req-subagent-001">子Agent</a><a href="#req-chrome-001">Chrome</a><a href="#req-platform-001">跨平台</a><a href="#req-eval-001">评测</a><a href="#sequence">顺序</a><a href="#acceptance">验收</a></nav>
+
+<section id="principles"><h2>1. 总原则</h2><div class="grid3">
+<div class="card"><h3>底座不是 Action</h3><p>Storage、FileSystem、Clock、Scheduler、Crypto、Session、Artifact、Network policy 和 Secret broker 属于 Host/Portable 基础，不允许通过 Action 提供。</p></div>
+<div class="card"><h3>Action 是叶子能力</h3><p>Python test、Xcode build、Playwright、数据库迁移、部署等应用特有操作才通过 Action 接入。</p></div>
+<div class="card"><h3>需求独立验收</h3><p>Host Baseline、TestEvidence、Capsule v2、LSP、子 Agent、Chrome 和评测分别建设计与测试，不合并成巨型需求。</p></div>
+<div class="card"><h3>共享组合</h3><p>TUI、Headless、Chrome 使用同一 CapabilityGraph、ToolPackComposer、Action Schema 和 Evidence 规则。</p></div>
+<div class="card"><h3>缺能力显式降级</h3><p>无 Execution Action 时仍可 Portable Coding，但不得运行或声称测试通过。</p></div>
+<div class="card"><h3>先证据后完成</h3><p>没有当前 Workspace generation、environment fingerprint 和 TestReport 的任务不能标 completed。</p></div>
+</div><div class="rule">本 Program 不新增通用 exec。每一层只解决自己的问题，Host Baseline 必须先于 Action 执行平台落地。</div></section>
+
+<section id="requirements"><h2>2. 需求总表</h2><table><thead><tr><th>ID</th><th>目标版本</th><th>目标</th><th>依赖</th></tr></thead><tbody>
+<tr><td><code>REQ-HOST-002</code></td><td>0.5.0</td><td>Host Baseline Matrix 与启动 Probe</td><td>REQ-HOST-001</td></tr>
+<tr><td><code>REQ-ACTION-001</code></td><td>0.5.0</td><td>可信应用 Action 执行平台</td><td>HOST-002</td></tr>
+<tr><td><code>REQ-TEST-001</code></td><td>0.6.0</td><td>TestDiscovery、TestReport、Evidence 与验证门禁</td><td>ACTION-001</td></tr>
+<tr><td><code>REQ-WORKSPACE-002</code></td><td>0.6.0</td><td>TUI Capsule 导入、流式 Capsule 与崩溃安全</td><td>ACTION-001</td></tr>
+<tr><td><code>REQ-LSP-001</code></td><td>0.7.0</td><td>LSP/符号索引与代码语义工具</td><td>TEST-001</td></tr>
+<tr><td><code>REQ-SUBAGENT-001</code></td><td>0.8.0</td><td>子 Agent Action 隔离、并行验证和合并证据</td><td>ACTION-001、TEST-001</td></tr>
+<tr><td><code>REQ-CHROME-001</code></td><td>0.9.0</td><td>Chrome 共享 Capability Composition 与 Remote Action</td><td>ACTION-001、WORKSPACE-002</td></tr>
+<tr><td><code>REQ-PLATFORM-001</code></td><td>0.9.0</td><td>Windows/Linux/iOS Adapter 与路径/动作契约</td><td>HOST-002、CHROME-001</td></tr>
+<tr><td><code>REQ-EVAL-001</code></td><td>1.0.0</td><td>复杂任务 Benchmark、故障注入和生产评测</td><td>其余全部</td></tr>
+</tbody></table></section>
+
+<section id="architecture-impact"><h2>3. Architecture Impact Map</h2><table><thead><tr><th>Surface</th><th>Change</th><th>Boundary</th></tr></thead><tbody>
+<tr><td>Host / Platform</td><td>Baseline tiers, FileSystemPort, profile matrix, startup probe</td><td>不包含 Agent 业务</td></tr>
+<tr><td>Runtime Composition</td><td>CapabilityGraph, ToolPack, Action lifecycle, Evidence wiring</td><td>不包含具体 OS API</td></tr>
+<tr><td>Node Local Adapter</td><td>trusted loader, local executor, provider modules</td><td>Core/TUI/Chrome不得依赖</td></tr>
+<tr><td>TUI</td><td>provider loading, action board, approval overlay, capsule import/export</td><td>只消费公共契约</td></tr>
+<tr><td>Chrome / iOS / Remote</td><td>Remote/Native Action Provider and profile adapters</td><td>不得导入 Local Node Adapter</td></tr>
+<tr><td>Workspace</td><td>Evidence lifecycle, streaming Capsule, resumable import</td><td>不解释 Provider 实现</td></tr>
+<tr><td>Git/Patch/VFS/Search</td><td>不因 Action Runtime 改接口</td><td>保持独立 ToolPack</td></tr>
+<tr><td>Prompt/UI/Registry/Verifier</td><td>同一 capability/evidence source</td><td>不硬编码 Action 或平台</td></tr>
+</tbody></table></section>
+
+<section id="req-host-002"><h2>4. REQ-HOST-002：Host Baseline Matrix</h2>
+<p><span class="tag">Target 0.5.0</span> <span class="tag">P0</span> <span class="tag">Infrastructure</span></p>
+<h3>目标</h3><p>明确每个平台的强制最小能力、Portable 补充能力、可选执行能力和启动失败/降级条件；避免把所有底座都 Action 化。</p>
+<h3>Baseline</h3><table><thead><tr><th>Tier</th><th>强制能力</th></tr></thead><tbody><tr><td>A. Core Boot</td><td>Storage、Clock、Scheduler、Crypto、JS runtime primitives</td></tr><tr><td>B. Workspace</td><td>FileSystemPort 或 Storage-backed Persistent VFS；WorkspacePath；原子写；迁移时的 Blob transport</td></tr><tr><td>C. Portable Coding</td><td>VFS、Patch、Search、Diff、Portable Git、Session、Artifact、Capsule</td></tr><tr><td>D. Real Execution</td><td>至少一个 Application Action、Native Action 或 Remote Action；非通用 shell</td></tr></tbody></table>
+<h3>Profile matrix</h3><table><thead><tr><th>Profile</th><th>必需</th><th>可选</th></tr></thead><tbody><tr><td>TUI Local</td><td>A+B+C</td><td>Local Actions、Git CLI、PTY、Network、Secrets</td></tr><tr><td>Chrome</td><td>A+B+C</td><td>BrowserProvider、Remote Actions</td></tr><tr><td>iOS</td><td>A+B+C</td><td>Native Actions、Remote Actions、WebView Provider</td></tr><tr><td>Sandbox</td><td>A+B+C</td><td>Execution Actions、Git、Tests、PTY</td></tr><tr><td>Memory</td><td>A+B+C</td><td>无真实执行</td></tr></tbody></table>
+<h3>禁止</h3><ul><li>Action 提供 Storage、FileSystem、Clock、Session 等基础能力。</li><li>没有 Process 就禁止 Portable Coding。</li><li>没有 Action 就注册通用 exec。</li><li>平台 Adapter 把自身类型泄漏进 Core。</li></ul>
+</section>
+
+<section id="req-test-001"><h2>5. REQ-TEST-001：TestEvidence</h2><p><span class="tag">Target 0.6.0</span> <span class="tag">P0</span></p><p>建立 TestDiscovery、TestPlan、TestReport、Evidence Store 和当前环境验证门禁。ActionResult 只负责调用结果，Verifier 必须检查报告、文件 hash、Action 版本、environment fingerprint 和 Workspace generation。</p><ul><li>标准 TestReport：suites、passed/failed/skipped、失败 Artifact。</li><li>证据状态：current/stale/failed/invalid。</li><li>TUI 显示失败用例和 Artifact。</li><li>0 tests、报告 malformed、旧报告均不能证明完成。</li></ul></section>
+
+<section id="req-workspace-002"><h2>6. REQ-WORKSPACE-002：Capsule Import 与流式 v2</h2><p><span class="tag">Target 0.6.0</span> <span class="tag">P0</span></p><p>TUI 增加导入、预览、冲突处理和恢复 Session。Capsule v2 使用流式分区、压缩、内容寻址、blob 去重和可恢复 staging，避免大 Workspace 的完整 JSON/base64 峰值。</p><ul><li>导入计划：环境、Action、路径和 Git 冲突。</li><li>原子切换与崩溃 journal。</li><li>Evidence/Action 版本 rebind 或 stale。</li><li>TUI 导入后自动打开恢复 Session。</li></ul></section>
+
+<section id="req-lsp-001"><h2>7. REQ-LSP-001：Code Intelligence</h2><p><span class="tag">Target 0.7.0</span> <span class="tag">P1</span></p><p>定义语言无关的 CodeIntelligencePort 和工具：diagnostics、document/workspace symbols、definition、references、hover、code actions。宿主可通过 LSP Action 注册，无 LSP 时回退到可移植文本/符号索引。</p><ul><li>首期 TypeScript/JavaScript/Python。</li><li>索引按文件 hash 增量更新。</li><li>Rename 先生成 WorkspaceEdit，由 PatchToolPack 应用。</li><li>诊断结果进入 Evidence/Review。</li></ul></section>
+
+<section id="req-subagent-001"><h2>8. REQ-SUBAGENT-001：子 Agent Action 隔离</h2><p><span class="tag">Target 0.8.0</span> <span class="tag">P0</span></p><p>Action Descriptor 声明 root/fork/remote binding。子 Agent 只能调用与自身 Workspace generation 兼容的 Action；Provider 必须能针对 fork 或 remote Workspace 执行。</p><ul><li>并行子 Workspace 验证。</li><li>父 Workspace 变化与子改动冲突检测。</li><li>合并时绑定 child evidence。</li><li>父取消向下传播并清理进程/Artifact/staging。</li></ul></section>
+
+<section id="req-chrome-001"><h2>9. REQ-CHROME-001：Chrome Shared Composition</h2><p><span class="tag">Target 0.9.0</span> <span class="tag">P1</span></p><p>Chrome Runtime 改用共享 WorkspaceCapabilityComposition，移除旧工具拼接；增加 Action Board、RemoteActionProvider、Capsule UI 和 Remote execution 状态展示。</p><ul><li>Chrome Browser ToolPack 与 Coding ToolPack 分离。</li><li>默认无 exec/job。</li><li>TUI/Headless/Chrome Tool Schema Golden。</li><li>Action unavailable/denied/stale 一致显示。</li></ul></section>
+
+<section id="req-platform-001"><h2>10. REQ-PLATFORM-001：Windows/Linux/iOS Adapter</h2><p><span class="tag">Target 0.9.0</span> <span class="tag">P1</span></p><p>实现 Host Baseline 对应的平台 Adapter：Windows/Linux FileSystem、Action Provider 和路径语义，iOS Native File/Blob、Keychain、Action Bridge。默认 Portable Coding 不依赖原生 Process。</p><ul><li>路径大小写、盘符、保留名、symlink/junction。</li><li>可执行 Action 映射与 cwd fence。</li><li>iOS 无本地进程时 Remote/Native Actions。</li><li>跨平台 Capsule round-trip。</li></ul></section>
+
+<section id="req-eval-001"><h2>11. REQ-EVAL-001：生产评测与加固</h2><p><span class="tag">Target 1.0.0</span> <span class="tag">P1</span></p><p>建立多语言、复杂应用的 Benchmark、故障注入和 Soak。指标包括任务完成率、误完成率、首次验证通过率、修复轮数、回归率、Token/时间/Action 成本、人工接管次数。</p><ul><li>Bug Fix、Feature、Test、Refactor、3D/Canvas、大型仓库。</li><li>Action/Remote/Capsule/Git 故障注入。</li><li>进程、FD、timer、内存泄漏。</li><li>发布门禁以真实证据为准。</li></ul></section>
+
+<section id="sequence"><h2>12. 依赖与实施顺序</h2><pre>0.5: REQ-HOST-002
+     REQ-ACTION-001
+       ├─ 0.6: REQ-TEST-001
+       └─ 0.6: REQ-WORKSPACE-002
+             └─ 0.7: REQ-LSP-001
+                      └─ 0.8: REQ-SUBAGENT-001
+                               └─ 0.9: REQ-CHROME-001
+                                        └─ 0.9: REQ-PLATFORM-001
+                                                 └─ 1.0: REQ-EVAL-001</pre>
+<p>TestEvidence 与 Capsule v2 可在 Action Runtime 后并行；LSP 与子 Agent 在契约稳定后分别推进。Chrome 和跨平台必须在共享 Action/Evidence 契约稳定后进行。</p></section>
+
+<section id="acceptance"><h2>13. Program 验收</h2><table><tbody><tr><td>模块化</td><td>Core/TUI/Chrome不得依赖 Local Node Action Adapter</td></tr><tr><td>Host 底座</td><td>每个 Profile 的 Baseline 有矩阵、Probe 和测试</td></tr><tr><td>真实执行</td><td>具名 Action 可本机/Native/Remote 执行，无通用 shell</td></tr><tr><td>验证</td><td>只有当前 TestReport/Evidence 允许 completed</td></tr><tr><td>迁移</td><td>Capsule 双向、流式、原子并可恢复</td></tr><tr><td>智能</td><td>LSP/符号工具提升跨文件定位与重构</td></tr><tr><td>并行</td><td>子 Agent Action 与 Workspace generation 隔离</td></tr><tr><td>跨端</td><td>TUI/Headless/Chrome/平台 Adapter Schema 和证据一致</td></tr><tr><td>生产</td><td>Benchmark、Fault、Soak 达到发布门禁</td></tr></tbody></table><p><a href="capability-completion-program-testing-v2.html#architecture-completeness">查看 Program 测试方案 →</a></p><p class="foot">Program Design V2 · Target 0.5.0 → 1.0.0 · Status: accepted planning baseline</p></section>
+</div></body></html>
