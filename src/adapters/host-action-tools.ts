@@ -1,9 +1,11 @@
-import type { JsonValue, ToolDefinition } from '../core/types';
+import type { JsonValue, ToolDefinition, ToolInvocation } from '../core/types';
 import { AgentError } from '../core/errors';
 import {
   HostActionRegistry,
   toolNameForAction,
   type AvailableHostAction,
+  type HostActionContext,
+  type HostActionResult,
 } from '../platform/host-action';
 
 export async function createHostActionTools(
@@ -11,7 +13,7 @@ export async function createHostActionTools(
   options: {
     workspacePath?: string;
     workspaceId?: string;
-    workspaceGeneration?: number;
+    workspaceGeneration?: number | (() => number | Promise<number>);
     environmentFingerprint?: string;
     signal?: AbortSignal;
   } = {}
@@ -55,7 +57,7 @@ function actionTool(
   options: {
     workspacePath?: string;
     workspaceId?: string;
-    workspaceGeneration?: number;
+    workspaceGeneration?: number | (() => number | Promise<number>);
     environmentFingerprint?: string;
   }
 ): ToolDefinition {
@@ -87,7 +89,7 @@ function actionTool(
     ...(descriptor.timeoutMs === undefined
       ? {}
       : { timeoutMs: descriptor.timeoutMs }),
-    approvalContext: () => ({
+    approvalContext: async () => ({
       actionId: descriptor.id,
       actionVersion: descriptor.version,
       effects: [...descriptor.effects],
@@ -95,56 +97,163 @@ function actionTool(
       ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
       ...(options.workspaceGeneration === undefined
         ? {}
-        : { workspaceGeneration: options.workspaceGeneration }),
+        : {
+            workspaceGeneration: await resolveWorkspaceGeneration(
+              options.workspaceGeneration
+            ),
+          }),
       ...(options.environmentFingerprint
         ? { environmentFingerprint: options.environmentFingerprint }
         : {}),
     }),
     execute: async (input, invocation) => {
-      const result = await registry.invoke(
-        descriptor.id,
+      const result = await runAction(
+        registry,
+        action,
+        options,
         input,
-        {
-          sessionId: invocation.sessionId,
-          taskId: invocation.taskId,
-          requestId: invocation.call.id,
-          ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
-          ...(options.workspaceGeneration === undefined
-            ? {}
-            : { workspaceGeneration: options.workspaceGeneration }),
-          ...(options.workspacePath
-            ? { workspacePath: options.workspacePath }
-            : {}),
-          ...(options.environmentFingerprint
-            ? { environmentFingerprint: options.environmentFingerprint }
-            : {}),
-          signal: invocation.signal,
-        }
+        invocation
       );
-      if (result.status === 'failed') {
-        throw new AgentError(
-          'ACTION_FAILED',
-          `Application Action failed: ${descriptor.id}`,
-          {
-            details: {
-              actionId: descriptor.id,
-              result: result.value,
-              ...(result.exitCode === undefined
-                ? {}
-                : { exitCode: result.exitCode }),
-            },
-          }
-        );
-      }
-      if (result.status === 'cancelled') {
-        throw new AgentError(
-          'ACTION_CANCELLED',
-          `Application Action was cancelled: ${descriptor.id}`
-        );
-      }
+      assertActionSuccess(result, descriptor.id);
       return result.value;
     },
+    executeDetailed: async (input, invocation) => {
+      const result = await runAction(
+        registry,
+        action,
+        options,
+        input,
+        invocation
+      );
+      return {
+        value: result.value,
+        metadata: {
+          status: result.status,
+          action: {
+            id: descriptor.id,
+            version: descriptor.version,
+            sourceId: action.sourceId,
+          },
+          ...(result.durationMs === undefined
+            ? {}
+            : { durationMs: result.durationMs }),
+          ...(result.exitCode === undefined
+            ? {}
+            : { exitCode: result.exitCode }),
+          ...(result.truncated === undefined
+            ? {}
+            : { truncated: result.truncated }),
+          ...(result.replayed === undefined
+            ? {}
+            : { replayed: result.replayed }),
+          ...(result.artifactIds?.length
+            ? { artifactIds: [...result.artifactIds] }
+            : {}),
+        },
+        ...(result.artifacts?.length
+          ? {
+              attachments: result.artifacts.map((artifact) => ({
+                name: artifact.name,
+                mimeType: artifact.mimeType,
+                kind: artifact.kind,
+                data: artifact.data,
+              })),
+            }
+          : {}),
+      };
+    },
   };
+}
+
+async function runAction(
+  registry: HostActionRegistry,
+  action: AvailableHostAction,
+  options: {
+    workspacePath?: string;
+    workspaceId?: string;
+    workspaceGeneration?: number | (() => number | Promise<number>);
+    environmentFingerprint?: string;
+  },
+  input: JsonValue,
+  invocation: ToolInvocation
+): Promise<HostActionResult> {
+  const descriptor = action.descriptor;
+  const workspaceGeneration =
+    options.workspaceGeneration === undefined
+      ? undefined
+      : await resolveWorkspaceGeneration(options.workspaceGeneration);
+  const context: HostActionContext = {
+    sessionId: invocation.sessionId,
+    taskId: invocation.taskId,
+    requestId: invocation.call.id,
+    idempotencyKey: stableDigest(
+      JSON.stringify({
+        actionId: descriptor.id,
+        version: descriptor.version,
+        input,
+        workspaceId: options.workspaceId,
+        workspaceGeneration,
+        environmentFingerprint: options.environmentFingerprint,
+      })
+    ),
+    ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+    ...(workspaceGeneration === undefined
+      ? {}
+      : { workspaceGeneration }),
+    ...(options.workspacePath
+      ? { workspacePath: options.workspacePath }
+      : {}),
+    ...(options.environmentFingerprint
+      ? { environmentFingerprint: options.environmentFingerprint }
+      : {}),
+    signal: invocation.signal,
+  };
+  const result = await registry.invoke(descriptor.id, input, context);
+  return result;
+}
+
+function assertActionSuccess(
+  result: HostActionResult,
+  actionId: string
+): void {
+  if (result.status === 'failed') {
+    throw new AgentError(
+      'ACTION_FAILED',
+      `Application Action failed: ${actionId}`,
+      {
+        details: {
+          actionId,
+          result: result.value,
+          ...(result.exitCode === undefined
+            ? {}
+            : { exitCode: result.exitCode }),
+        },
+      }
+    );
+  }
+  if (result.status === 'cancelled') {
+    throw new AgentError(
+      'ACTION_CANCELLED',
+      `Application Action was cancelled: ${actionId}`
+    );
+  }
+}
+
+async function resolveWorkspaceGeneration(
+  value: number | (() => number | Promise<number>)
+): Promise<number> {
+  return typeof value === 'function' ? value() : value;
+}
+
+function stableDigest(value: string): string {
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    first = Math.imul(first ^ code, 0x01000193);
+    second = Math.imul(second ^ code, 0x85ebca6b);
+  }
+  return `${(first >>> 0).toString(16)}${(second >>> 0).toString(16)}`;
 }
 
 function describeAction(action: AvailableHostAction): JsonValue {

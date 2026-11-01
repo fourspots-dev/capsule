@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { DockerSandboxProvider } from '../adapters/docker-sandbox';
+import { InMemoryApprovalReceiptStore } from '../adapters/host-approval-receipt-store';
 import { OpenAIModelTransport } from '../adapters/openai-model';
 import { createSandboxTools } from '../adapters/sandbox-tools';
 import type { ApprovalPort } from '../core/ports';
@@ -104,6 +105,7 @@ async function main(): Promise<void> {
     const modes = new PermissionModeRegistry('sandbox-auto', () => Date.now());
     const tools = new ToolExecutor(createSandboxTools(sandbox, activeLease), denyApproval, {
       policy: new PolicyEngine((sessionId) => modes.mode(sessionId)),
+      approvalReceipts: new InMemoryApprovalReceiptStore(),
       artifacts: {
         store: new InMemoryArtifactStore(),
         thresholdBytes: 64_000,

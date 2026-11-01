@@ -127,6 +127,10 @@ describe('HostActionRegistry', () => {
     );
     const report = await registry.discover();
     expect(report.available).toEqual([]);
+    expect(report.inspected[0]).toMatchObject({
+      descriptor: { id: 'app.python.run-tests' },
+      probe: { state: 'unavailable' },
+    });
     expect(report.diagnostics[0]).toMatchObject({
       code: 'ACTION_PROBE_FAILED',
       message: 'Python runtime unavailable',
@@ -248,9 +252,10 @@ describe('HostActionRegistry', () => {
   it('binds approval digests to Action input and environment context', async () => {
     const registry = new HostActionRegistry();
     registry.register('python-app', provider([descriptor()]));
+    let generation = 7;
     const tools = await createHostActionTools(registry, {
       workspaceId: 'workspace_1',
-      workspaceGeneration: 7,
+      workspaceGeneration: () => generation,
       environmentFingerprint: 'environment-a',
     });
     const approval = new FakeApproval(true);
@@ -278,6 +283,20 @@ describe('HostActionRegistry', () => {
     expect(approval.requests[0].actionDigest).not.toBe(
       approval.requests[1].actionDigest
     );
+    generation = 8;
+    await executor.execute({
+      sessionId: 'session',
+      taskId: 'task',
+      call: {
+        id: 'call_3',
+        name: 'action_app_python_run_tests',
+        arguments: JSON.stringify({ pattern: 'integration' }),
+      },
+      signal: new AbortController().signal,
+    });
+    expect(approval.requests[2].actionDigest).not.toBe(
+      approval.requests[1].actionDigest
+    );
   });
 
   it('re-discovers provider versions before each invocation', async () => {
@@ -290,5 +309,107 @@ describe('HostActionRegistry', () => {
     expect((await registry.list())[0].descriptor.version).toBe('1.0.0');
     version = '1.1.0';
     expect((await registry.list())[0].descriptor.version).toBe('1.1.0');
+  });
+
+  it('suppresses duplicate side effects for required idempotency scopes', async () => {
+    const invoke = vi.fn(async () => ({ value: { ok: true } }));
+    const registry = new HostActionRegistry();
+    registry.register('app', {
+      describe: async () => [
+        descriptor({
+          id: 'app.write-result',
+          idempotency: 'required',
+          effects: ['write'],
+          risk: 'write',
+        }),
+      ],
+      invoke,
+    });
+    const context = {
+      sessionId: 'session',
+      taskId: 'task',
+      requestId: 'request_1',
+      idempotencyKey: 'same-scope',
+      workspaceId: 'workspace',
+      workspaceGeneration: 1,
+      environmentFingerprint: 'env-a',
+      signal: new AbortController().signal,
+    };
+    const first = await registry.invoke('app.write-result', {}, context);
+    const second = await registry.invoke('app.write-result', {}, {
+      ...context,
+      requestId: 'request_2',
+    });
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(first.replayed).toBeUndefined();
+    expect(second.replayed).toBe(true);
+
+    await registry.invoke('app.write-result', {}, {
+      ...context,
+      requestId: 'request_3',
+      workspaceGeneration: 2,
+    });
+    expect(invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it('maps Provider result metadata and binary artifacts into detailed Tool output', async () => {
+    const registry = new HostActionRegistry();
+    const binary = new Uint8Array([0, 9, 255]);
+    registry.register(
+      'app',
+      provider([descriptor({ version: '2.3.0' })], async () => ({
+        value: { ok: true },
+        status: 'succeeded',
+        durationMs: 17,
+        exitCode: 3,
+        truncated: true,
+        artifactIds: ['provider_artifact'],
+        artifacts: [
+          {
+            name: 'result.bin',
+            mimeType: 'application/octet-stream',
+            kind: 'binary',
+            data: binary,
+          },
+        ],
+      }))
+    );
+    const tools = await createHostActionTools(registry);
+    const detailed = await tools[1].executeDetailed!(
+      { pattern: 'unit' },
+      {
+        sessionId: 'session',
+        taskId: 'task',
+        call: {
+          id: 'call',
+          name: 'action_app_python_run_tests',
+          arguments: '{"pattern":"unit"}',
+        },
+        signal: new AbortController().signal,
+      }
+    );
+    expect(detailed).toMatchObject({
+      value: { ok: true },
+      metadata: {
+        status: 'succeeded',
+        action: {
+          id: 'app.python.run-tests',
+          version: '2.3.0',
+          sourceId: 'app',
+        },
+        durationMs: 17,
+        exitCode: 3,
+        truncated: true,
+        artifactIds: ['provider_artifact'],
+      },
+      attachments: [
+        {
+          name: 'result.bin',
+          mimeType: 'application/octet-stream',
+          kind: 'binary',
+          data: binary,
+        },
+      ],
+    });
   });
 });

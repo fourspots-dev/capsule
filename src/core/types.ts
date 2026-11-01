@@ -171,6 +171,42 @@ export interface ToolInvocation {
   signal: AbortSignal;
 }
 
+export interface ToolArtifactRef {
+  artifactId: string;
+  name: string;
+  mimeType: string;
+  bytes: number;
+  kind: 'text' | 'image' | 'pdf' | 'log' | 'diff' | 'binary';
+}
+
+export interface ToolExecutionMetadata {
+  status?: 'succeeded' | 'failed' | 'cancelled';
+  action?: {
+    id: string;
+    version: string;
+    sourceId?: string;
+  };
+  durationMs?: number;
+  exitCode?: number;
+  truncated?: boolean;
+  replayed?: boolean;
+  artifactIds?: string[];
+  artifacts?: ToolArtifactRef[];
+}
+
+export interface ToolExecutionAttachment {
+  name: string;
+  mimeType: string;
+  kind: ToolArtifactRef['kind'];
+  data: Uint8Array;
+}
+
+export interface ToolExecutionOutput {
+  value: JsonValue;
+  metadata?: ToolExecutionMetadata;
+  attachments?: ToolExecutionAttachment[];
+}
+
 export interface ToolDefinition {
   name: string;
   description: string;
@@ -187,9 +223,17 @@ export interface ToolDefinition {
     invocation: ToolInvocation
   ) => JsonValue | Promise<JsonValue>;
   execute: (input: JsonValue, invocation: ToolInvocation) => Promise<JsonValue>;
+  executeDetailed?: (
+    input: JsonValue,
+    invocation: ToolInvocation
+  ) => Promise<ToolExecutionOutput>;
 }
 
-export type ToolExecutionStatus = 'succeeded' | 'failed' | 'denied';
+export type ToolExecutionStatus =
+  | 'succeeded'
+  | 'failed'
+  | 'denied'
+  | 'cancelled';
 
 export interface ToolExecutionResult {
   callId: string;
@@ -197,6 +241,7 @@ export interface ToolExecutionResult {
   status: ToolExecutionStatus;
   output?: JsonValue;
   error?: StructuredError;
+  metadata?: ToolExecutionMetadata;
 }
 
 export type AgentLoopEvent =
@@ -233,6 +278,7 @@ export interface ConversationRow {
   status: 'pending' | 'streaming' | 'completed' | 'failed' | 'denied' | 'cancelled';
   callId?: string;
   toolName?: string;
+  toolMetadata?: ToolExecutionMetadata;
   startedAt?: number;
   completedAt?: number;
 }

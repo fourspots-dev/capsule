@@ -420,6 +420,28 @@
         "rationale": "The implementation applies the accepted explicit unreviewed approval rule.",
         "reviewedAt": "2026-11-01"
       }
+    },
+    {
+      "id": "REQ-ACTION-002",
+      "title": "Action result approval and observability integrity",
+      "type": "bugfix",
+      "priority": "P0",
+      "status": "verified",
+      "designStatus": "approved_unreviewed",
+      "approvalNote": "User asked to continue the recommended 0.6.1 hardening without claiming detailed review.",
+      "implementationAuthorized": true,
+      "targetVersion": "0.6.1",
+      "design": "docs/action/REQ-ACTION-002-design.html#architecture-impact",
+      "testDesign": "docs/action/REQ-ACTION-002-testing.html#architecture-completeness",
+      "acceptance": "Action result metadata and binary artifacts survive the tool and Session boundary, approval decisions produce durable receipts, required idempotency prevents duplicate side effects, late remote results are ignored, and TUI exposes a read-only Action manager.",
+      "legacyAliases": [],
+      "adrReview": {
+        "status": "existing",
+        "adrs": ["ADR-015"],
+        "rationale": "The hardening applies the accepted durable Action result and approval-record rule.",
+        "reviewedAt": "2026-11-01"
+      },
+      "architectureImpact": true
     }
   ]
 }

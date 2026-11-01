@@ -17,6 +17,8 @@ export interface LocalActionExecutionResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  stdoutBytes: Uint8Array;
+  stderrBytes: Uint8Array;
   truncated: boolean;
   durationMs: number;
 }
@@ -114,10 +116,16 @@ export class LocalActionExecutor {
 
       let stdout = '';
       let stderr = '';
+      const stdoutChunks: Buffer[] = [];
+      const stderrChunks: Buffer[] = [];
       let truncated = false;
       let settled = false;
       let killTimer: ReturnType<typeof setTimeout> | undefined;
-      const append = (current: string, chunk: Buffer): string => {
+      const append = (
+        current: string,
+        chunk: Buffer,
+        chunks: Buffer[]
+      ): string => {
         const used = Buffer.byteLength(current);
         if (used >= maxOutputBytes) {
           truncated = true;
@@ -125,13 +133,15 @@ export class LocalActionExecutor {
         }
         const remaining = maxOutputBytes - used;
         if (chunk.byteLength > remaining) truncated = true;
-        return current + chunk.subarray(0, remaining).toString('utf8');
+        const retained = chunk.subarray(0, remaining);
+        chunks.push(Buffer.from(retained));
+        return current + retained.toString('utf8');
       };
       child.stdout.on('data', (chunk: Buffer) => {
-        stdout = append(stdout, chunk);
+        stdout = append(stdout, chunk, stdoutChunks);
       });
       child.stderr.on('data', (chunk: Buffer) => {
-        stderr = append(stderr, chunk);
+        stderr = append(stderr, chunk, stderrChunks);
       });
 
       const cleanup = () => {
@@ -179,6 +189,8 @@ export class LocalActionExecutor {
             exitCode: code ?? 1,
             stdout,
             stderr,
+            stdoutBytes: new Uint8Array(Buffer.concat(stdoutChunks)),
+            stderrBytes: new Uint8Array(Buffer.concat(stderrChunks)),
             truncated,
             durationMs: Date.now() - startedAt,
           })

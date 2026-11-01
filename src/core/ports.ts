@@ -1,4 +1,4 @@
-import type { ModelEvent, ModelRequest } from './types';
+import type { JsonValue, ModelEvent, ModelRequest } from './types';
 
 export interface Clock {
   now(): number;
@@ -27,6 +27,34 @@ export interface ApprovalRequest {
 
 export interface ApprovalPort {
   requestApproval(request: ApprovalRequest, signal: AbortSignal): Promise<boolean>;
+}
+
+export type ApprovalDecision =
+  | 'approved'
+  | 'denied'
+  | 'cancelled'
+  | 'failed';
+
+export interface ApprovalReceipt {
+  id: string;
+  sessionId: string;
+  taskId: string;
+  callId: string;
+  toolName: string;
+  risk: 'write' | 'dangerous';
+  decision: ApprovalDecision;
+  inputDigest: string;
+  actionDigest?: string;
+  approvalContext?: JsonValue;
+  createdAt: number;
+}
+
+export interface ApprovalReceiptStore {
+  record(receipt: ApprovalReceipt): Promise<void>;
+  list(filter?: {
+    sessionId?: string;
+    taskId?: string;
+  }): Promise<ApprovalReceipt[]>;
 }
 
 export interface HandoffPort {

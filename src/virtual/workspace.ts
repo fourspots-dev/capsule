@@ -172,6 +172,18 @@ export class VirtualWorkspace {
     return this.vcs.commit(label);
   }
 
+  async generation(): Promise<number> {
+    const entries = await this.fs.list('', { recursive: true });
+    let hash = 0x811c9dc5;
+    for (const entry of entries) {
+      const value = `${entry.path}\0${entry.kind}\0${entry.version}\0${entry.size}\0${entry.modifiedAt}`;
+      for (let index = 0; index < value.length; index += 1) {
+        hash = Math.imul(hash ^ value.charCodeAt(index), 0x01000193);
+      }
+    }
+    return hash >>> 0;
+  }
+
   async diff(fromId?: string, toId?: string): Promise<SnapshotDiff> {
     return this.vcs.diff(fromId, toId);
   }

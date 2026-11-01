@@ -9,6 +9,7 @@ export type TuiIntent =
   | { type: 'exit' }
   | { type: 'sessions' }
   | { type: 'agents' }
+  | { type: 'actions' }
   | { type: 'status' }
   | { type: 'review' }
   | { type: 'commands' }
@@ -40,6 +41,7 @@ export function mapKey(
   if (key === '\x03') return { type: 'stop' };
   if (key === '\x0b') return { type: 'sessions' };
   if (key === '\x07') return { type: 'agents' };
+  if (key === '\x19') return { type: 'actions' };
   if (key === '\x09') return { type: 'status' };
   if (key === '\x0f') return { type: 'review' };
   if (key === '\x10') return { type: 'commands' };

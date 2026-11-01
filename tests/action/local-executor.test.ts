@@ -89,6 +89,20 @@ describe('REQ-ACTION-001 local Action executor', () => {
     });
   });
 
+  it('preserves output bytes even when they are not valid UTF-8', async () => {
+    const root = await workspace();
+    const executor = new LocalActionExecutor({
+      workspaceRoot: root,
+      executableAllowlist: ['node'],
+    });
+    const result = await executor.execute({
+      executable: 'node',
+      args: ['-e', 'process.stdout.write(Buffer.from([0,255,65]))'],
+      signal: new AbortController().signal,
+    });
+    expect([...result.stdoutBytes]).toEqual([0, 255, 65]);
+  });
+
   it('maps timeout and abort to action cancellation errors', async () => {
     const root = await workspace();
     const executor = new LocalActionExecutor({

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { HostArtifactStore } from '../adapters/host-artifact-store';
+import { HostApprovalReceiptStore } from '../adapters/host-approval-receipt-store';
 import { HostSessionStore } from '../adapters/host-session-store';
 import { NpmScriptActionProvider, type NpmScriptActionDefinition } from '../adapters/npm-action-provider';
 import { RemoteActionProvider } from '../adapters/remote-action-provider';
@@ -80,6 +81,7 @@ async function main(): Promise<void> {
   const git = new PortableGitBackend(fs);
   const sessions = new HostSessionStore(host.storage);
   const artifacts = new HostArtifactStore(host.storage);
+  const approvalReceipts = new HostApprovalReceiptStore(host.storage);
   const npmActions = new NpmScriptActionProvider({
     workspaceRoot: options.workspace,
     scripts: options.scripts,
@@ -126,6 +128,7 @@ async function main(): Promise<void> {
         .map(([tier, state]) => `${tier}:${state}`),
     ].join('|'),
     hostBaseline,
+    workspaceGeneration: () => workspace.generation(),
   });
   const actionTools = capability.actionTools;
   const applicationActions = capability.applicationActions;
@@ -263,6 +266,7 @@ async function main(): Promise<void> {
     denyApproval,
     {
       policy: new PolicyEngine((sessionId) => modes.mode(sessionId)),
+      approvalReceipts,
       artifacts: { store: artifacts, thresholdBytes: 64_000 },
     }
   );

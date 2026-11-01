@@ -7113,6 +7113,17 @@
     async checkpoint(label) {
       return this.vcs.commit(label);
     }
+    async generation() {
+      const entries = await this.fs.list("", { recursive: true });
+      let hash = 2166136261;
+      for (const entry of entries) {
+        const value = `${entry.path}\0${entry.kind}\0${entry.version}\0${entry.size}\0${entry.modifiedAt}`;
+        for (let index = 0; index < value.length; index += 1) {
+          hash = Math.imul(hash ^ value.charCodeAt(index), 16777619);
+        }
+      }
+      return hash >>> 0;
+    }
     async diff(fromId, toId) {
       return this.vcs.diff(fromId, toId);
     }
@@ -8891,7 +8902,7 @@ ${skillListing}` : ""
       permissionMode: view.permissionMode,
       ...view.plan ? { plan: { ...view.plan } } : {},
       ...view.children?.length ? { children: view.children.map((child) => ({ ...child })) } : {},
-      rows: view.rows.map((row) => ({ ...row })),
+      rows: view.rows.map(cloneRow),
       availability
     };
   }
@@ -8929,7 +8940,7 @@ ${skillListing}` : ""
     for (const row of next.rows) {
       const old = previousRows.get(row.id);
       if (!old) {
-        deltas.push({ type: "row.appended", row: { ...row } });
+        deltas.push({ type: "row.appended", row: cloneRow(row) });
         continue;
       }
       if (old.kind === row.kind && old.entityId === row.entityId && old.productTurnId === row.productTurnId && old.status === row.status && old.callId === row.callId && old.toolName === row.toolName && row.text.startsWith(old.text)) {
@@ -8942,7 +8953,7 @@ ${skillListing}` : ""
           });
         }
       } else if (JSON.stringify(old) !== JSON.stringify(row)) {
-        deltas.push({ type: "row.upserted", row: { ...row } });
+        deltas.push({ type: "row.upserted", row: cloneRow(row) });
       }
     }
     return {
@@ -8961,7 +8972,13 @@ ${skillListing}` : ""
       ...projection.lastError ? { lastError: { ...projection.lastError } } : {},
       availability: { ...projection.availability },
       ...projection.children ? { children: projection.children.map((child) => ({ ...child })) } : {},
-      rows: projection.rows.map((row) => ({ ...row }))
+      rows: projection.rows.map(cloneRow)
+    };
+  }
+  function cloneRow(row) {
+    return {
+      ...row,
+      ...row.toolMetadata ? { toolMetadata: structuredClone(row.toolMetadata) } : {}
     };
   }
 
@@ -9318,22 +9335,22 @@ ${skillListing}` : ""
       }
       let policyRequiresApproval = false;
       let actionDigest;
-      if (this.options.policy) {
-        let approvalContext;
-        if (tool5.approvalContext) {
-          try {
-            approvalContext = await tool5.approvalContext(input, invocation);
-          } catch (error2) {
-            return {
-              ...base,
-              status: "failed",
-              error: toStructuredError(
-                error2,
-                "TOOL_APPROVAL_CONTEXT_FAILED"
-              )
-            };
-          }
+      let approvalContext;
+      if (tool5.approvalContext) {
+        try {
+          approvalContext = await tool5.approvalContext(input, invocation);
+        } catch (error2) {
+          return {
+            ...base,
+            status: "failed",
+            error: toStructuredError(
+              error2,
+              "TOOL_APPROVAL_CONTEXT_FAILED"
+            )
+          };
         }
+      }
+      if (this.options.policy) {
         const decision = await this.options.policy.evaluate(
           {
             sessionId: invocation.sessionId,
@@ -9377,22 +9394,96 @@ ${skillListing}` : ""
             invocation.signal
           );
         } catch (error2) {
+          const receiptError2 = await this.recordApprovalReceipt(
+            invocation,
+            tool5,
+            approvalContext,
+            "cancelled",
+            actionDigest
+          );
+          if (receiptError2) {
+            return {
+              ...base,
+              status: "failed",
+              error: receiptError2.toStructured()
+            };
+          }
           return { ...base, status: "failed", error: toStructuredError(error2, "TOOL_APPROVAL_FAILED") };
         }
         if (!approved) {
+          const receiptError2 = await this.recordApprovalReceipt(
+            invocation,
+            tool5,
+            approvalContext,
+            "denied",
+            actionDigest
+          );
+          if (receiptError2) {
+            return {
+              ...base,
+              status: "failed",
+              error: receiptError2.toStructured()
+            };
+          }
           return {
             ...base,
             status: "denied",
             error: new AgentError("TOOL_DENIED", `User denied ${tool5.name}`).toStructured()
           };
         }
+        const receiptError = await this.recordApprovalReceipt(
+          invocation,
+          tool5,
+          approvalContext,
+          "approved",
+          actionDigest
+        );
+        if (receiptError) {
+          return {
+            ...base,
+            status: "failed",
+            error: receiptError.toStructured()
+          };
+        }
       }
       try {
-        const rawOutput = await this.executeWithTimeout(tool5, input, invocation);
-        if (tool5.outputSchema) validateToolInput(tool5.outputSchema, rawOutput);
+        const execution = await this.executeWithTimeout(tool5, input, invocation);
+        const executionStatus = execution.metadata?.status ?? "succeeded";
+        if (tool5.outputSchema && executionStatus === "succeeded") {
+          validateToolInput(
+            tool5.outputSchema,
+            execution.value
+          );
+        }
         this.assertActive(invocation.signal);
-        const output = await this.artifactize(rawOutput, invocation);
-        const result = { ...base, status: "succeeded", output };
+        const output = await this.artifactize(execution.value, invocation);
+        const metadata = await this.materializeArtifacts(
+          execution,
+          invocation
+        );
+        if (executionStatus === "failed" || executionStatus === "cancelled") {
+          const result2 = {
+            ...base,
+            status: executionStatus,
+            output,
+            ...metadata ? { metadata } : {},
+            error: new AgentError(
+              executionStatus === "cancelled" ? "TOOL_CANCELLED" : "TOOL_EXECUTION_FAILED",
+              executionStatus === "cancelled" ? `${tool5.name} was cancelled` : `${tool5.name} failed`
+            ).toStructured()
+          };
+          if (failureKey) {
+            this.recordFailure(failureKey, result2.error.code);
+          }
+          await this.runPostHooks(invocation, input, result2);
+          return result2;
+        }
+        const result = {
+          ...base,
+          status: "succeeded",
+          output,
+          ...metadata ? { metadata } : {}
+        };
         await this.runPostHooks(invocation, input, result);
         if (failureKey) this.repeatedFailures.delete(failureKey);
         return result;
@@ -9447,13 +9538,53 @@ ${skillListing}` : ""
       });
       try {
         return await Promise.race([
-          tool5.execute(input, { ...invocation, signal: controller.signal }),
+          tool5.executeDetailed ? tool5.executeDetailed(input, {
+            ...invocation,
+            signal: controller.signal
+          }) : tool5.execute(input, { ...invocation, signal: controller.signal }).then(
+            (value) => ({ value })
+          ),
           timeout
         ]);
       } finally {
         if (timer !== void 0) clearTimeout(timer);
         invocation.signal.removeEventListener("abort", abort);
       }
+    }
+    async materializeArtifacts(execution, invocation) {
+      const attachments = execution.attachments ?? [];
+      if (attachments.length === 0) return execution.metadata;
+      if (!this.options.artifacts) {
+        throw new AgentError(
+          "ARTIFACT_STORE_UNAVAILABLE",
+          "Action returned binary attachments but no ArtifactStore is configured"
+        );
+      }
+      const refs = [];
+      for (const attachment of attachments) {
+        refs.push(
+          await this.options.artifacts.store.put({
+            name: attachment.name,
+            mimeType: attachment.mimeType,
+            kind: attachment.kind,
+            data: attachment.data,
+            sessionId: invocation.sessionId,
+            taskId: invocation.taskId
+          })
+        );
+      }
+      const metadata = execution.metadata ?? {};
+      const artifactIds = [
+        .../* @__PURE__ */ new Set([
+          ...metadata.artifactIds ?? [],
+          ...refs.map((ref) => ref.artifactId)
+        ])
+      ];
+      return {
+        ...metadata,
+        artifacts: [...metadata.artifacts ?? [], ...refs],
+        ...artifactIds.length ? { artifactIds } : {}
+      };
     }
     async runPostHooks(invocation, input, result) {
       if (!this.options.hooks) return;
@@ -9469,6 +9600,33 @@ ${skillListing}` : ""
         invocation.signal
       );
       this.options.onPostToolUse?.(records);
+    }
+    async recordApprovalReceipt(invocation, tool5, approvalContext, decision, actionDigest) {
+      if (!this.options.approvalReceipts) return void 0;
+      try {
+        await this.options.approvalReceipts.record({
+          id: `approval:${invocation.sessionId}:${invocation.call.id}`,
+          sessionId: invocation.sessionId,
+          taskId: invocation.taskId,
+          callId: invocation.call.id,
+          toolName: tool5.name,
+          risk: tool5.risk === "read" ? "write" : tool5.risk,
+          decision,
+          inputDigest: actionDigest ?? `fnv:${hashString(JSON.stringify({
+            input: invocation.call.arguments,
+            tool: tool5.name
+          }))}`,
+          ...actionDigest ? { actionDigest } : {},
+          ...approvalContext === void 0 ? {} : { approvalContext },
+          createdAt: Date.now()
+        });
+        return void 0;
+      } catch (error2) {
+        return new AgentError(
+          "APPROVAL_RECEIPT_FAILED",
+          error2 instanceof Error ? error2.message : String(error2)
+        );
+      }
     }
     async artifactize(output, invocation) {
       if (!this.options.artifacts) return output;
@@ -9506,8 +9664,11 @@ ${skillListing}` : ""
   }
   function toolResultText(result) {
     if (result.status === "succeeded") {
-      if (result.output === void 0) return "(no output)";
-      return typeof result.output === "string" ? result.output : JSON.stringify(result.output);
+      const output = result.output === void 0 ? "(no output)" : typeof result.output === "string" ? result.output : JSON.stringify(result.output);
+      return result.metadata ? JSON.stringify({
+        output: result.output ?? null,
+        toolMetadata: result.metadata
+      }) : output;
     }
     return JSON.stringify(result.error ?? new AgentError("TOOL_FAILED", "Tool failed").toStructured());
   }
@@ -11279,8 +11440,11 @@ ${stringContent(item.content)}`
       } else if (event.type === "tool_execution_end") {
         const row = this.rows.find((candidate) => candidate.callId === event.result.callId);
         if (row) {
-          row.status = event.result.status === "succeeded" ? "completed" : event.result.status === "denied" ? "denied" : "failed";
+          row.status = event.result.status === "succeeded" ? "completed" : event.result.status === "denied" ? "denied" : event.result.status === "cancelled" ? "cancelled" : "failed";
           row.text = event.result.status === "succeeded" ? typeof event.result.output === "string" ? event.result.output : JSON.stringify(event.result.output ?? null) : event.result.error?.message ?? "Tool failed";
+          if (event.result.metadata) {
+            row.toolMetadata = structuredClone(event.result.metadata);
+          }
           row.completedAt = this.clock.now();
         }
         this.sessionTree.append({

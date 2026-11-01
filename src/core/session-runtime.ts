@@ -854,13 +854,18 @@ export class SessionRuntime {
             ? 'completed'
             : event.result.status === 'denied'
               ? 'denied'
-              : 'failed';
+              : event.result.status === 'cancelled'
+                ? 'cancelled'
+                : 'failed';
         row.text =
           event.result.status === 'succeeded'
             ? typeof event.result.output === 'string'
               ? event.result.output
               : JSON.stringify(event.result.output ?? null)
             : event.result.error?.message ?? 'Tool failed';
+        if (event.result.metadata) {
+          row.toolMetadata = structuredClone(event.result.metadata);
+        }
         row.completedAt = this.clock.now();
       }
       this.sessionTree.append({

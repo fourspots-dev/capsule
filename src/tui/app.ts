@@ -24,6 +24,7 @@ import type {
   ReasoningMode,
   StatusBarFacts,
   TuiAgentRecord,
+  TuiActionInfo,
   TuiFocus,
   TuiRuntimePort,
   TuiReviewProvider,
@@ -41,6 +42,7 @@ export interface TuiAppOptions {
   processAvailable?: boolean;
   review?: TuiReviewProvider;
   agentWorkspace?: TuiAgentWorkspacePort;
+  actions?: () => Promise<TuiActionInfo[]>;
   capsuleExport?: () => Promise<{ path: string }>;
   now?: () => number;
 }
@@ -81,6 +83,8 @@ export class TuiApp {
   private agentFilter: AgentFilter = 'all';
   private review?: TuiReviewSnapshot;
   private readonly mergePreviewed = new Set<string>();
+  private actions: TuiActionInfo[] = [];
+  private actionIndex = 0;
   private readonly renderListeners = new Set<() => void>();
   private reasoningMode: ReasoningMode = 'preview';
 
@@ -190,6 +194,10 @@ export class TuiApp {
       this.selectFirstAgent();
       return;
     }
+    if (intent.type === 'actions') {
+      await this.openActions();
+      return;
+    }
     if (intent.type === 'status') {
       if (this.sessionsController.active) {
         this.routes.push({
@@ -244,6 +252,10 @@ export class TuiApp {
       await this.handleAgentsIntent(intent);
       return;
     }
+    if (this.routes.current.kind === 'actions') {
+      this.handleActionIntent(intent);
+      return;
+    }
     if (this.routes.current.kind !== 'conversation') return;
     await this.handleConversationIntent(intent);
   }
@@ -265,6 +277,53 @@ export class TuiApp {
       }`;
     }
     this.notifyRender();
+  }
+
+  private async openActions(): Promise<void> {
+    if (!this.options.actions) {
+      this.statusMessage = 'Action manager is unavailable';
+      this.notifyRender();
+      return;
+    }
+    try {
+      this.actions = await this.options.actions();
+      this.actionIndex = Math.min(
+        this.actionIndex,
+        Math.max(0, this.actions.length - 1)
+      );
+      this.routes.push({
+        kind: 'actions',
+        ...(this.actions[this.actionIndex]
+          ? { selectedId: this.actions[this.actionIndex].id }
+          : {}),
+      });
+    } catch (error) {
+      this.statusMessage = `Action discovery failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+    }
+    this.notifyRender();
+  }
+
+  private handleActionIntent(intent: TuiIntent): void {
+    if (intent.type === 'back') {
+      this.routes.back();
+      return;
+    }
+    if (intent.type === 'up' || intent.type === 'down') {
+      if (this.actions.length === 0) return;
+      const direction = intent.type === 'down' ? 1 : -1;
+      this.actionIndex =
+        (this.actionIndex + direction + this.actions.length) %
+        this.actions.length;
+      const current = this.routes.current;
+      if (current.kind === 'actions') {
+        this.routes.replace({
+          kind: 'actions',
+          selectedId: this.actions[this.actionIndex]?.id,
+        });
+      }
+    }
   }
 
   render(width: number, height: number): string[] {
@@ -768,6 +827,12 @@ export class TuiApp {
       ...(this.selectedSessionId ? { selectedSessionId: this.selectedSessionId } : {}),
       sessionQuery: this.sessionQuery,
       agentRows: controls.rows,
+      ...(this.routes.current.kind === 'actions'
+        ? {
+            actions: this.actions.map((action) => ({ ...action })),
+            selectedActionId: this.actions[this.actionIndex]?.id,
+          }
+        : {}),
       ...(controls.route.selectedId
         ? { selectedAgentId: controls.route.selectedId }
         : {}),

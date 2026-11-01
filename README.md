@@ -229,6 +229,7 @@ Enter          send
 Shift+Enter    newline (Ctrl+J fallback)
 Ctrl+K         sessions
 Ctrl+G         agent board
+Ctrl+Y         application Actions
 Ctrl+I         full runtime status
 Ctrl+O         workspace diff review
 Ctrl+C         stop, or press twice while idle to exit

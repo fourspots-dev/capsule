@@ -22,6 +22,7 @@ export interface HostActionDescriptor {
   effects: readonly HostActionEffect[];
   risk: ToolRisk;
   workspaceBinding?: 'root' | 'fork' | 'remote';
+  idempotency?: 'safe' | 'required' | 'never';
   timeoutMs?: number;
   limitations?: readonly string[];
   probe(): Promise<HostActionProbe>;
@@ -31,11 +32,19 @@ export interface HostActionContext {
   sessionId: string;
   taskId: string;
   requestId?: string;
+  idempotencyKey?: string;
   workspaceId?: string;
   workspaceGeneration?: number;
   workspacePath?: string;
   environmentFingerprint?: string;
   signal: AbortSignal;
+}
+
+export interface HostActionArtifact {
+  name: string;
+  mimeType: string;
+  kind: 'text' | 'image' | 'pdf' | 'log' | 'diff' | 'binary';
+  data: Uint8Array;
 }
 
 export interface HostActionResult {
@@ -45,6 +54,8 @@ export interface HostActionResult {
   exitCode?: number;
   truncated?: boolean;
   artifactIds?: readonly string[];
+  artifacts?: readonly HostActionArtifact[];
+  replayed?: boolean;
 }
 
 export interface HostActionProvider {
@@ -83,6 +94,12 @@ export interface AvailableHostAction {
   probe: HostActionProbe;
 }
 
+export interface InspectedHostAction {
+  descriptor: HostActionDescriptor;
+  sourceId: string;
+  probe: HostActionProbe;
+}
+
 export interface HostActionDiagnostic {
   actionId: string;
   sourceId: string;
@@ -94,12 +111,14 @@ export interface HostActionDiagnostic {
     | 'ACTION_VERSION_INVALID'
     | 'ACTION_EFFECT_INVALID'
     | 'ACTION_RISK_INVALID'
-    | 'ACTION_WORKSPACE_BINDING_INVALID';
+    | 'ACTION_WORKSPACE_BINDING_INVALID'
+    | 'ACTION_IDEMPOTENCY_INVALID';
   message: string;
 }
 
 export interface HostActionReport {
   available: AvailableHostAction[];
+  inspected: InspectedHostAction[];
   diagnostics: HostActionDiagnostic[];
 }
 
@@ -110,6 +129,7 @@ interface Registration {
 
 export class HostActionRegistry {
   private readonly providers = new Map<string, Registration>();
+  private readonly idempotent = new Map<string, Promise<HostActionResult>>();
 
   register(sourceId: string, provider: HostActionProvider): () => void {
     const normalized = sourceId.trim();
@@ -133,6 +153,7 @@ export class HostActionRegistry {
   async discover(signal?: AbortSignal): Promise<HostActionReport> {
     throwIfAborted(signal);
     const available: AvailableHostAction[] = [];
+    const inspected: InspectedHostAction[] = [];
     const diagnostics: HostActionDiagnostic[] = [];
     const seen = new Map<string, string>();
 
@@ -242,6 +263,18 @@ export class HostActionRegistry {
           });
           continue;
         }
+        if (
+          descriptor.idempotency !== undefined &&
+          !idempotencyModes.has(descriptor.idempotency)
+        ) {
+          diagnostics.push({
+            actionId: descriptor.id,
+            sourceId: registration.sourceId,
+            code: 'ACTION_IDEMPOTENCY_INVALID',
+            message: `Action ${descriptor.id} has invalid idempotency policy`,
+          });
+          continue;
+        }
         let probe: HostActionProbe;
         const started = Date.now();
         try {
@@ -254,6 +287,12 @@ export class HostActionRegistry {
             latencyMs: Date.now() - started,
           };
         }
+        const observed = {
+          descriptor,
+          sourceId: registration.sourceId,
+          probe: { ...probe, latencyMs: probe.latencyMs ?? Date.now() - started },
+        };
+        inspected.push(observed);
         if (probe.state !== 'available') {
           diagnostics.push({
             actionId: descriptor.id,
@@ -266,15 +305,16 @@ export class HostActionRegistry {
           continue;
         }
         available.push({
-          descriptor,
-          sourceId: registration.sourceId,
-          probe: { ...probe, latencyMs: probe.latencyMs ?? Date.now() - started },
+          ...observed,
         });
       }
     }
 
     return {
       available: available.sort((a, b) =>
+        a.descriptor.id.localeCompare(b.descriptor.id)
+      ),
+      inspected: inspected.sort((a, b) =>
         a.descriptor.id.localeCompare(b.descriptor.id)
       ),
       diagnostics,
@@ -317,11 +357,43 @@ export class HostActionRegistry {
       );
     }
     try {
-      const result = await registration.provider.invoke(
-        actionId,
-        input,
-        context
-      );
+      const cacheKey =
+        action.descriptor.idempotency === 'required'
+          ? idempotencyCacheKey(action, input, context)
+          : undefined;
+      let result: HostActionResult | JsonValue;
+      if (cacheKey) {
+        const existing = this.idempotent.get(cacheKey);
+        if (existing) {
+          return { ...(await existing), replayed: true };
+        }
+        const invocation = registration.provider.invoke(
+          actionId,
+          input,
+          { ...context, idempotencyKey: cacheKey }
+        );
+        const promise = invocation.then((value) => {
+          const normalized = isActionResult(value) ? value : { value };
+          return {
+            ...normalized,
+            status: normalized.status ?? ('succeeded' as const),
+            durationMs: normalized.durationMs ?? Date.now() - started,
+          };
+        });
+        this.idempotent.set(cacheKey, promise);
+        try {
+          result = await promise;
+        } catch (error) {
+          this.idempotent.delete(cacheKey);
+          throw error;
+        }
+      } else {
+        result = await registration.provider.invoke(
+          actionId,
+          input,
+          context
+        );
+      }
       throwIfAborted(context.signal);
       const normalized = isActionResult(result) ? result : { value: result };
       return {
@@ -358,6 +430,7 @@ export class HostActionRegistry {
   async dispose(): Promise<void> {
     const providers = [...this.providers.values()];
     this.providers.clear();
+    this.idempotent.clear();
     await Promise.allSettled(
       providers.map((provider) => provider.provider.dispose?.())
     );
@@ -398,6 +471,26 @@ const actionEffects = new Set<HostActionEffect>([
 ]);
 const actionRisks = new Set<ToolRisk>(['read', 'write', 'dangerous']);
 const workspaceBindings = new Set(['root', 'fork', 'remote']);
+const idempotencyModes = new Set(['safe', 'required', 'never']);
+
+function idempotencyCacheKey(
+  action: AvailableHostAction,
+  input: JsonValue,
+  context: HostActionContext
+): string {
+  return [
+    action.sourceId,
+    action.descriptor.id,
+    action.descriptor.version,
+    context.sessionId,
+    context.taskId,
+    context.workspaceId ?? '',
+    context.workspaceGeneration ?? '',
+    context.environmentFingerprint ?? '',
+    context.idempotencyKey ?? '',
+    JSON.stringify(input),
+  ].join(':');
+}
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw abortError();

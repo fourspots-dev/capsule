@@ -133,6 +133,48 @@ describe('TuiApp and renderer', () => {
     await app.dispose();
   });
 
+  it('opens a compact read-only application Action manager', async () => {
+    const { app } = await appWithAnswer('ready', {
+      actions: async () => [
+        {
+          id: 'app.test.check',
+          version: '1.2.0',
+          title: 'Run checks',
+          description: 'Run the application test suite.',
+          sourceId: 'local',
+          state: 'available',
+          effects: ['execute'],
+          risk: 'dangerous',
+        },
+        {
+          id: 'browser.remote',
+          version: '1.0.0',
+          title: 'Remote browser',
+          description: 'Remote action.',
+          sourceId: 'remote',
+          state: 'degraded',
+          effects: ['network'],
+          risk: 'write',
+          limitations: ['reconnect required'],
+        },
+      ],
+    });
+    await app.handleInput('\x19');
+    const first = app.render(100, 24).join('\n');
+    expect(first).toContain('ACTIONS');
+    expect(first).toContain('app.test.check');
+    expect(first).toContain('Run checks');
+    expect(first).toContain('reconnect required');
+    await app.handleInput('\x1b[B');
+    expect(app.routes.current).toMatchObject({
+      kind: 'actions',
+      selectedId: 'browser.remote',
+    });
+    await app.handleInput('\x1b');
+    expect(app.routes.current.kind).toBe('conversation');
+    await app.dispose();
+  });
+
   it('keeps one visible space between the prompt and the native block cursor', async () => {
     const { app } = await appWithAnswer();
     const frame = app.renderFrame(80, 24, {

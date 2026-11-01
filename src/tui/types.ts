@@ -12,6 +12,7 @@ export type TuiRoute =
   | { kind: 'agents'; rootSessionId: string; selectedId?: string }
   | { kind: 'review'; targetSessionId: string }
   | { kind: 'status'; targetSessionId: string }
+  | { kind: 'actions'; selectedId?: string }
   | { kind: 'commands'; query: string }
   | { kind: 'help' };
 
@@ -134,6 +135,18 @@ export interface TuiAgentRecord {
   deletions?: number;
   attention?: boolean;
   resumable?: boolean;
+}
+
+export interface TuiActionInfo {
+  id: string;
+  version: string;
+  title: string;
+  description: string;
+  sourceId: string;
+  state: 'available' | 'degraded' | 'unavailable';
+  effects: string[];
+  risk: 'read' | 'write' | 'dangerous';
+  limitations?: string[];
 }
 
 export interface AgentTreeRow {

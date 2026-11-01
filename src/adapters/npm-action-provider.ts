@@ -100,9 +100,34 @@ export class NpmScriptActionProvider implements HostActionProvider {
       value: {
         actionId,
         script: action.script,
-        ...result,
+        exitCode: result.exitCode,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        truncated: result.truncated,
       },
       truncated: result.truncated,
+      ...(result.truncated
+        ? {
+            artifacts: [
+              {
+                name: `${action.id}-stdout.bin`,
+                mimeType: 'application/octet-stream',
+                kind: 'binary' as const,
+                data: result.stdoutBytes,
+              },
+              ...(result.stderrBytes.byteLength
+                ? [
+                    {
+                      name: `${action.id}-stderr.bin`,
+                      mimeType: 'application/octet-stream',
+                      kind: 'binary' as const,
+                      data: result.stderrBytes,
+                    },
+                  ]
+                : []),
+            ],
+          }
+        : {}),
     };
   }
 }

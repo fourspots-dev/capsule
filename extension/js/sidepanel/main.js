@@ -176,13 +176,13 @@
   function applyProjectionDelta(current, delta) {
     const next = {
       ...current,
-      rows: current.rows.map((row) => ({ ...row }))
+      rows: current.rows.map(cloneRow)
     };
-    if (delta.type === "row.appended") next.rows.push({ ...delta.row });
+    if (delta.type === "row.appended") next.rows.push(cloneRow(delta.row));
     if (delta.type === "row.upserted") {
       const index = next.rows.findIndex((row) => row.id === delta.row.id);
-      if (index >= 0) next.rows[index] = { ...delta.row };
-      else next.rows.push({ ...delta.row });
+      if (index >= 0) next.rows[index] = cloneRow(delta.row);
+      else next.rows.push(cloneRow(delta.row));
     }
     if (delta.type === "row.removed") {
       next.rows = next.rows.filter((row) => row.id !== delta.fromRowId);
@@ -229,7 +229,7 @@
     for (const row of next.rows) {
       const old = previousRows.get(row.id);
       if (!old) {
-        deltas.push({ type: "row.appended", row: { ...row } });
+        deltas.push({ type: "row.appended", row: cloneRow(row) });
         continue;
       }
       if (old.kind === row.kind && old.entityId === row.entityId && old.productTurnId === row.productTurnId && old.status === row.status && old.callId === row.callId && old.toolName === row.toolName && row.text.startsWith(old.text)) {
@@ -242,7 +242,7 @@
           });
         }
       } else if (JSON.stringify(old) !== JSON.stringify(row)) {
-        deltas.push({ type: "row.upserted", row: { ...row } });
+        deltas.push({ type: "row.upserted", row: cloneRow(row) });
       }
     }
     return {
@@ -292,7 +292,13 @@
       ...projection.lastError ? { lastError: { ...projection.lastError } } : {},
       availability: { ...projection.availability },
       ...projection.children ? { children: projection.children.map((child) => ({ ...child })) } : {},
-      rows: projection.rows.map((row) => ({ ...row }))
+      rows: projection.rows.map(cloneRow)
+    };
+  }
+  function cloneRow(row) {
+    return {
+      ...row,
+      ...row.toolMetadata ? { toolMetadata: structuredClone(row.toolMetadata) } : {}
     };
   }
 

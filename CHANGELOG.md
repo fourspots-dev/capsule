@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.1
+
+### Fixes
+
+- `REQ-ACTION-002`: carry Action result metadata through ToolExecutionResult,
+  Session rows and TUI rendering without changing legacy tool outputs.
+- Preserve binary and failure artifacts through ArtifactStore, including bounded
+  raw stdout/stderr bytes in the local executor.
+- Persist approved, denied and cancelled approval receipts through HostStorage,
+  and fail closed when receipt storage is unavailable.
+- Add required-idempotency scopes, dynamic Workspace generation binding and
+  late-remote-response rejection.
+- Add a read-only TUI Action Manager on `Ctrl+Y` for state, version, effects,
+  risk, source and limitations.
+
+### Verification
+
+- `npm run check`: 403 tests passed, 3 skipped.
+- `npm run test:e2e`: 5 Chrome extension tests passed.
+- `npm run verify:tui`: real PTY Action metadata and Capsule export passed.
+
 ## 0.6.0
 
 ### Features

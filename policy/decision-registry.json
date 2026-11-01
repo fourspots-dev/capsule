@@ -38,6 +38,25 @@
       "supersedes": [],
       "supersededBy": null,
       "file": "docs/decisions/DEC-002-unreviewed-approval.md"
+    },
+    {
+      "id": "DEC-003",
+      "title": "Harden Action results approvals and observability",
+      "statement": "先继续 0.6 硬化：补 ActionResult 元数据、Action Manager、审批票据、二进制输出、幂等和迟到结果测试。",
+      "normalizedDecision": "Treat Action result metadata and approval receipts as durable first-class data; expose an Action manager; preserve binary artifacts; prevent duplicate side effects for providers that require idempotency; and never accept late remote results as success.",
+      "capturedAt": "2026-11-01",
+      "source": "request",
+      "scope": ["action", "approval", "artifact", "tui", "observability"],
+      "status": "promoted",
+      "triage": {
+        "disposition": "adr_and_requirement",
+        "adrs": ["ADR-015"],
+        "requirements": ["REQ-ACTION-002"],
+        "rationale": "The change affects execution trust, persistence and every Action consumer, so it is both a durable architecture rule and an implementation requirement."
+      },
+      "supersedes": [],
+      "supersededBy": null,
+      "file": "docs/decisions/DEC-003-action-hardening.md"
     }
   ]
 }

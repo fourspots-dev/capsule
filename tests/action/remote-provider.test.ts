@@ -86,6 +86,29 @@ describe('REQ-ACTION-001 remote Action provider', () => {
       code: 'REMOTE_ACTION_HTTP_ERROR',
     });
   });
+
+  it('ignores a late remote response after cancellation', async () => {
+    const provider = new RemoteActionProvider({
+      endpoint: 'https://actions.example.test/rpc',
+      fetch: vi.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        return jsonResponse({
+          result: {
+            status: 'succeeded',
+            value: { tooLate: true },
+          },
+        });
+      }) as typeof fetch,
+    });
+    const controller = new AbortController();
+    const pending = provider.invoke('app.remote.check', {}, {
+      sessionId: 's',
+      taskId: 't',
+      signal: controller.signal,
+    });
+    setTimeout(() => controller.abort(), 5);
+    await expect(pending).rejects.toMatchObject({ code: 'ACTION_CANCELLED' });
+  });
 });
 
 function jsonResponse(value: unknown): Response {

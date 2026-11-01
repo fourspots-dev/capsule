@@ -18,6 +18,7 @@ export interface WorkspaceCapabilityCompositionOptions {
   hostProfile?: string;
   environmentFingerprint?: string;
   hostBaseline?: HostBaselineReport;
+  workspaceGeneration?: () => number | Promise<number>;
 }
 
 export interface WorkspaceCapabilityComposition {
@@ -50,6 +51,9 @@ export async function createWorkspaceCapabilityComposition(
             : {}),
           ...(options.environmentFingerprint
             ? { environmentFingerprint: options.environmentFingerprint }
+            : {}),
+          ...(options.workspaceGeneration
+            ? { workspaceGeneration: options.workspaceGeneration }
             : {}),
         })
       : [];

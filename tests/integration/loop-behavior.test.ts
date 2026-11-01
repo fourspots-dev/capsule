@@ -114,6 +114,48 @@ describe('Pi behavior baseline', () => {
     expect(toolMessages.map((message) => message.callId)).toEqual(['call_slow', 'call_fast']);
   });
 
+  it('preserves detailed Tool metadata in the persisted conversation row', async () => {
+    const harness = createTestWorkspace({
+      model: async (_request, index) =>
+        events(
+          ...(index === 0
+            ? toolCall('call_meta', 'action_meta', {})
+            : text('finished'))
+        ),
+      tools: [
+        {
+          name: 'action_meta',
+          description: 'Metadata action',
+          parameters: { type: 'object', properties: {} },
+          risk: 'read',
+          execute: async () => ({ ok: true }),
+          executeDetailed: async () => ({
+            value: { ok: true },
+            metadata: {
+              action: { id: 'app.meta', version: '2.0.0', sourceId: 'test' },
+              durationMs: 8,
+              exitCode: 0,
+              replayed: true,
+            },
+          }),
+        },
+      ],
+    });
+    await harness.runtime.command(
+      command('session_meta', 'command_meta', 'run metadata action')
+    );
+    await harness.runtime.waitForSessionIdle('session_meta');
+    const row = harness.runtime
+      .getProjection('session_meta')
+      .rows.find((candidate) => candidate.callId === 'call_meta');
+    expect(row?.toolMetadata).toEqual({
+      action: { id: 'app.meta', version: '2.0.0', sourceId: 'test' },
+      durationMs: 8,
+      exitCode: 0,
+      replayed: true,
+    });
+  });
+
   it('inserts a guide after the active model turn before a new turn starts', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {

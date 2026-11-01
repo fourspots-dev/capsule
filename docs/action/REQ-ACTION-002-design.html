@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>REQ-ACTION-002 Action Result and Approval Integrity</title>
+<style>
+:root{--bg:#f4f5f7;--paper:#fff;--text:#191a1e;--muted:#6f7179;--line:#e2e3e8;--accent:#b45309;--soft:#fff3e8;--danger:#b42318;--mono:ui-monospace,Menlo,monospace}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1160px;margin:auto;padding:34px 22px 90px}header{padding:38px;border-radius:24px;background:radial-gradient(circle at 86% 8%,#f8b26a 0,transparent 24%),linear-gradient(135deg,#1c1510,#553518 58%,#9a4d13);color:#fff}header h1{font-size:34px;line-height:1.2;margin:12px 0}header p{margin:0;max-width:900px;color:#fff2df}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}nav{display:flex;gap:14px;overflow:auto;margin:18px 0;padding:10px 14px;position:sticky;top:0;background:#f4f5f7ed;border:1px solid var(--line);border-radius:12px}nav a{font-size:12px;color:var(--muted);text-decoration:none;white-space:nowrap}section{margin:18px 0;padding:25px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{margin:0 0 14px;font-size:23px}h3{margin:20px 0 8px;font-size:16px}p{color:#44454c}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafafa}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafafa;color:var(--muted)}code{font-family:var(--mono);background:#f0f0f4;padding:1px 5px;border-radius:4px}pre{padding:16px;overflow:auto;border-radius:11px;background:#17130f;color:#fff5e8;font:12px/1.6 var(--mono)}.rule{padding:12px 14px;border-left:3px solid var(--accent);background:var(--soft);border-radius:0 9px 9px 0}.warn{border-color:var(--danger);background:#fff1f0}.foot{font-size:12px;color:var(--muted)}@media(max-width:760px){.grid{grid-template-columns:1fr}header h1{font-size:28px}.wrap{padding:20px 10px 70px}table{display:block;overflow-x:auto}}
+</style>
+</head>
+<body><div class="wrap">
+<header><small>REQ-ACTION-002 / HARDENING DESIGN / 0.6.1</small><h1>Action Result、审批票据与可观察性</h1><p>修复 0.6.0 中 ActionResult 元数据在 Agent 工具边界丢失、审批仅存在于当前调用、二进制输出退化为文本以及缺少 Action 管理器的问题。</p><div class="chips"><span class="chip">Verified</span><span class="chip">Approved unreviewed</span><span class="chip">Implementation complete</span></div></header>
+<nav><a href="#scope">范围</a><a href="#architecture-impact">影响面</a><a href="#model">对象</a><a href="#result">结果</a><a href="#approval">审批</a><a href="#actions-ui">Action Manager</a><a href="#failure">失败</a><a href="#acceptance">验收</a></nav>
+<section id="scope"><h2>1. 范围</h2><div class="grid"><div class="card"><h3>实现</h3><ul><li>ActionResult 元数据进入 ToolExecutionResult、Session row 和 UI。</li><li>二进制 Action Artifact 存入 ArtifactStore。</li><li>持久化 approval receipt。</li><li>Provider 可选幂等要求。</li><li>TUI Action Manager 展示状态、版本、风险和限制。</li></ul></div><div class="card"><h3>非目标</h3><ul><li>不实现 TestReport 当前/过期证据（REQ-TEST-001）。</li><li>不实现跨进程分布式审批。</li><li>不增加通用 exec。</li><li>不改变 Action Tool Schema。</li></ul></div></div></section>
+<section id="architecture-impact"><h2>2. Architecture Impact Map</h2><table><thead><tr><th>Surface</th><th>Action</th><th>Proof</th></tr></thead><tbody><tr><td>Tool contract / Executor</td><td>modify</td><td>metadata round-trip unit tests</td></tr><tr><td>Action tools/providers</td><td>modify</td><td>inline binary artifact + idempotency contract tests</td></tr><tr><td>Artifact store</td><td>reuse</td><td>binary bytes preserved</td></tr><tr><td>Session / Projection</td><td>modify</td><td>row metadata survives persistence and projection</td></tr><tr><td>TUI</td><td>modify</td><td>Action manager render/navigation test</td></tr><tr><td>Headless</td><td>modify</td><td>approval receipt store and metadata output</td></tr><tr><td>Workspace/Capsule runtime</td><td>none</td><td>no Action/approval schema inside Capsule in this release</td></tr></tbody></table></section>
+<section id="model"><h2>3. 核心对象与交互</h2><pre>HostActionResult
+  ├─ value
+  ├─ status / durationMs / exitCode / truncated
+  ├─ artifactIds[]
+  └─ artifacts[] (inline binary)
+        ↓
+ToolExecutionOutput
+  ├─ value
+  ├─ metadata
+  └─ attachments[]
+        ↓ ToolExecutor
+ToolExecutionResult
+  ├─ output
+  └─ metadata
+        ↓
+ConversationRow.toolMetadata + ArtifactStore refs
+
+ApprovalPort
+  → ApprovalReceiptStore
+       ├─ approved | denied | cancelled | timedOut
+       └─ Action/input/workspace/environment digest</pre></section>
+<section id="result"><h2>4. Result 与 Artifact</h2><p>ToolDefinition 增加可选 <code>executeDetailed</code>；旧工具继续返回 JsonValue。Action 工具通过 detailed 路径返回结构化 metadata。ToolExecutor 对输出 schema 只校验 value，再将 inline attachments 写入 ArtifactStore。</p><ul><li><code>artifactIds</code> 和新建 Artifact ref 合并，不去重丢失。</li><li>binary 数据以原 bytes 保存，MIME/kind/name 明确。</li><li>ConversationRow 保存可投影 metadata；模型 ToolResult 同时得到 output 与工具元数据。</li><li>metadata 不含 Secret；截断只影响模型可见文本。</li></ul></section>
+<section id="approval"><h2>5. 审批票据与幂等</h2><p>ToolExecutor 在 approval 决策后写入 receipt。Receipt 包含 session/task/call/tool、risk、decision、actionDigest、approvalContext 和 timestamp。默认使用 HostStorage；内存宿主使用 Memory store。</p><pre>HostActionDescriptor.idempotency: 'safe' | 'required' | 'never'
+
+required + 相同 session/task/action/version/input/workspace generation
+  → 返回第一次结果，不重复执行副作用
+
+workspace generation / environment / input / Action version 变化
+  → 新 scope，旧结果不复用</pre><p>Remote abort 后迟到响应必须丢弃；调用只能返回 cancelled，不得在当前或后续请求中变成成功。</p></section>
+<section id="actions-ui"><h2>6. TUI Action Manager</h2><p>新增 Actions route，Ctrl+Y 打开。列表从当前 HostActionRegistry 重新 discover，显示 Action ID、版本、available/degraded/unavailable、effects、risk、source 和 limitations。它只读，不直接执行危险操作。</p><pre>tinyai Action Manager
+✓ app.test.check  1.2.0  execute/dangerous  local
+! browser.remote  1.0.0  degraded           remote: reconnect required</pre></section>
+<section id="failure"><h2>7. 失败与恢复</h2><table><tbody><tr><td>ArtifactStore 缺失</td><td>保留 metadata 和 attachment bytes 摘要，不声称已持久化</td></tr><tr><td>Receipt 写失败</td><td>工具失败，不执行危险 Action</td></tr><tr><td>重复 idempotency key</td><td>返回 cached result 并标注 replayed</td></tr><tr><td>Remote 迟到结果</td><td>丢弃，不更新当前状态</td></tr><tr><td>Provider version 改变</td><td>旧 idempotency cache 失效</td></tr></tbody></table></section>
+<section id="acceptance"><h2>8. 验收</h2><ul><li>Action metadata 从 Provider 到 UI 全链路保持。</li><li>二进制 Artifact round-trip byte-equal。</li><li>approved/denied/cancelled 审批均有持久 receipt。</li><li>required idempotency 的重复调用只执行一次。</li><li>Late remote response 不会产生成功结果。</li><li>Action Manager 不暴露隐藏 Action，不泄露 Secret。</li><li>旧 ToolDefinition 与现有测试保持兼容。</li></ul><p class="foot">Design status: approved_unreviewed · status: verified · targetVersion: 0.6.1</p></section>
+</div></body></html>

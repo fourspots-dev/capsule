@@ -2,14 +2,21 @@ import { AgentError, toStructuredError } from './errors';
 import type { ArtifactStore } from './artifact-store';
 import type { HookRunner, PostToolRecord } from './hooks';
 import type { PolicyEngine } from './policy';
-import type { ApprovalPort } from './ports';
+import type {
+  ApprovalDecision,
+  ApprovalPort,
+  ApprovalReceiptStore,
+} from './ports';
 import { parseToolArguments, validateToolInput } from './tool-schema';
 import type {
   JsonValue,
   ToolCall,
+  ToolArtifactRef,
   ToolDefinition,
   ToolDescriptor,
   ToolExecutionResult,
+  ToolExecutionMetadata,
+  ToolExecutionOutput,
   ToolInvocation,
 } from './types';
 
@@ -28,6 +35,7 @@ export class ToolExecutor {
       hooks?: HookRunner;
       onPostToolUse?: (records: PostToolRecord[]) => void;
       policy?: PolicyEngine;
+      approvalReceipts?: ApprovalReceiptStore;
       artifacts?: {
         store: ArtifactStore;
         thresholdBytes?: number;
@@ -137,22 +145,22 @@ export class ToolExecutor {
 
     let policyRequiresApproval = false;
     let actionDigest: string | undefined;
-    if (this.options.policy) {
-      let approvalContext: JsonValue | undefined;
-      if (tool.approvalContext) {
-        try {
-          approvalContext = await tool.approvalContext(input, invocation);
-        } catch (error) {
-          return {
-            ...base,
-            status: 'failed',
-            error: toStructuredError(
-              error,
-              'TOOL_APPROVAL_CONTEXT_FAILED'
-            ),
-          };
-        }
+    let approvalContext: JsonValue | undefined;
+    if (tool.approvalContext) {
+      try {
+        approvalContext = await tool.approvalContext(input, invocation);
+      } catch (error) {
+        return {
+          ...base,
+          status: 'failed',
+          error: toStructuredError(
+            error,
+            'TOOL_APPROVAL_CONTEXT_FAILED'
+          ),
+        };
       }
+    }
+    if (this.options.policy) {
       const decision = await this.options.policy.evaluate(
         {
           sessionId: invocation.sessionId,
@@ -201,23 +209,101 @@ export class ToolExecutor {
           invocation.signal
         );
       } catch (error) {
+        const receiptError = await this.recordApprovalReceipt(
+          invocation,
+          tool,
+          approvalContext,
+          'cancelled',
+          actionDigest
+        );
+        if (receiptError) {
+          return {
+            ...base,
+            status: 'failed',
+            error: receiptError.toStructured(),
+          };
+        }
         return { ...base, status: 'failed', error: toStructuredError(error, 'TOOL_APPROVAL_FAILED') };
       }
       if (!approved) {
+        const receiptError = await this.recordApprovalReceipt(
+          invocation,
+          tool,
+          approvalContext,
+          'denied',
+          actionDigest
+        );
+        if (receiptError) {
+          return {
+            ...base,
+            status: 'failed',
+            error: receiptError.toStructured(),
+          };
+        }
         return {
           ...base,
           status: 'denied',
           error: new AgentError('TOOL_DENIED', `User denied ${tool.name}`).toStructured(),
         };
       }
+      const receiptError = await this.recordApprovalReceipt(
+        invocation,
+        tool,
+        approvalContext,
+        'approved',
+        actionDigest
+      );
+      if (receiptError) {
+        return {
+          ...base,
+          status: 'failed',
+          error: receiptError.toStructured(),
+        };
+      }
     }
 
     try {
-      const rawOutput = await this.executeWithTimeout(tool, input, invocation);
-      if (tool.outputSchema) validateToolInput(tool.outputSchema, rawOutput as JsonValue as Record<string, JsonValue>);
+      const execution = await this.executeWithTimeout(tool, input, invocation);
+      const executionStatus = execution.metadata?.status ?? 'succeeded';
+      if (tool.outputSchema && executionStatus === 'succeeded') {
+        validateToolInput(
+          tool.outputSchema,
+          execution.value as Record<string, JsonValue>
+        );
+      }
       this.assertActive(invocation.signal);
-      const output = await this.artifactize(rawOutput, invocation);
-      const result: ToolExecutionResult = { ...base, status: 'succeeded', output };
+      const output = await this.artifactize(execution.value, invocation);
+      const metadata = await this.materializeArtifacts(
+        execution,
+        invocation
+      );
+      if (executionStatus === 'failed' || executionStatus === 'cancelled') {
+        const result: ToolExecutionResult = {
+          ...base,
+          status: executionStatus,
+          output,
+          ...(metadata ? { metadata } : {}),
+          error: new AgentError(
+            executionStatus === 'cancelled'
+              ? 'TOOL_CANCELLED'
+              : 'TOOL_EXECUTION_FAILED',
+            executionStatus === 'cancelled'
+              ? `${tool.name} was cancelled`
+              : `${tool.name} failed`
+          ).toStructured(),
+        };
+        if (failureKey) {
+          this.recordFailure(failureKey, result.error!.code);
+        }
+        await this.runPostHooks(invocation, input, result);
+        return result;
+      }
+      const result: ToolExecutionResult = {
+        ...base,
+        status: 'succeeded',
+        output,
+        ...(metadata ? { metadata } : {}),
+      };
       await this.runPostHooks(invocation, input, result);
       if (failureKey) this.repeatedFailures.delete(failureKey);
       return result;
@@ -269,7 +355,7 @@ export class ToolExecutor {
     tool: ToolDefinition,
     input: JsonValue,
     invocation: ToolInvocation
-  ): Promise<JsonValue> {
+  ): Promise<ToolExecutionOutput> {
     const timeoutMs = tool.timeoutMs ?? this.options.defaultTimeoutMs ?? 120_000;
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -285,13 +371,59 @@ export class ToolExecutor {
     });
     try {
       return await Promise.race([
-        tool.execute(input, { ...invocation, signal: controller.signal }),
+        tool.executeDetailed
+          ? tool.executeDetailed(input, {
+              ...invocation,
+              signal: controller.signal,
+            })
+          : tool.execute(input, { ...invocation, signal: controller.signal }).then(
+              (value) => ({ value })
+            ),
         timeout,
       ]);
     } finally {
       if (timer !== undefined) clearTimeout(timer);
       invocation.signal.removeEventListener('abort', abort);
     }
+  }
+
+  private async materializeArtifacts(
+    execution: ToolExecutionOutput,
+    invocation: ToolInvocation
+  ): Promise<ToolExecutionMetadata | undefined> {
+    const attachments = execution.attachments ?? [];
+    if (attachments.length === 0) return execution.metadata;
+    if (!this.options.artifacts) {
+      throw new AgentError(
+        'ARTIFACT_STORE_UNAVAILABLE',
+        'Action returned binary attachments but no ArtifactStore is configured'
+      );
+    }
+    const refs: ToolArtifactRef[] = [];
+    for (const attachment of attachments) {
+      refs.push(
+        await this.options.artifacts.store.put({
+          name: attachment.name,
+          mimeType: attachment.mimeType,
+          kind: attachment.kind,
+          data: attachment.data,
+          sessionId: invocation.sessionId,
+          taskId: invocation.taskId,
+        })
+      );
+    }
+    const metadata = execution.metadata ?? {};
+    const artifactIds = [
+      ...new Set([
+        ...(metadata.artifactIds ?? []),
+        ...refs.map((ref) => ref.artifactId),
+      ]),
+    ];
+    return {
+      ...metadata,
+      artifacts: [...(metadata.artifacts ?? []), ...refs],
+      ...(artifactIds.length ? { artifactIds } : {}),
+    };
   }
 
   private async runPostHooks(
@@ -312,6 +444,44 @@ export class ToolExecutor {
       invocation.signal
     );
     this.options.onPostToolUse?.(records);
+  }
+
+  private async recordApprovalReceipt(
+    invocation: ToolInvocation,
+    tool: ToolDefinition,
+    approvalContext: JsonValue | undefined,
+    decision: ApprovalDecision,
+    actionDigest: string | undefined
+  ): Promise<AgentError | undefined> {
+    if (!this.options.approvalReceipts) return undefined;
+    try {
+      await this.options.approvalReceipts.record({
+        id: `approval:${invocation.sessionId}:${invocation.call.id}`,
+        sessionId: invocation.sessionId,
+        taskId: invocation.taskId,
+        callId: invocation.call.id,
+        toolName: tool.name,
+        risk: tool.risk === 'read'
+          ? 'write'
+          : tool.risk,
+        decision,
+        inputDigest:
+          actionDigest ??
+          `fnv:${hashString(JSON.stringify({
+            input: invocation.call.arguments,
+            tool: tool.name,
+          }))}`,
+        ...(actionDigest ? { actionDigest } : {}),
+        ...(approvalContext === undefined ? {} : { approvalContext }),
+        createdAt: Date.now(),
+      });
+      return undefined;
+    } catch (error) {
+      return new AgentError(
+        'APPROVAL_RECEIPT_FAILED',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
   }
 
   private async artifactize(
@@ -355,8 +525,18 @@ function hashString(value: string): number {
 
 export function toolResultText(result: ToolExecutionResult): string {
   if (result.status === 'succeeded') {
-    if (result.output === undefined) return '(no output)';
-    return typeof result.output === 'string' ? result.output : JSON.stringify(result.output);
+    const output =
+      result.output === undefined
+        ? '(no output)'
+        : typeof result.output === 'string'
+          ? result.output
+          : JSON.stringify(result.output);
+    return result.metadata
+      ? JSON.stringify({
+          output: result.output ?? null,
+          toolMetadata: result.metadata,
+        })
+      : output;
   }
   return JSON.stringify(result.error ?? new AgentError('TOOL_FAILED', 'Tool failed').toStructured());
 }

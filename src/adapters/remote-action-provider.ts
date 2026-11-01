@@ -134,6 +134,12 @@ export class RemoteActionProvider implements HostActionProvider {
         );
       }
       const body = (await response.json()) as unknown;
+      if (signal?.aborted) {
+        throw new AgentError('ACTION_CANCELLED', 'Remote Action was cancelled');
+      }
+      if (controller.signal.aborted) {
+        throw new AgentError('ACTION_TIMEOUT', 'Remote Action timed out');
+      }
       if (!body || typeof body !== 'object' || Array.isArray(body)) {
         throw new AgentError(
           'REMOTE_ACTION_RESPONSE_INVALID',

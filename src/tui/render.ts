@@ -1,4 +1,5 @@
 import type { ConversationRow, ProductProjection } from '../core/types';
+import type { TuiActionInfo } from './types';
 import { renderPanel, blankLine } from './components';
 import {
   indentStyledLine,
@@ -49,6 +50,8 @@ export interface TuiRenderSnapshot {
   reasoningMode: ReasoningMode;
   statusMessage?: string;
   prompt?: { label: string; value: string };
+  actions?: TuiActionInfo[];
+  selectedActionId?: string;
   review?: TuiReviewSnapshot;
 }
 
@@ -122,6 +125,7 @@ function renderBody(
   if (view.route.kind === 'sessions') return renderSessions(view, width, height);
   if (view.route.kind === 'agents') return renderAgents(view, width, height);
   if (view.route.kind === 'status') return renderStatus(view, width, height);
+  if (view.route.kind === 'actions') return renderActions(view, width, height);
   if (view.route.kind === 'help' || view.route.kind === 'commands') {
     return renderHelp(width, height);
   }
@@ -201,7 +205,7 @@ function renderConversation(
 function renderHint(view: TuiRenderSnapshot, width: number): StyledLine[] {
   const text =
     view.statusMessage ??
-    `Enter send · Ctrl+T think:${view.reasoningMode} · Ctrl+K sessions · Ctrl+G agents · ? help`;
+    `Enter send · Ctrl+T think:${view.reasoningMode} · Ctrl+K sessions · Ctrl+G agents · Ctrl+Y actions · ? help`;
   return [plainStyledLine(truncateDisplay(text, width), { fg: 'muted', dim: true })];
 }
 
@@ -589,10 +593,31 @@ function renderTool(row: ConversationRow, width: number): StyledLine[] {
 }
 
 function toolSummary(row: ConversationRow): string {
+  const metadata = row.toolMetadata;
+  const metadataSuffix = metadata
+    ? [
+        metadata.action
+          ? `${metadata.action.id}@${metadata.action.version}`
+          : undefined,
+        metadata.exitCode === undefined
+          ? undefined
+          : `exit ${metadata.exitCode}`,
+        metadata.artifactIds?.length
+          ? `${metadata.artifactIds.length} artifact${metadata.artifactIds.length === 1 ? '' : 's'}`
+          : undefined,
+        metadata.truncated ? 'truncated' : undefined,
+        metadata.replayed ? 'replayed' : undefined,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : '';
   const parsedValue =
     row.text.length <= 128_000 ? parseJsonValue(row.text) : undefined;
   if (Array.isArray(parsedValue)) {
-    return `${parsedValue.length} result${parsedValue.length === 1 ? '' : 's'}`;
+    return withMetadata(
+      `${parsedValue.length} result${parsedValue.length === 1 ? '' : 's'}`,
+      metadataSuffix
+    );
   }
   const parsed =
     parsedValue && typeof parsedValue === 'object'
@@ -603,31 +628,44 @@ function toolSummary(row: ConversationRow): string {
       const stdout = typeof parsed.stdout === 'string' ? parsed.stdout : '';
       const stderr = typeof parsed.stderr === 'string' ? parsed.stderr : '';
       const first = (stdout || stderr).trim().split('\n').find(Boolean);
-      return `exit ${parsed.exitCode}${first ? ` · ${sanitizeSingleLine(first)}` : ''}`;
+      return withMetadata(
+        `exit ${parsed.exitCode}${first ? ` · ${sanitizeSingleLine(first)}` : ''}`,
+        metadataSuffix
+      );
     }
     if (typeof parsed.path === 'string') {
       const bytes =
         typeof parsed.bytes === 'number' ? ` · ${parsed.bytes} bytes` : '';
-      return `${parsed.path}${bytes}`;
+      return withMetadata(`${parsed.path}${bytes}`, metadataSuffix);
     }
     if (Array.isArray(parsed.files)) {
       const additions =
         typeof parsed.additions === 'number' ? parsed.additions : 0;
       const deletions =
         typeof parsed.deletions === 'number' ? parsed.deletions : 0;
-      return `${parsed.files.length} file${parsed.files.length === 1 ? '' : 's'} · +${additions}/-${deletions}`;
+      return withMetadata(
+        `${parsed.files.length} file${parsed.files.length === 1 ? '' : 's'} · +${additions}/-${deletions}`,
+        metadataSuffix
+      );
     }
     if (typeof parsed.error === 'object' && parsed.error) {
       const error = parsed.error as { message?: unknown; code?: unknown };
-      return sanitizeSingleLine(String(error.message ?? error.code ?? 'error'));
+      return withMetadata(
+        sanitizeSingleLine(String(error.message ?? error.code ?? 'error')),
+        metadataSuffix
+      );
     }
   }
-  return (
+  const summary =
     truncateDisplay(
       sanitizeSingleLine(boundedDisplayText(row.text, 4_000)),
       72
-    ) || row.status
-  );
+    ) || row.status;
+  return withMetadata(summary, metadataSuffix);
+}
+
+function withMetadata(summary: string, metadata: string): string {
+  return metadata ? `${summary} · ${metadata}` : summary;
 }
 
 function renderContextPanel(
@@ -824,6 +862,78 @@ function renderAgents(
   );
 }
 
+function renderActions(
+  view: TuiRenderSnapshot,
+  width: number,
+  height: number
+): StyledLine[] {
+  const actions = view.actions ?? [];
+  if (actions.length === 0) {
+    return renderPanel({
+      title: 'ACTIONS',
+      badge: '0 discovered',
+      width,
+      lines: [
+        plainStyledLine('No application Actions are currently available.', {
+          fg: 'muted',
+        }),
+        plainStyledLine('Configure a trusted module, npm script or remote endpoint.', {
+          fg: 'muted',
+        }),
+      ],
+      token: 'tool',
+    }).slice(0, height);
+  }
+  const lines: StyledLine[] = [];
+  for (const action of actions) {
+    const selected = action.id === view.selectedActionId;
+    const glyph =
+      action.state === 'available'
+        ? '✓'
+        : action.state === 'degraded'
+          ? '!'
+          : '×';
+    const limitations = action.limitations?.length
+      ? ` · ${sanitizeSingleLine(action.limitations.join('; '))}`
+      : '';
+    lines.push(
+      styledLine(
+        styleSpan(selected ? '› ' : '  ', {
+          fg: 'accent',
+          bold: selected,
+        }),
+        styleSpan(`${glyph} ${action.id}`, {
+          fg:
+            action.state === 'available'
+              ? 'success'
+              : action.state === 'degraded'
+                ? 'warning'
+                : 'error',
+          bold: selected,
+        }),
+        styleSpan(
+          `  ${action.version} · ${action.effects.join('/') || 'read'} · ${action.risk} · ${action.sourceId}${limitations}`,
+          { fg: 'muted', dim: !selected }
+        )
+      )
+    );
+  }
+  const selected = actions.find((action) => action.id === view.selectedActionId);
+  if (selected) {
+    lines.push(blankLine());
+    lines.push(plainStyledLine(selected.title, { fg: 'accent', bold: true }));
+    lines.push(...renderMarkdown(selected.description, Math.max(1, width - 4)).slice(0, 3));
+  }
+  return renderPanel({
+    title: 'ACTIONS',
+    badge: `${actions.length} discovered · ↑↓ inspect · Esc back`,
+    width,
+    lines,
+    token: 'tool',
+    maxHeight: height,
+  }).slice(-height);
+}
+
 function renderStatus(
   view: TuiRenderSnapshot,
   width: number,
@@ -1007,6 +1117,7 @@ function renderHelp(width: number, height: number): StyledLine[] {
     ['Ctrl+T', 'reasoning hidden / preview / full'],
     ['Ctrl+K', 'sessions'],
     ['Ctrl+G', 'agent board'],
+    ['Ctrl+Y', 'application actions'],
     ['Ctrl+I', 'full status'],
     ['Ctrl+O', 'review'],
     ['Ctrl+P', 'commands / help'],

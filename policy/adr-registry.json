@@ -197,6 +197,18 @@
       "approvedBy": "user",
       "supersedes": [],
       "supersededBy": null
+    },
+    {
+      "id": "ADR-015",
+      "title": "Action results and approvals are durable first-class records",
+      "status": "accepted",
+      "file": "docs/adr/ADR-015-action-result-approval-records.md",
+      "requirements": ["REQ-ACTION-002"],
+      "originDecision": "DEC-003",
+      "decidedAt": "2026-11-01",
+      "approvedBy": "user",
+      "supersedes": [],
+      "supersededBy": null
     }
   ]
 }

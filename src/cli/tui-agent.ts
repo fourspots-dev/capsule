@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { OpenAIModelTransport } from '../adapters/openai-model';
 import { HostArtifactStore } from '../adapters/host-artifact-store';
+import { HostApprovalReceiptStore } from '../adapters/host-approval-receipt-store';
 import { HostSessionStore } from '../adapters/host-session-store';
 import {
   NpmScriptActionProvider,
@@ -135,6 +136,7 @@ async function main(): Promise<void> {
   const ids = new SequentialIdGenerator();
   const sessionStore = new HostSessionStore(host.storage);
   const artifactStore = new HostArtifactStore(host.storage);
+  const approvalReceipts = new HostApprovalReceiptStore(host.storage);
   const actionRegistry = new HostActionRegistry();
   if (host.actions) {
     actionRegistry.register(host.descriptor.id, host.actions);
@@ -189,6 +191,7 @@ async function main(): Promise<void> {
         .map(([tier, state]) => `${tier}:${state}`),
     ].join('|'),
     hostBaseline,
+    workspaceGeneration: () => workspace.generation(),
   });
   const actionTools = capability.actionTools;
   const applicationActions = capability.applicationActions;
@@ -310,6 +313,7 @@ async function main(): Promise<void> {
     approvalPort,
     {
       policy: new PolicyEngine((sessionId) => modes.mode(sessionId)),
+      approvalReceipts,
       artifacts: {
         store: artifactStore,
         thresholdBytes: 64_000,
@@ -420,6 +424,42 @@ async function main(): Promise<void> {
       applicationActions.length ? `${applicationActions.length}-actions` : 'no-actions',
     ].join('/'),
     capsuleExport: exportCapsule,
+    actions: async () => {
+      const report = await actionRegistry.discover();
+      const available = report.inspected.map((action) => ({
+        id: action.descriptor.id,
+        version: action.descriptor.version,
+        title: action.descriptor.title,
+        description: action.descriptor.description,
+        sourceId: action.sourceId,
+        state: action.probe.state,
+        effects: [...action.descriptor.effects],
+        risk: action.descriptor.risk,
+        ...(action.descriptor.limitations
+          ? { limitations: [...action.descriptor.limitations] }
+          : {}),
+      }));
+      const unavailable = report.diagnostics
+        .filter(
+          (diagnostic) =>
+            diagnostic.actionId !== '*' &&
+            !available.some((action) => action.id === diagnostic.actionId)
+        )
+        .map((diagnostic) => ({
+          id: diagnostic.actionId,
+          version: 'unknown',
+          title: diagnostic.actionId,
+          description: diagnostic.message,
+          sourceId: diagnostic.sourceId,
+          state: 'unavailable' as const,
+          effects: [],
+          risk: 'write' as const,
+          limitations: [diagnostic.message],
+        }));
+      return [...available, ...unavailable].sort((left, right) =>
+        left.id.localeCompare(right.id)
+      );
+    },
     ...(baseline
       ? {
           review: async () => {
