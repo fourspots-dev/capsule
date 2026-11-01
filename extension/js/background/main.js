@@ -13211,15 +13211,26 @@ ${lines.join("\n")}
   };
   function resultFromProjection(projection, aborted) {
     const assistant = [...projection.rows].reverse().find((row) => row.kind === "assistant");
+    const evidence = projection.rows.flatMap(
+      (row) => row.kind === "tool" && row.toolMetadata?.evidence ? [structuredClone(row.toolMetadata.evidence)] : []
+    );
+    const artifactIds = [
+      ...new Set(
+        projection.rows.flatMap(
+          (row) => row.toolMetadata?.artifactIds ?? []
+        )
+      )
+    ];
     const status = aborted ? "cancelled" : projection.taskStatus === "completed" ? "completed" : projection.taskStatus === "cancelled" ? "cancelled" : "failed";
     return {
       status,
       summary: assistant?.text || projection.lastError?.message || projection.taskStatus,
       output: {
         sessionId: projection.sessionId,
-        rows: projection.rows
+        rows: projection.rows,
+        evidence
       },
-      artifacts: [],
+      artifacts: artifactIds,
       unresolved: status === "completed" ? [] : [projection.lastError?.message ?? status],
       ...projection.lastError ? { error: projection.lastError } : {}
     };
@@ -14874,7 +14885,7 @@ ${lines.join("\n")}
       artifacts: artifactStore,
       environmentId: "chrome-extension-v1",
       hostProfile: "browser-agent",
-      agentVersion: "0.8.0",
+      agentVersion: "0.9.0",
       newId: () => `capsule_${crypto.randomUUID()}`,
       beforeExport: async () => {
         if (!activeRuntime) return;

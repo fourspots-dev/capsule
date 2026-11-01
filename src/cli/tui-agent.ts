@@ -14,6 +14,7 @@ import { RemoteActionProvider } from '../adapters/remote-action-provider';
 import { LspActionCodeIntelligence } from '../adapters/lsp-action-code-intelligence';
 import { createSubagentTools } from '../adapters/subagent-tools';
 import { createVirtualWorkspaceTools } from '../adapters/virtual-workspace-tools';
+import { assertActionWorkspaceBinding } from '../adapters/host-action-tools';
 import {
   AgentProfileRegistry,
   type PermissionPolicy,
@@ -151,6 +152,7 @@ async function main(): Promise<void> {
   const approvalReceipts = new HostApprovalReceiptStore(host.storage);
   const evidenceStore = new HostEvidenceStore(host.storage);
   const importJournal = new HostWorkspaceImportJournal(host.storage);
+  const sessionWorkspaces = new Map<string, VirtualWorkspace>();
   const actionRegistry = new HostActionRegistry();
   if (host.actions) {
     actionRegistry.register(host.descriptor.id, host.actions);
@@ -220,6 +222,17 @@ async function main(): Promise<void> {
     hostBaseline,
     workspaceGeneration: () => workspace.generation(),
     testEvidence,
+    actionBindingForInvocation: async (invocation, descriptor) => {
+      const target =
+        sessionWorkspaces.get(invocation.sessionId) ?? workspace;
+      assertActionWorkspaceBinding(target !== workspace, descriptor);
+      return {
+        workspaceId: target.workspaceId,
+        workspaceGeneration: await target.generation(),
+        environmentFingerprint,
+        evidenceVfs: target.fs,
+      };
+    },
     ...(codeIntelligence ? { codeIntelligence } : {}),
   });
   const actionTools = capability.actionTools;
@@ -273,7 +286,6 @@ async function main(): Promise<void> {
     maxDepth: 2,
     maxConcurrency: 4,
   });
-  const sessionWorkspaces = new Map<string, VirtualWorkspace>();
   const sessionPermissions = new Map<string, PermissionPolicy>();
   const sessionDepths = new Map<string, number>();
   const toolCache = new Map<VirtualWorkspace, ToolDefinition[]>([
@@ -387,7 +399,7 @@ async function main(): Promise<void> {
     environmentId: `tui-${options.workspaceMode}-${options.toolProfile}`,
     hostProfile:
       options.workspaceMode === 'host' ? 'local-coding' : 'portable',
-    agentVersion: '0.8.0',
+    agentVersion: '0.9.0',
     environment: {
       manifestVersion: 1,
       requiredActions: options.actionScripts.map((script) => ({

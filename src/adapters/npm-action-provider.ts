@@ -63,6 +63,7 @@ export class NpmScriptActionProvider implements HostActionProvider {
       },
       effects: ['execute', 'read'],
       risk: 'dangerous',
+      workspaceBinding: 'root',
       ...(script.testRunner
         ? { test: { runner: script.testRunner } }
         : {}),

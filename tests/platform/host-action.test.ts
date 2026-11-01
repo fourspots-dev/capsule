@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createHostActionTools } from '../../src/adapters/host-action-tools';
+import {
+  assertActionWorkspaceBinding,
+  createHostActionTools,
+} from '../../src/adapters/host-action-tools';
 import { ToolExecutor } from '../../src/core/tool-executor';
 import { PermissionModeRegistry, PolicyEngine } from '../../src/core/policy';
 import {
@@ -410,6 +413,52 @@ describe('HostActionRegistry', () => {
           data: binary,
         },
       ],
+    });
+  });
+
+  it('rejects root-only Actions in child workspaces and supports fork bindings', () => {
+    expect(() =>
+      assertActionWorkspaceBinding(true, descriptor({ workspaceBinding: 'root' }))
+    ).toThrowError(/not fork-bound/);
+    expect(() =>
+      assertActionWorkspaceBinding(true, descriptor({ workspaceBinding: 'fork' }))
+    ).not.toThrow();
+    expect(() =>
+      assertActionWorkspaceBinding(false, descriptor({ workspaceBinding: 'root' }))
+    ).not.toThrow();
+  });
+
+  it('rejects an approval when generation changes before execution', async () => {
+    let generation = 1;
+    const registry = new HostActionRegistry();
+    registry.register('app', provider([descriptor({ effects: ['write'] })]));
+    const tools = await createHostActionTools(registry, {
+      workspaceId: 'child_workspace',
+      bindingForInvocation: () => ({
+        workspaceId: 'child_workspace',
+        workspaceGeneration: generation,
+      }),
+    });
+    const approval = new FakeApproval(() => {
+      generation = 2;
+      return true;
+    });
+    const executor = new ToolExecutor(tools, approval, {
+      policy: new PolicyEngine(() => 'guarded'),
+    });
+    const result = await executor.execute({
+      sessionId: 'child_session',
+      taskId: 'child_task',
+      call: {
+        id: 'call_stale',
+        name: 'action_app_python_run_tests',
+        arguments: '{"pattern":"unit"}',
+      },
+      signal: new AbortController().signal,
+    });
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: { code: 'ACTION_APPROVAL_STALE' },
     });
   });
 });

@@ -218,6 +218,18 @@ function resultFromProjection(
   aborted: boolean
 ): ChildResult {
   const assistant = [...projection.rows].reverse().find((row) => row.kind === 'assistant');
+  const evidence = projection.rows.flatMap((row) =>
+    row.kind === 'tool' && row.toolMetadata?.evidence
+      ? [structuredClone(row.toolMetadata.evidence)]
+      : []
+  );
+  const artifactIds = [
+    ...new Set(
+      projection.rows.flatMap(
+        (row) => row.toolMetadata?.artifactIds ?? []
+      )
+    ),
+  ];
   const status = aborted
     ? 'cancelled'
     : projection.taskStatus === 'completed'
@@ -231,8 +243,9 @@ function resultFromProjection(
     output: {
       sessionId: projection.sessionId,
       rows: projection.rows,
+      evidence,
     },
-    artifacts: [],
+    artifacts: artifactIds,
     unresolved: status === 'completed' ? [] : [projection.lastError?.message ?? status],
     ...(projection.lastError ? { error: projection.lastError } : {}),
   };

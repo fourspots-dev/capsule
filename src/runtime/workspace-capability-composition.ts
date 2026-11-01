@@ -1,9 +1,15 @@
 import { createHostActionTools } from '../adapters/host-action-tools';
 import { createVirtualWorkspaceTools } from '../adapters/virtual-workspace-tools';
 import type { CompletionGuard } from '../core/session-runtime';
-import type { SessionView, ToolDefinition } from '../core/types';
+import type {
+  SessionView,
+  ToolDefinition,
+  ToolInvocation,
+} from '../core/types';
 import { CapabilityGraph } from '../platform/capability';
 import type { HostActionRegistry } from '../platform/host-action';
+import type { HostActionDescriptor } from '../platform/host-action';
+import type { ActionWorkspaceBinding } from '../adapters/host-action-tools';
 import type { HostBaselineReport } from '../host';
 import type { TestEvidenceService } from '../evidence';
 import { ToolPackComposer } from '../platform/tool-pack';
@@ -25,6 +31,10 @@ export interface WorkspaceCapabilityCompositionOptions {
   workspaceGeneration?: () => number | Promise<number>;
   testEvidence?: TestEvidenceService;
   codeIntelligence?: CodeIntelligencePort;
+  actionBindingForInvocation?: (
+    invocation: ToolInvocation,
+    descriptor: HostActionDescriptor
+  ) => Promise<ActionWorkspaceBinding> | ActionWorkspaceBinding;
 }
 
 export interface WorkspaceCapabilityComposition {
@@ -70,6 +80,12 @@ export async function createWorkspaceCapabilityComposition(
             : {}),
           ...(options.testEvidence
             ? { testEvidence: options.testEvidence }
+            : {}),
+          ...(options.actionBindingForInvocation
+            ? {
+                bindingForInvocation:
+                  options.actionBindingForInvocation,
+              }
             : {}),
         })
       : [];

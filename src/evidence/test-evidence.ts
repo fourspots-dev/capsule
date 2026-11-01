@@ -29,6 +29,9 @@ export interface ActionTestInput {
       data: Uint8Array;
     }[];
   };
+  workspaceGeneration?: number;
+  environmentFingerprint?: string;
+  vfs?: VirtualFileSystem;
 }
 
 export interface TestEvidenceServiceOptions {
@@ -120,10 +123,16 @@ export class TestEvidenceService {
       id: this.newId(),
       sessionId: input.sessionId,
       taskId: input.taskId,
-      workspaceGeneration: await this.options.workspaceGeneration(),
-      environmentFingerprint: this.options.environmentFingerprint,
+      workspaceGeneration:
+        input.workspaceGeneration ??
+        (await this.options.workspaceGeneration()),
+      environmentFingerprint:
+        input.environmentFingerprint ??
+        this.options.environmentFingerprint,
       action: { ...input.action },
-      fileHashes: await workspaceFileHashes(this.options.vfs),
+      fileHashes: await workspaceFileHashes(
+        input.vfs ?? this.options.vfs
+      ),
       report,
       status,
       ...(reason ? { reason } : {}),

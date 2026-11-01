@@ -1,6 +1,7 @@
 import type { JsonValue, ToolDefinition, ToolInvocation } from '../core/types';
 import { AgentError } from '../core/errors';
 import type { TestEvidenceService } from '../evidence';
+import type { VirtualFileSystem } from '../virtual';
 import {
   HostActionRegistry,
   toolNameForAction,
@@ -8,6 +9,26 @@ import {
   type HostActionContext,
   type HostActionResult,
 } from '../platform/host-action';
+
+export interface ActionWorkspaceBinding {
+  workspacePath?: string;
+  workspaceId?: string;
+  workspaceGeneration?: number;
+  environmentFingerprint?: string;
+  evidenceVfs?: VirtualFileSystem;
+}
+
+export function assertActionWorkspaceBinding(
+  isChildWorkspace: boolean,
+  descriptor: AvailableHostAction['descriptor']
+): void {
+  if (isChildWorkspace && descriptor.workspaceBinding !== 'fork') {
+    throw new AgentError(
+      'ACTION_WORKSPACE_BINDING_DENIED',
+      `Action ${descriptor.id} is not fork-bound and cannot run in a child workspace`
+    );
+  }
+}
 
 export async function createHostActionTools(
   registry: HostActionRegistry,
@@ -17,6 +38,10 @@ export async function createHostActionTools(
     workspaceGeneration?: number | (() => number | Promise<number>);
     environmentFingerprint?: string;
     testEvidence?: TestEvidenceService;
+    bindingForInvocation?: (
+      invocation: ToolInvocation,
+      descriptor: AvailableHostAction['descriptor']
+    ) => Promise<ActionWorkspaceBinding> | ActionWorkspaceBinding;
     signal?: AbortSignal;
   } = {}
 ): Promise<ToolDefinition[]> {
@@ -48,7 +73,7 @@ export async function createHostActionTools(
   return [
     discovery,
     ...actions.map((action) =>
-      actionTool(registry, action, options)
+      actionTool(registry, action, options, new Map())
     ),
   ];
 }
@@ -62,7 +87,12 @@ function actionTool(
     workspaceGeneration?: number | (() => number | Promise<number>);
     environmentFingerprint?: string;
     testEvidence?: TestEvidenceService;
-  }
+    bindingForInvocation?: (
+      invocation: ToolInvocation,
+      descriptor: AvailableHostAction['descriptor']
+    ) => Promise<ActionWorkspaceBinding> | ActionWorkspaceBinding;
+  },
+  approvalBindings: Map<string, ActionWorkspaceBinding>
 ): ToolDefinition {
   const descriptor = action.descriptor;
   const toolName = toolNameForAction(descriptor.id);
@@ -92,28 +122,23 @@ function actionTool(
     ...(descriptor.timeoutMs === undefined
       ? {}
       : { timeoutMs: descriptor.timeoutMs }),
-    approvalContext: async () => ({
-      actionId: descriptor.id,
-      actionVersion: descriptor.version,
-      effects: [...descriptor.effects],
-      risk: descriptor.risk,
-      ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
-      ...(options.workspaceGeneration === undefined
-        ? {}
-        : {
-            workspaceGeneration: await resolveWorkspaceGeneration(
-              options.workspaceGeneration
-            ),
-          }),
-      ...(options.environmentFingerprint
-        ? { environmentFingerprint: options.environmentFingerprint }
-        : {}),
-    }),
+    approvalContext: async (_input, invocation) => {
+      const binding = await resolveBinding(options, invocation, descriptor);
+      approvalBindings.set(invocation.call.id, binding);
+      return {
+        actionId: descriptor.id,
+        actionVersion: descriptor.version,
+        effects: [...descriptor.effects],
+        risk: descriptor.risk,
+        ...bindingContext(binding),
+      };
+    },
     execute: async (input, invocation) => {
+      const binding = await resolveBinding(options, invocation, descriptor);
       const result = await runAction(
         registry,
         action,
-        options,
+        binding,
         input,
         invocation
       );
@@ -121,10 +146,25 @@ function actionTool(
       return result.value;
     },
     executeDetailed: async (input, invocation) => {
+      const approved = approvalBindings.get(invocation.call.id);
+      const current = await resolveBinding(options, invocation, descriptor);
+      if (
+        approved &&
+        descriptor.risk !== 'read' &&
+        bindingDigest(approved) !== bindingDigest(current)
+      ) {
+        approvalBindings.delete(invocation.call.id);
+        throw new AgentError(
+          'ACTION_APPROVAL_STALE',
+          `Workspace or environment changed after approval: ${descriptor.id}`
+        );
+      }
+      approvalBindings.delete(invocation.call.id);
+      const executionBinding = approved ?? current;
       const result = await runAction(
         registry,
         action,
-        options,
+        executionBinding,
         input,
         invocation
       );
@@ -139,6 +179,21 @@ function actionTool(
               },
               runner: descriptor.test.runner,
               result,
+              ...(executionBinding.workspaceGeneration === undefined
+                ? {}
+                : {
+                    workspaceGeneration:
+                      executionBinding.workspaceGeneration,
+                  }),
+              ...(executionBinding.evidenceVfs
+                ? { vfs: executionBinding.evidenceVfs }
+                : {}),
+              ...(executionBinding.environmentFingerprint
+                ? {
+                    environmentFingerprint:
+                      executionBinding.environmentFingerprint,
+                  }
+                : {}),
             })
           : undefined;
       const attachmentArtifacts = evidence
@@ -198,21 +253,11 @@ function actionTool(
 async function runAction(
   registry: HostActionRegistry,
   action: AvailableHostAction,
-  options: {
-    workspacePath?: string;
-    workspaceId?: string;
-    workspaceGeneration?: number | (() => number | Promise<number>);
-    environmentFingerprint?: string;
-    testEvidence?: TestEvidenceService;
-  },
+  binding: ActionWorkspaceBinding,
   input: JsonValue,
   invocation: ToolInvocation
 ): Promise<HostActionResult> {
   const descriptor = action.descriptor;
-  const workspaceGeneration =
-    options.workspaceGeneration === undefined
-      ? undefined
-      : await resolveWorkspaceGeneration(options.workspaceGeneration);
   const context: HostActionContext = {
     sessionId: invocation.sessionId,
     taskId: invocation.taskId,
@@ -222,20 +267,20 @@ async function runAction(
         actionId: descriptor.id,
         version: descriptor.version,
         input,
-        workspaceId: options.workspaceId,
-        workspaceGeneration,
-        environmentFingerprint: options.environmentFingerprint,
+        workspaceId: binding.workspaceId,
+        workspaceGeneration: binding.workspaceGeneration,
+        environmentFingerprint: binding.environmentFingerprint,
       })
     ),
-    ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
-    ...(workspaceGeneration === undefined
+    ...(binding.workspaceId ? { workspaceId: binding.workspaceId } : {}),
+    ...(binding.workspaceGeneration === undefined
       ? {}
-      : { workspaceGeneration }),
-    ...(options.workspacePath
-      ? { workspacePath: options.workspacePath }
+      : { workspaceGeneration: binding.workspaceGeneration }),
+    ...(binding.workspacePath
+      ? { workspacePath: binding.workspacePath }
       : {}),
-    ...(options.environmentFingerprint
-      ? { environmentFingerprint: options.environmentFingerprint }
+    ...(binding.environmentFingerprint
+      ? { environmentFingerprint: binding.environmentFingerprint }
       : {}),
     signal: invocation.signal,
   };
@@ -274,6 +319,69 @@ async function resolveWorkspaceGeneration(
   value: number | (() => number | Promise<number>)
 ): Promise<number> {
   return typeof value === 'function' ? value() : value;
+}
+
+async function resolveBinding(
+  options: {
+    workspacePath?: string;
+    workspaceId?: string;
+    workspaceGeneration?: number | (() => number | Promise<number>);
+    environmentFingerprint?: string;
+    bindingForInvocation?: (
+      invocation: ToolInvocation,
+      descriptor: AvailableHostAction['descriptor']
+    ) => Promise<ActionWorkspaceBinding> | ActionWorkspaceBinding;
+  },
+  invocation: ToolInvocation,
+  descriptor: AvailableHostAction['descriptor']
+): Promise<ActionWorkspaceBinding> {
+  const dynamic = await options.bindingForInvocation?.(invocation, descriptor);
+  const workspaceGeneration =
+    dynamic?.workspaceGeneration ??
+    (options.workspaceGeneration === undefined
+      ? undefined
+      : await resolveWorkspaceGeneration(options.workspaceGeneration));
+  return {
+    ...(dynamic?.workspacePath ?? options.workspacePath
+      ? {
+          workspacePath:
+            dynamic?.workspacePath ?? options.workspacePath,
+        }
+      : {}),
+    ...(dynamic?.workspaceId ?? options.workspaceId
+      ? { workspaceId: dynamic?.workspaceId ?? options.workspaceId }
+      : {}),
+    ...(workspaceGeneration === undefined ? {} : { workspaceGeneration }),
+    ...(dynamic?.environmentFingerprint ?? options.environmentFingerprint
+      ? {
+          environmentFingerprint:
+            dynamic?.environmentFingerprint ??
+            options.environmentFingerprint,
+        }
+      : {}),
+    ...(dynamic?.evidenceVfs ? { evidenceVfs: dynamic.evidenceVfs } : {}),
+  };
+}
+
+function bindingDigest(binding: ActionWorkspaceBinding): string {
+  return stableDigest(JSON.stringify(binding));
+}
+
+function bindingContext(
+  binding: ActionWorkspaceBinding
+): Record<string, JsonValue> {
+  return {
+    ...(binding.workspacePath
+      ? { workspacePath: binding.workspacePath }
+      : {}),
+    ...(binding.workspaceId ? { workspaceId: binding.workspaceId } : {}),
+    ...(binding.workspaceGeneration === undefined
+      ? {}
+      : { workspaceGeneration: binding.workspaceGeneration }),
+    ...(binding.environmentFingerprint
+      ? { environmentFingerprint: binding.environmentFingerprint }
+      : {}),
+  };
 }
 
 function stableDigest(value: string): string {

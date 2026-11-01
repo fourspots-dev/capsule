@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.9.0
+
+### Features
+
+- `REQ-SUBAGENT-001`: bind each child Action invocation to its own Session,
+  Workspace fork, generation, VFS and Evidence scope.
+- Reject root-only Actions in child workspaces; allow only descriptors that
+  explicitly declare a fork binding.
+- Invalidate approval when Workspace generation or environment changes before
+  Action execution.
+- Propagate child Artifact and Evidence IDs into structured ChildResult output.
+- Preserve recursive parent cancellation and generic configurable agent
+  profiles.
+
+### Verification
+
+- `npm run check`: 423 tests passed, 3 skipped.
+- `npm run test:e2e`: 5 Chrome extension tests passed.
+- `npm run verify:tui`: real PTY coding loop and current TestEvidence passed.
+
 ## 0.8.0
 
 ### Features

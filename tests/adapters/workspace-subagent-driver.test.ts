@@ -9,7 +9,7 @@ import {
 } from '../../src/core';
 import { MemoryHostBridge } from '../../src/host';
 import { VirtualWorkspace } from '../../src/virtual';
-import { events, text } from '../harness/fakes';
+import { events, text, toolCall } from '../harness/fakes';
 import { FakeApproval } from '../harness/fakes';
 
 const encoder = new TextEncoder();
@@ -93,5 +93,104 @@ describe('WorkspaceSubagentDriver virtual forks', () => {
     await driver.applyMerge('child_1');
     expect(decoder.decode(await parent.fs.read('src/value.ts'))).toContain('= 2');
     await driver.dispose();
+  });
+
+  it('returns child artifact and evidence identity without sharing parent results', async () => {
+    const parent = new VirtualWorkspace({
+      host: new MemoryHostBridge(),
+      storageKey: 'subagent:evidence-parent',
+    });
+    const ids = new SequentialIdGenerator();
+    const profiles = new AgentProfileRegistry();
+    profiles.register({
+      name: 'worker',
+      displayName: 'worker',
+      description: 'worker',
+      instructions: '',
+      source: 'builtin',
+      skills: [],
+      tools: {},
+      mcpServers: [],
+      permissions: { capabilities: [], effects: ['read'] },
+      contextMode: 'fresh',
+      execution: {
+        defaultMode: 'background',
+        allowedModes: ['background'],
+      },
+      maxDepth: 2,
+      maxConcurrency: 1,
+    });
+    const driver = new WorkspaceSubagentDriver({
+      ids,
+      forkWorkspace: () => parent.fork(),
+      createRuntime({ workspace }) {
+        if (!workspace) throw new Error('child workspace missing');
+        let calls = 0;
+        const tools = new ToolExecutor(
+          [
+            {
+              name: 'child_check',
+              description: 'Child check',
+              parameters: { type: 'object', properties: {} },
+              risk: 'read',
+              execute: async () => ({ passed: true }),
+              executeDetailed: async () => ({
+                value: { passed: true },
+                metadata: {
+                  artifactIds: ['artifact_child'],
+                  evidence: {
+                    id: 'evidence_child',
+                    status: 'current',
+                  },
+                },
+              }),
+            },
+          ],
+          new FakeApproval(true)
+        );
+        return new WorkspaceRuntime({
+          model: {
+            async *stream() {
+              calls += 1;
+              yield* events(
+                ...(calls === 1
+                  ? toolCall('call_child', 'child_check', {})
+                  : text('child done'))
+              );
+            },
+          },
+          tools,
+          clock: { now: () => 1, setTimeout: () => 1, clearTimeout: () => undefined },
+          ids,
+        });
+      },
+    });
+    await driver.create({
+      taskId: 'child_evidence',
+      spec: {
+        parentTaskId: 'parent_task',
+        profile: 'worker',
+        brief: 'check',
+        budget: {},
+        contextMode: 'fresh',
+        executionMode: 'background',
+      },
+      profile: profiles.resolve('worker', {
+        capabilities: [],
+        effects: ['read'],
+      }),
+      prompt: 'check',
+    });
+    const result = await driver.run(
+      'child_evidence',
+      new AbortController().signal
+    );
+    expect(result).toMatchObject({
+      status: 'completed',
+      artifacts: ['artifact_child'],
+      output: {
+        evidence: [{ id: 'evidence_child', status: 'current' }],
+      },
+    });
   });
 });

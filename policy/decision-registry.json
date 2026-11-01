@@ -114,6 +114,25 @@
       "supersedes": [],
       "supersededBy": null,
       "file": "docs/decisions/DEC-006-code-intelligence-authorization.md"
+    },
+    {
+      "id": "DEC-007",
+      "title": "Authorize fork-bound subagent isolation for 0.9.0",
+      "statement": "继续实现通用 profile 子 Agent 的 fork-bound Action、Workspace generation、Evidence 与取消隔离。",
+      "normalizedDecision": "Implement REQ-SUBAGENT-001 under ADR-007 by binding each child invocation to its own Session, Workspace fork generation, Evidence scope and parent cancellation tree.",
+      "capturedAt": "2026-11-01",
+      "source": "request",
+      "scope": ["subagent", "action-isolation", "workspace", "evidence"],
+      "status": "promoted",
+      "triage": {
+        "disposition": "requirement",
+        "adrs": [],
+        "requirements": ["REQ-SUBAGENT-001"],
+        "rationale": "Generic subagent profiles are already the accepted architecture; this decision authorizes fork-bound execution implementation."
+      },
+      "supersedes": [],
+      "supersededBy": null,
+      "file": "docs/decisions/DEC-007-subagent-isolation-authorization.md"
     }
   ]
 }

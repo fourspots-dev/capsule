@@ -11,6 +11,7 @@ import { LspActionCodeIntelligence } from '../adapters/lsp-action-code-intellige
 import { OpenAIModelTransport } from '../adapters/openai-model';
 import { createSubagentTools } from '../adapters/subagent-tools';
 import { createVirtualWorkspaceTools } from '../adapters/virtual-workspace-tools';
+import { assertActionWorkspaceBinding } from '../adapters/host-action-tools';
 import {
   AgentProfileRegistry,
   type PermissionPolicy,
@@ -93,6 +94,7 @@ async function main(): Promise<void> {
   const approvalReceipts = new HostApprovalReceiptStore(host.storage);
   const evidenceStore = new HostEvidenceStore(host.storage);
   const importJournal = new HostWorkspaceImportJournal(host.storage);
+  const sessionWorkspaces = new Map<string, VirtualWorkspace>();
   const npmActions = new NpmScriptActionProvider({
     workspaceRoot: options.workspace,
     scripts: options.scripts,
@@ -154,6 +156,17 @@ async function main(): Promise<void> {
     hostBaseline,
     workspaceGeneration: () => workspace.generation(),
     testEvidence,
+    actionBindingForInvocation: async (invocation, descriptor) => {
+      const target =
+        sessionWorkspaces.get(invocation.sessionId) ?? workspace;
+      assertActionWorkspaceBinding(target !== workspace, descriptor);
+      return {
+        workspaceId: target.workspaceId,
+        workspaceGeneration: await target.generation(),
+        environmentFingerprint,
+        evidenceVfs: target.fs,
+      };
+    },
     ...(codeIntelligence ? { codeIntelligence } : {}),
   });
   const actionTools = capability.actionTools;
@@ -166,7 +179,7 @@ async function main(): Promise<void> {
     artifacts,
     environmentId: `local-${process.platform}-${process.arch}`,
     hostProfile: 'local-coding',
-    agentVersion: '0.8.0',
+    agentVersion: '0.9.0',
     newId: () => `capsule_${randomUUID()}`,
     environment: {
       manifestVersion: 1,
@@ -232,7 +245,6 @@ async function main(): Promise<void> {
     maxDepth: 2,
     maxConcurrency: 3,
   });
-  const sessionWorkspaces = new Map<string, VirtualWorkspace>();
   const sessionPermissions = new Map<string, PermissionPolicy>();
   const sessionDepths = new Map<string, number>();
   const toolCache = new Map<VirtualWorkspace, ToolDefinition[]>();

@@ -117,4 +117,70 @@ describe('REQ-TEST-001 Action to completion evidence integration', () => {
       reason: expect.stringContaining('Action version changed'),
     });
   });
+
+  it('binds child Action evidence to the child VFS and generation', async () => {
+    const rootVfs = new MemoryFileSystem();
+    const childVfs = new MemoryFileSystem();
+    await rootVfs.write('root.txt', new TextEncoder().encode('root'));
+    await childVfs.write('child.txt', new TextEncoder().encode('child'));
+    const evidenceStore = new InMemoryEvidenceStore();
+    const evidence = new TestEvidenceService({
+      store: evidenceStore,
+      artifacts: new InMemoryArtifactStore(),
+      vfs: rootVfs,
+      environmentFingerprint: 'env',
+      workspaceGeneration: () => 1,
+      now: () => 10,
+      newId: () => 'evidence_child',
+    });
+    const registry = new HostActionRegistry();
+    registry.register('app', {
+      describe: async () => [
+        {
+          id: 'app.tests.run',
+          version: '1.0.0',
+          title: 'Run tests',
+          description: 'Run tests.',
+          inputSchema: { type: 'object', properties: {} },
+          effects: ['execute'],
+          risk: 'read',
+          workspaceBinding: 'fork',
+          test: { runner: 'vitest' },
+          probe: async () => ({ state: 'available' }),
+        },
+      ],
+      invoke: async () => ({
+        value: { total: 1, passed: 1, failed: 0, skipped: 0, failures: [] },
+        status: 'succeeded',
+      }),
+    });
+    const tools = await createHostActionTools(registry, {
+      testEvidence: evidence,
+      bindingForInvocation: () => ({
+        workspaceId: 'child_workspace',
+        workspaceGeneration: 9,
+        evidenceVfs: childVfs,
+      }),
+    });
+    const executor = new ToolExecutor(tools, new FakeApproval(true));
+    await executor.execute({
+      sessionId: 'child_session',
+      taskId: 'child_task',
+      call: {
+        id: 'call_child',
+        name: 'action_app_tests_run',
+        arguments: '{}',
+      },
+      signal: new AbortController().signal,
+    });
+    expect(await evidenceStore.list()).toMatchObject([
+      {
+        id: 'evidence_child',
+        sessionId: 'child_session',
+        taskId: 'child_task',
+        workspaceGeneration: 9,
+        fileHashes: { 'child.txt': expect.any(String) },
+      },
+    ]);
+  });
 });
