@@ -229,7 +229,7 @@ export class TabSessionRegistry {
       const group = await this.options.browser.addTabToSession?.(
         sessionId,
         tab.id,
-        { owned: true }
+        { owned: true, baseTabId: existing.activeTabId }
       );
       if (!group) {
         throw new AgentError(

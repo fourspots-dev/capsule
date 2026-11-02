@@ -144,6 +144,68 @@ describe('browser tool adapter', () => {
     expect(workspaceTabs.switchTab).toHaveBeenCalledWith('session_1', '9');
   });
 
+  it('treats a missing tab search as a normal result inside the current workspace', async () => {
+    const workspaceTabs = {
+      createTab: vi.fn(),
+      switchTab: vi.fn(async () => undefined),
+      listTabs: vi.fn(async () => [
+        {
+          id: 'page_1',
+          title: 'Current page',
+          url: 'https://example.com/app',
+          active: true,
+        },
+      ]),
+    };
+    const provider = browser();
+    const executor = new ToolExecutor(
+      createBrowserTools(provider, { workspaceTabs }),
+      new FakeApproval(true)
+    );
+    const result = await executor.execute({
+      sessionId: 'session_1',
+      taskId: 'task_1',
+      signal: new AbortController().signal,
+      call: {
+        id: 'find_missing',
+        name: 'find_tab',
+        arguments: '{"url":"about:blank"}',
+      },
+    });
+    expect(result).toMatchObject({
+      status: 'succeeded',
+      output: { found: false, query: 'about:blank' },
+    });
+    expect(workspaceTabs.listTabs).toHaveBeenCalledWith('session_1');
+    expect(workspaceTabs.switchTab).not.toHaveBeenCalled();
+    expect(provider.listTabs).not.toHaveBeenCalled();
+
+    workspaceTabs.listTabs.mockResolvedValue([
+      {
+        id: 'blank_2',
+        title: 'Blank',
+        url: 'about:blank',
+        active: false,
+      },
+    ]);
+    await expect(
+      executor.execute({
+        sessionId: 'session_1',
+        taskId: 'task_1',
+        signal: new AbortController().signal,
+        call: {
+          id: 'find_blank',
+          name: 'find_tab',
+          arguments: '{"url":"about:blank"}',
+        },
+      })
+    ).resolves.toMatchObject({
+      status: 'succeeded',
+      output: { id: 'blank_2', url: 'about:blank' },
+    });
+    expect(workspaceTabs.switchTab).toHaveBeenCalledWith('session_1', 'blank_2');
+  });
+
   it('filters accessibility nodes without introducing a separate UI adapter', async () => {
     const executor = new ToolExecutor(createBrowserTools(browser()), new FakeApproval(true));
     const result = await executor.execute({

@@ -99,12 +99,12 @@
     }
     async listTabs() {
       const tabs = await this.tabs.query({});
-      return tabs.filter((tab) => isInspectable(tab.url)).filter((tab) => tab.id !== void 0).map(toDescriptor);
+      return tabs.filter((tab) => isInspectable(inspectableUrl(tab))).filter((tab) => tab.id !== void 0).map(toDescriptor);
     }
     async getTab(tabId) {
       try {
         const tab = await this.tabs.get(Number(tabId));
-        return isInspectable(tab.url) ? toDescriptor(tab) : null;
+        return isInspectable(inspectableUrl(tab)) ? toDescriptor(tab) : null;
       } catch {
         return null;
       }
@@ -189,19 +189,23 @@
     async addTabToSession(sessionId, tabId, options = {}) {
       const tab = await this.waitForTab(tabId);
       if (!tab) throw new AgentError("BROWSER_TAB_NOT_FOUND", `Tab not found: ${tabId}`);
-      const binding = this.sessions.get(sessionId);
-      if (!binding) {
-        throw new AgentError("BROWSER_SESSION_NOT_FOUND", `Browser session not found: ${sessionId}`);
-      }
+      const binding = this.sessions.get(sessionId) ?? {
+        tabId: options.baseTabId ?? tabId,
+        ownedTabs: /* @__PURE__ */ new Set(),
+        attached: /* @__PURE__ */ new Set()
+      };
       if (!this.tabs.group) {
         throw new AgentError("BROWSER_GROUP_UNAVAILABLE", "Chrome tabGroups are unavailable");
       }
-      const existingGroup = binding.groupId ?? (await this.getTab(binding.tabId))?.groupId;
+      const baseTab = binding.tabId === tabId ? tab : await this.waitForTab(binding.tabId);
+      const existingGroup = binding.groupId ?? baseTab?.groupId;
       binding.groupId = existingGroup !== void 0 && existingGroup >= 0 ? await this.tabs.group({
         groupId: existingGroup,
         tabIds: [Number(tabId)]
+      }) : baseTab ? await this.tabs.group({
+        tabIds: [Number(baseTab.id), Number(tabId)]
       }) : await this.tabs.group({
-        tabIds: [Number(binding.tabId), Number(tabId)]
+        tabIds: [Number(tabId)]
       });
       binding.tabId = tabId;
       if (options.owned) binding.ownedTabs.add(tabId);
@@ -837,10 +841,11 @@
     };
   }
   function toDescriptor(tab) {
+    const url = inspectableUrl(tab);
     return {
       id: String(tab.id),
       ...tab.title ? { title: tab.title } : {},
-      ...tab.url ? { url: tab.url } : {},
+      ...url ? { url } : {},
       active: Boolean(tab.active),
       ...tab.windowId === void 0 ? {} : { windowId: tab.windowId },
       ...tab.groupId === void 0 || tab.groupId === -1 ? {} : { groupId: tab.groupId }
@@ -852,6 +857,9 @@
   }
   function isInspectable(url) {
     return /^(https?|file):/.test(String(url ?? "")) || url === "about:blank";
+  }
+  function inspectableUrl(tab) {
+    return String(tab.url || tab.pendingUrl || "");
   }
   function safeUrl(url) {
     const value = url.trim();
@@ -14321,19 +14329,24 @@ ${lines.join("\n")}
       ),
       tool5(
         "find_tab",
-        "Find an inspectable tab by URL/domain and make it the working tab.",
+        "Find an inspectable tab by URL/domain and make it the working tab. Returns found=false when the current workspace has no match.",
         objectSchema({ url: { type: "string" } }, ["url"]),
         "write",
         ["browser:read"],
         async (input, invocation) => {
           const needle = requiredString6(input, "url").toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
-          const tab = (await browser.listTabs()).find((candidate) => {
+          const candidates = dependencies.workspaceTabs ? await dependencies.workspaceTabs.listTabs(invocation.sessionId) : await browser.listTabs();
+          const tab = candidates.find((candidate) => {
             const value = String(candidate.url ?? "").toLowerCase();
             const domain = value.replace(/^https?:\/\//, "").split("/")[0];
             return value.includes(needle) || domain.includes(needle);
           });
-          if (!tab) throw new AgentError("BROWSER_TAB_NOT_FOUND", `No tab matches ${needle}`);
-          await browser.setWorkingTab(invocation.sessionId, tab.id);
+          if (!tab) return { found: false, query: needle };
+          if (dependencies.workspaceTabs) {
+            await dependencies.workspaceTabs.switchTab(invocation.sessionId, tab.id);
+          } else {
+            await browser.setWorkingTab(invocation.sessionId, tab.id);
+          }
           return tab;
         }
       ),
@@ -15207,7 +15220,7 @@ ${lines.join("\n")}
         const group = await this.options.browser.addTabToSession?.(
           sessionId,
           tab.id,
-          { owned: true }
+          { owned: true, baseTabId: existing.activeTabId }
         );
         if (!group) {
           throw new AgentError(
@@ -16729,7 +16742,7 @@ ${lines.join("\n")}
       artifacts: artifactStore,
       environmentId: "chrome-extension-v1",
       hostProfile: "browser-agent",
-      agentVersion: "0.11.0",
+      agentVersion: "0.11.1",
       newId: () => `capsule_${crypto.randomUUID()}`,
       beforeExport: async () => {
         if (!activeRuntime) return;

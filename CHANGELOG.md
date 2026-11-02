@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.11.1
+
+### Fixes
+
+- `REQ-CHROME-001`: make `find_tab` search only the active tab workspace and
+  return `found=false` for a normal no-match instead of surfacing a tool error.
+- Normalize pending `about:blank` URLs so newly-created tabs remain discoverable
+  while Chrome is still committing the navigation.
+- Recover a missing in-memory Browser Provider session from the Session base tab
+  before adding a new workspace tab, eliminating transient
+  `Browser session not found` failures after runtime/app recovery.
+- Add real Chrome coverage for missing `about:blank` lookup followed by opening a
+  new blank tab without error rows.
+
+### Verification
+
+- `npm run check`: 440 tests passed, 3 skipped.
+- `npm run test:e2e`: 8 Chrome E2E tests passed.
+
 ## 0.11.0
 
 ### Features

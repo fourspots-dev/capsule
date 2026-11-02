@@ -346,6 +346,47 @@ describe('ChromeBrowserProvider', () => {
     ).resolves.toMatchObject({ groupId: 7 });
   });
 
+  it('restores a missing provider binding from the session base tab', async () => {
+    const tabs = fakeTabs([tab(1)]);
+    const browser = new ChromeBrowserProvider({
+      tabs,
+      debugger: fakeDebugger(),
+      clock: { now: () => 10, setTimeout: (callback) => callback() },
+    });
+    const created = await browser.createTab('about:blank', { active: false });
+
+    await expect(
+      browser.addTabToSession('session_restored', created.id, {
+        baseTabId: '1',
+        owned: true,
+      })
+    ).resolves.toMatchObject({
+      sessionId: 'session_restored',
+      tabId: '99',
+      groupId: 7,
+    });
+    expect(tabs.group).toHaveBeenCalledWith({ tabIds: [1, 99] });
+  });
+
+  it('treats a pending about:blank URL as the stable tab descriptor', async () => {
+    const pending = tab(2, '');
+    pending.pendingUrl = 'about:blank';
+    const browser = new ChromeBrowserProvider({
+      tabs: fakeTabs([pending]),
+      debugger: fakeDebugger(),
+    });
+    expect(await browser.listTabs()).toEqual([
+      expect.objectContaining({
+        id: '2',
+        url: 'about:blank',
+      }),
+    ]);
+    expect(await browser.getTab('2')).toMatchObject({
+      id: '2',
+      url: 'about:blank',
+    });
+  });
+
   it('keeps the previous working target when tab grouping fails', async () => {
     const tabs = fakeTabs([tab(1)]);
     tabs.group = vi.fn(async () => {

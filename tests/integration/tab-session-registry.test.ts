@@ -248,6 +248,11 @@ describe('TabSessionRegistry', () => {
 
     const created = await registry.createTab('session_group', 'https://example.com');
     expect(created).toMatchObject({ id: '41', groupId: 8 });
+    expect(browserProvider.addTabToSession).toHaveBeenCalledWith(
+      'session_group',
+      '41',
+      { owned: true, baseTabId: '40' }
+    );
     expect(await registry.list()).toEqual([
       expect.objectContaining({
         scope: 'group',

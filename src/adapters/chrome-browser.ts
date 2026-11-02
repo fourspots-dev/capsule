@@ -175,7 +175,7 @@ export class ChromeBrowserProvider implements BrowserProvider {
   async listTabs(): Promise<TabDescriptor[]> {
     const tabs = await this.tabs.query({});
     return tabs
-      .filter((tab) => isInspectable(tab.url))
+      .filter((tab) => isInspectable(inspectableUrl(tab)))
       .filter((tab) => tab.id !== undefined)
       .map(toDescriptor);
   }
@@ -183,7 +183,7 @@ export class ChromeBrowserProvider implements BrowserProvider {
   async getTab(tabId: BrowserTabId): Promise<TabDescriptor | null> {
     try {
       const tab = await this.tabs.get(Number(tabId));
-      return isInspectable(tab.url) ? toDescriptor(tab) : null;
+      return isInspectable(inspectableUrl(tab)) ? toDescriptor(tab) : null;
     } catch {
       return null;
     }
@@ -283,29 +283,37 @@ export class ChromeBrowserProvider implements BrowserProvider {
   async addTabToSession(
     sessionId: string,
     tabId: BrowserTabId,
-    options: { owned?: boolean } = {}
+    options: { owned?: boolean; baseTabId?: BrowserTabId } = {}
   ): Promise<TabGroupRef> {
     const tab = await this.waitForTab(tabId);
     if (!tab) throw new AgentError('BROWSER_TAB_NOT_FOUND', `Tab not found: ${tabId}`);
-    const binding = this.sessions.get(sessionId);
-    if (!binding) {
-      throw new AgentError('BROWSER_SESSION_NOT_FOUND', `Browser session not found: ${sessionId}`);
-    }
+    const binding = this.sessions.get(sessionId) ?? {
+      tabId: options.baseTabId ?? tabId,
+      ownedTabs: new Set<string>(),
+      attached: new Set<string>(),
+    };
     if (!this.tabs.group) {
       throw new AgentError('BROWSER_GROUP_UNAVAILABLE', 'Chrome tabGroups are unavailable');
     }
+    const baseTab =
+      binding.tabId === tabId
+        ? tab
+        : await this.waitForTab(binding.tabId);
     const existingGroup =
-      binding.groupId ??
-      (await this.getTab(binding.tabId))?.groupId;
+      binding.groupId ?? baseTab?.groupId;
     binding.groupId =
       existingGroup !== undefined && existingGroup >= 0
         ? await this.tabs.group({
             groupId: existingGroup,
             tabIds: [Number(tabId)],
           })
-        : await this.tabs.group({
-            tabIds: [Number(binding.tabId), Number(tabId)],
-          });
+        : baseTab
+          ? await this.tabs.group({
+              tabIds: [Number(baseTab.id), Number(tabId)],
+            })
+          : await this.tabs.group({
+              tabIds: [Number(tabId)],
+            });
     binding.tabId = tabId;
     if (options.owned) binding.ownedTabs.add(tabId);
     this.sessions.set(sessionId, binding);
@@ -1123,10 +1131,11 @@ function defaultChromeApis(): {
 }
 
 function toDescriptor(tab: chrome.tabs.Tab): TabDescriptor {
+  const url = inspectableUrl(tab);
   return {
     id: String(tab.id),
     ...(tab.title ? { title: tab.title } : {}),
-    ...(tab.url ? { url: tab.url } : {}),
+    ...(url ? { url } : {}),
     active: Boolean(tab.active),
     ...(tab.windowId === undefined ? {} : { windowId: tab.windowId }),
     ...(tab.groupId === undefined || tab.groupId === -1
@@ -1142,6 +1151,10 @@ function tabGroupTitle(title: string | undefined): string {
 
 function isInspectable(url: unknown): boolean {
   return /^(https?|file):/.test(String(url ?? '')) || url === 'about:blank';
+}
+
+function inspectableUrl(tab: chrome.tabs.Tab): string {
+  return String(tab.url || tab.pendingUrl || '');
 }
 
 function safeUrl(url: string): string {

@@ -523,7 +523,7 @@ export function createBrowserTools(
     ),
     tool(
       'find_tab',
-      'Find an inspectable tab by URL/domain and make it the working tab.',
+      'Find an inspectable tab by URL/domain and make it the working tab. Returns found=false when the current workspace has no match.',
       objectSchema({ url: { type: 'string' } }, ['url']),
       'write',
       ['browser:read'],
@@ -532,13 +532,20 @@ export function createBrowserTools(
           .toLowerCase()
           .replace(/^https?:\/\//, '')
           .replace(/\/+$/, '');
-        const tab = (await browser.listTabs()).find((candidate) => {
+        const candidates = dependencies.workspaceTabs
+          ? await dependencies.workspaceTabs.listTabs(invocation.sessionId)
+          : await browser.listTabs();
+        const tab = candidates.find((candidate) => {
           const value = String(candidate.url ?? '').toLowerCase();
           const domain = value.replace(/^https?:\/\//, '').split('/')[0];
           return value.includes(needle) || domain.includes(needle);
         });
-        if (!tab) throw new AgentError('BROWSER_TAB_NOT_FOUND', `No tab matches ${needle}`);
-        await browser.setWorkingTab(invocation.sessionId, tab.id);
+        if (!tab) return { found: false, query: needle };
+        if (dependencies.workspaceTabs) {
+          await dependencies.workspaceTabs.switchTab(invocation.sessionId, tab.id);
+        } else {
+          await browser.setWorkingTab(invocation.sessionId, tab.id);
+        }
         return tab as unknown as JsonValue;
       }
     ),

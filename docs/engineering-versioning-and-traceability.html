@@ -322,7 +322,7 @@ scripts/
 <h2>10. 当前采用基线</h2>
 <table><thead><tr><th>项目</th><th>值</th></tr></thead><tbody>
 <tr><td>历史基线提交</td><td><code>e48b5b1</code></td></tr>
-<tr><td>当前目标版本</td><td><code>0.11.0</code></td></tr>
+<tr><td>当前目标版本</td><td><code>0.11.1</code></td></tr>
 <tr><td>本次纳入需求</td><td><code>REQ-ENG-008</code>： Extension manifest version synchronization</td></tr>
 <tr><td>当前决策基线</td><td><code>2</code> 个 DEC、<code>14</code> 个 ADR；ADR 中 10 Accepted、2 Rejected、2 Superseded</td></tr>
 <tr><td>版本理由</td><td>修复扩展 manifest 发布版本漂移，按 C 段发布</td></tr>
@@ -334,7 +334,7 @@ scripts/
 <h2>11. 本规范验收</h2>
 <ul><li>注册表中每个 REQ 都有唯一 ID、目标版本、Design、Tests、Design Status 和 Implementation Authorization。</li><li>需求/设计/测试模板可以直接复制使用。</li><li>ADR 文件、注册表、正文元数据和受影响 REQ 完全一致，且没有未注册 ADR。</li><li>Accepted/Rejected ADR 有用户批准、完整章节和合法状态转换；Supersede 双向对称且无循环。</li><li>标记 <code>architectureImpact: true</code> 的需求必须包含架构影响面和完整性证据锚点。</li><li>未获用户确认和实现授权的 REQ 不能标记 <code>in_progress</code>。</li><li>commit hook 拒绝缺少 REQ、Version、Design、Tests 或 Test-Evidence 的提交。</li><li>hook 拒绝不存在的 REQ、文档路径和版本不一致。</li><li><code>npm run requirements:check</code> 和 <code>npm run adr:check</code> 在正常检查链中执行。</li><li>从一个需求请求到发布 tag 的完整流程可以按本文执行并复核。</li></ul>
 <p>机器可读注册表：<code>policy/requirement-registry.json</code>。需求状态以注册表为准，设计事实以设计文档为准，验收事实以测试文档和 CI 证据为准。</p>
-<p class="foot">规范版本：1.9 · 产品目标版本：0.11.0 · 生效基线：e48b5b1 之后</p>
+<p class="foot">规范版本：1.9 · 产品目标版本：0.11.1 · 生效基线：e48b5b1 之后</p>
 </section>
 </div>
 </body>

@@ -19,6 +19,7 @@ const subagentPromptCalls = new Map<string, number>();
 const handoffPromptCalls = new Map<string, number>();
 const groupWorkspacePromptCalls = new Map<string, number>();
 const remoteActionPromptCalls = new Map<string, number>();
+const tabRecoveryPromptCalls = new Map<string, number>();
 const capturedToolRequests: string[][] = [];
 let remoteActionCalls = 0;
 
@@ -102,6 +103,49 @@ beforeAll(async () => {
       const userText =
         [...(parsed.messages ?? [])].reverse().find((message) => message.role === 'user')?.content ??
         '';
+      if (userText.includes('about blank recovery smoke')) {
+        const count = (tabRecoveryPromptCalls.get(userText) ?? 0) + 1;
+        tabRecoveryPromptCalls.set(userText, count);
+        const toolCall =
+          count === 1
+            ? {
+                index: 0,
+                id: 'call_find_blank',
+                function: {
+                  name: 'find_tab',
+                  arguments: '{"url":"about:blank"}',
+                },
+              }
+            : count === 2
+              ? {
+                  index: 0,
+                  id: 'call_open_blank',
+                  function: {
+                    name: 'new_tab',
+                    arguments: '{"url":"about:blank"}',
+                  },
+                }
+              : undefined;
+        if (toolCall) {
+          response.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+          });
+          response.write(
+            `data: ${JSON.stringify({
+              choices: [
+                {
+                  delta: { tool_calls: [toolCall] },
+                  finish_reason: 'tool_calls',
+                },
+              ],
+            })}\n\n`
+          );
+          response.write('data: [DONE]\n\n');
+          response.end();
+          return;
+        }
+      }
       if (userText.includes('remote action smoke')) {
         const count = (remoteActionPromptCalls.get(userText) ?? 0) + 1;
         remoteActionPromptCalls.set(userText, count);
@@ -917,6 +961,92 @@ describe('kernel extension E2E', () => {
       path: resolve('docs/group-workspace-tabs.png'),
       fullPage: false,
     });
+  });
+
+  it('handles an absent about:blank tab and adds a new blank tab without session errors', async () => {
+    const recoveryDir = await mkdtemp(join(tmpdir(), 'tinyai-tab-recovery-e2e-'));
+    const recoveryContext = await chromium.launchPersistentContext(recoveryDir, {
+      headless: true,
+      executablePath: chromeExecutable(),
+      args: [
+        `--disable-extensions-except=${resolve('extension')}`,
+        `--load-extension=${resolve('extension')}`,
+        '--no-first-run',
+      ],
+      ignoreDefaultArgs: ['--disable-extensions'],
+    });
+    try {
+      let worker = recoveryContext.serviceWorkers()[0];
+      if (!worker) worker = await recoveryContext.waitForEvent('serviceworker');
+      const extensionId = new URL(worker.url()).host;
+      await worker.evaluate(
+        async ({ modelUrl }) => {
+          await chrome.storage.local.set({
+            'tinyai:v2:config': {
+              approval: 'auto',
+              language: 'en',
+              theme: 'light',
+              zoom: 100,
+              connection: 'e2e',
+              model: 'e2e-model',
+              connections: [
+                {
+                  id: 'e2e',
+                  label: 'E2E',
+                  'base-url': modelUrl,
+                  'api-key': 'e2e-key',
+                  models: ['e2e-model'],
+                },
+              ],
+            },
+          });
+        },
+        { modelUrl: baseUrl }
+      );
+
+      const page = await recoveryContext.newPage();
+      const pageErrors: string[] = [];
+      page.on('pageerror', (error) => pageErrors.push(error.message));
+      await page.goto(`chrome-extension://${extensionId}/sidepanel.html`);
+      await page.waitForSelector('#kernel-input');
+      const targetTab = await page.evaluate(async (pageUrl) => {
+        const current = await chrome.windows.getCurrent();
+        const tab = await chrome.tabs.create({
+          windowId: current.id,
+          url: pageUrl,
+          active: true,
+        });
+        return String(tab.id);
+      }, `${baseUrl.replace(/\/v1$/, '')}/page`);
+      await page.click('#kernel-tabs');
+      await page.waitForSelector('#kernel-tab-menu:not([hidden])');
+      await page.click(`[data-kernel-tab="${targetTab}"]`);
+      await page.waitForFunction(
+        (tabId) => document.documentElement.dataset.tinyaiTabId === tabId,
+        targetTab
+      );
+
+      const callsBefore = modelCalls;
+      await page.fill('#kernel-input', 'about blank recovery smoke');
+      await page.click('#kernel-send');
+      await page.waitForFunction(
+        () =>
+          document.querySelector('#kernel-rows')?.textContent?.includes(
+            'E2E received: about blank recovery smoke'
+          ),
+        undefined,
+        { timeout: 30_000 }
+      );
+      const body = await page.textContent('body');
+      expect(body).not.toContain('No tab matches about:blank');
+      expect(body).not.toContain('Browser session not found');
+      expect(await page.locator('.wb-tool-status--error').count()).toBe(0);
+      expect(modelCalls).toBe(callsBefore + 3);
+      expect(pageErrors).toEqual([]);
+    } finally {
+      await recoveryContext.close();
+      await rm(recoveryDir, { recursive: true, force: true });
+    }
   });
 
   it('keeps one conversation per tab and switches automatically', async () => {

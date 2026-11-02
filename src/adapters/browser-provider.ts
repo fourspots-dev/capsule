@@ -122,7 +122,7 @@ export interface BrowserProvider {
   addTabToSession?(
     sessionId: string,
     tabId: BrowserTabId,
-    options?: { owned?: boolean }
+    options?: { owned?: boolean; baseTabId?: BrowserTabId }
   ): Promise<TabGroupRef>;
   listSessionTabs?(sessionId: string): Promise<TabDescriptor[]>;
   assertSessionTab?(sessionId: string, tabId: BrowserTabId): Promise<void>;
