@@ -556,6 +556,27 @@
         "rationale": "ADR-019 establishes Chrome for Testing as the canonical automated E2E baseline.",
         "reviewedAt": "2026-11-02"
       }
+    },
+    {
+      "id": "REQ-PROMPT-001",
+      "title": "Layered host-neutral Agent prompt composition",
+      "type": "feature",
+      "priority": "P0",
+      "status": "accepted",
+      "designStatus": "review",
+      "implementationAuthorized": false,
+      "targetVersion": "0.13.0",
+      "design": "docs/prompts/REQ-PROMPT-001-design.html#architecture-impact",
+      "testDesign": "docs/prompts/REQ-PROMPT-001-testing.html#architecture-completeness",
+      "acceptance": "A deterministic assembler composes host-neutral Core, Workspace and Mode policies with isolated host policies, registry-derived capability context, bounded Skill/Profile instructions and runtime facts; every supported host has prompt golden and behavioral evidence without cross-host capability leakage.",
+      "legacyAliases": [],
+      "adrReview": {
+        "status": "proposed",
+        "adrs": ["ADR-020"],
+        "rationale": "ADR-020 proposes a cross-host prompt composition boundary and must be approved before implementation.",
+        "reviewedAt": "2026-11-02"
+      },
+      "architectureImpact": true
     }
   ]
 }

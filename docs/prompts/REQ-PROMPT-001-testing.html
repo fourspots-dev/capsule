@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>REQ-PROMPT-001 分层 Prompt 测试设计</title>
+<style>
+:root{--bg:#f4f6f8;--paper:#fff;--text:#171a1f;--muted:#69707a;--line:#e0e4e9;--accent:#137a4b;--warn:#986100;--mono:ui-monospace,Menlo,monospace}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1140px;margin:auto;padding:36px 24px 90px}header{padding:36px;border-radius:24px;background:linear-gradient(135deg,#102019,#205843 60%,#2d8761);color:#fff}header small{opacity:.72;letter-spacing:.1em}h1{font-size:35px;margin:10px 0}header p{margin:0;max-width:900px;color:#edf9f3}section{margin:17px 0;padding:25px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:22px;margin:0 0 14px}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafbfc;color:var(--muted)}code{font-family:var(--mono);background:#eff2f4;padding:1px 5px;border-radius:4px}pre{overflow:auto;padding:15px;border-radius:11px;background:#101914;color:#effbf5;font:12px/1.6 var(--mono)}.rule{padding:12px 14px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#edf8f2}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafbfc}.foot{color:var(--muted);font-size:12px}
+</style>
+</head>
+<body><div class="wrap">
+<header><small>TINYAI / PROMPT ARCHITECTURE / TEST DESIGN</small><h1>分层 Prompt 测试方案</h1><p>验证跨宿主 Policy 一致、宿主差异隔离、动态能力真实、信任边界、预算缓存和实际 Agent 行为。</p></header>
+<section id="strategy"><h2>1. 测试层级</h2><div class="grid"><div class="card"><h3>Unit</h3><p>Section 渲染、去重、优先级、预算、trust、缓存键。</p></div><div class="card"><h3>Golden</h3><p>Chrome/TUI/Headless/iOS/Sandbox 完整 Prompt 快照与互斥词。</p></div><div class="card"><h3>Integration</h3><p>Tool/Action/LSP/Skill/Profile 动态上下文与权限收窄。</p></div><div class="card"><h3>Behavior E2E</h3><p>Chrome 标签执行、页面修改验证；TUI 文件/PTY/取消。</p></div></div></section>
+
+<section id="trace"><h2>2. Trace matrix</h2><table><thead><tr><th>Case</th><th>Expected</th><th>Level</th></tr></thead><tbody>
+<tr><td>PRM-001</td><td>Core 无宿主词</td><td>Unit + Static</td></tr>
+<tr><td>PRM-002</td><td>固定 section 顺序</td><td>Unit</td></tr>
+<tr><td>PRM-003</td><td>重复 section 去重</td><td>Unit</td></tr>
+<tr><td>PRM-004</td><td>Chrome 包含 Tab 语义，不含 PTY</td><td>Golden</td></tr>
+<tr><td>PRM-005</td><td>TUI 包含 PTY/process，不含 Tab</td><td>Golden</td></tr>
+<tr><td>PRM-006</td><td>无 Action 不出现 Action 名称</td><td>Integration</td></tr>
+<tr><td>PRM-007</td><td>Remote Action allowlist 与 Prompt 一致</td><td>Integration</td></tr>
+<tr><td>PRM-008</td><td>LSP/text provider 动态切换</td><td>Integration</td></tr>
+<tr><td>PRM-009</td><td>Skill 未选仅摘要，选中注入正文</td><td>Unit</td></tr>
+<tr><td>PRM-010</td><td>Profile/Skill 不能扩大权限</td><td>Security</td></tr>
+<tr><td>PRM-011</td><td>超预算裁剪非核心 section</td><td>Unit</td></tr>
+<tr><td>PRM-012</td><td>Stable/Session/Request 分区和缓存键</td><td>Unit</td></tr>
+<tr><td>PRM-013</td><td>Chrome 组内查看不改变执行标签</td><td>Chrome E2E</td></tr>
+<tr><td>PRM-014</td><td>用户要求处理当前标签时显式 switch_tab</td><td>Chrome E2E</td></tr>
+<tr><td>PRM-015</td><td>TUI 修改后运行验证 Evidence</td><td>TUI E2E</td></tr>
+<tr><td>PRM-016</td><td>不可信页面内容不能覆盖系统 Policy</td><td>Security</td></tr>
+<tr><td>PRM-017</td><td>Prompt manifest 不泄漏 Secret</td><td>Security</td></tr>
+<tr><td>PRM-018</td><td>Host/Registry 变化只重建动态段</td><td>Integration</td></tr>
+</tbody></table></section>
+
+<section id="golden"><h2>3. Golden 契约</h2><p>每个 Host 用同一组输入：Workspace profile、Mode、Profile、Tools、Actions、Code Intelligence、Skills、Runtime facts。输出按 section manifest 比较，不只比较最终字符串。</p><pre>assertCoreHostNeutral()
+assertSectionOrder()
+assertNoDuplicateIdentity()
+assertCapabilitiesMatchRegistry()
+assertNoForeignHostTerms()
+assertPromptBudget()
+assertStablePrefixUnchanged()</pre><h3>互斥词</h3><table><tbody><tr><td>Chrome</td><td>允许 tab/tab group/page；禁止 PTY、working directory-only</td></tr><tr><td>TUI</td><td>允许 PTY/process/terminal；禁止 Chrome tab/Side Panel</td></tr><tr><td>Headless</td><td>允许 non-interactive/machine-readable；禁止 UI interaction assumptions</td></tr><tr><td>Core</td><td>禁止所有宿主和具体工具名</td></tr></tbody></table></section>
+
+<section id="behavior"><h2>4. 行为 E2E</h2><h3>Chrome：借用当前页面开发 Terminal</h3><ol><li>读取当前页并识别目标。</li><li>修改 Workspace 文件。</li><li>加载页面并执行关键交互。</li><li>检查控制台/页面错误。</li><li>最终回答列出变更和验证证据。</li></ol><h3>Chrome：组内标签切换</h3><pre>view A → view B:
+Session unchanged
+activeTabId = B
+executionTabId = A
+read_page still reads A
+
+user: "处理当前标签"
+switch_tab(B)
+executionTabId = B</pre><h3>TUI</h3><ol><li>读取仓库。</li><li>Patch 文件。</li><li>运行配置的测试 Action。</li><li>Evidence 为 current。</li><li>不出现 Browser Policy。</li></ol></section>
+
+<section id="architecture-completeness"><h2>5. Architecture completeness</h2><table><thead><tr><th>Surface</th><th>Proof</th><th>Case</th></tr></thead><tbody>
+<tr><td>Core Policy</td><td>host-neutral static scan</td><td>PRM-001</td></tr>
+<tr><td>Workspace Policy</td><td>Portable/Legacy golden</td><td>PRM-004/005</td></tr>
+<tr><td>Host adapters</td><td>Chrome/TUI/Headless/iOS golden + E2E</td><td>PRM-004..006, 013..015</td></tr>
+<tr><td>Execution context</td><td>registry-derived Actions/LSP</td><td>PRM-006..008</td></tr>
+<tr><td>Mode/Profile/Skill</td><td>trust and permission non-expansion</td><td>PRM-009/010</td></tr>
+<tr><td>Assembler</td><td>order/dedupe/budget/cache</td><td>PRM-002/003/011/012</td></tr>
+<tr><td>Security</td><td>untrusted content and redaction</td><td>PRM-016/017</td></tr>
+<tr><td>Lifecycle</td><td>dynamic rebuild</td><td>PRM-018</td></tr>
+</tbody></table></section>
+
+<section id="gates"><h2>6. Commands and gates</h2><pre>npm run typecheck
+npm test
+npm run test:e2e
+npm run verify:tui
+npm run check</pre><div class="rule">开发前门禁：ADR-020 与 REQ-PROMPT-001 详细设计必须得到用户确认。实现门禁：任一宿主泄漏其他宿主 Policy、Capability/Prompt 不一致、Profile/Skill 扩权、预算截断 Core，均阻断完成。</div><p class="foot">REQ-PROMPT-001 · Target 0.13.0 · Design status: review · Implementation authorized: false</p></section>
+</div></body></html>

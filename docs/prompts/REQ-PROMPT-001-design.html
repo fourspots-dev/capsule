@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>REQ-PROMPT-001 分层 Prompt 详细设计</title>
+<style>
+:root{--bg:#f4f6f8;--paper:#fff;--text:#171a1f;--muted:#69707a;--line:#e0e4e9;--accent:#4f46c8;--ok:#137a4b;--warn:#986100;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1180px;margin:auto;padding:36px 24px 96px}header{padding:38px;border-radius:25px;background:radial-gradient(circle at 88% 8%,#aaa5ff 0,transparent 26%),linear-gradient(135deg,#131522,#29276f 58%,#5046c2);color:#fff}header small{opacity:.72;letter-spacing:.11em}h1{font-size:36px;line-height:1.2;margin:10px 0}header p{max-width:930px;margin:0;color:#edebff}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}nav{position:sticky;top:0;z-index:3;display:flex;gap:14px;overflow:auto;margin:17px 0;padding:10px 14px;border:1px solid var(--line);border-radius:13px;background:#f4f6f8ed;backdrop-filter:blur(12px)}nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}section{margin:17px 0;padding:25px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:23px;margin:0 0 14px}h3{font-size:16px;margin:20px 0 8px}p{color:#424851}code{font-family:var(--mono);background:#f0f1f5;padding:1px 5px;border-radius:4px}pre{overflow:auto;padding:16px;border-radius:11px;background:#131720;color:#eff0ff;font:12px/1.6 var(--mono)}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafbfc;color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafbfc}.card h3{margin:0 0 8px}.rule{padding:12px 14px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#f0efff}.warn{border-color:var(--warn);background:#fff8e8}.foot{color:var(--muted);font-size:12px}@media(max-width:800px){.grid{grid-template-columns:1fr}.wrap{padding:18px 12px 70px}header h1{font-size:28px}}
+</style>
+</head>
+<body><div class="wrap">
+<header><small>TINYAI / PROMPT ARCHITECTURE / DETAILED DESIGN</small><h1>分层、跨宿主 Prompt 组合</h1><p>把稳定行为策略、Workspace 语义、宿主差异、执行能力、模式、Profile 和动态运行上下文拆成可测试、可缓存、可按权限裁剪的 Prompt Contract。</p><div class="chips"><span class="chip">REQ-PROMPT-001</span><span class="chip">Target 0.13.0</span><span class="chip">ADR-020 Proposed</span><span class="chip">Design Review</span><span class="chip">Implementation blocked</span></div></header>
+<nav><a href="#problems">问题</a><a href="#architecture-impact">影响面</a><a href="#layers">分层</a><a href="#objects">对象</a><a href="#composition">组合</a><a href="#hosts">宿主</a><a href="#trust">优先级</a><a href="#budget">预算缓存</a><a href="#lifecycle">生命周期</a><a href="#migration">迁移</a><a href="#acceptance">验收</a></nav>
+
+<section id="problems"><h2>1. 当前问题</h2><div class="grid"><div class="card"><h3>结构问题</h3><ul><li>Workspace Prompt 与 Chrome Prompt 重复定义 Agent 身份。</li><li>浏览器、Coding、Patch 和 Skill 规则全部平铺。</li><li>宿主不存在的能力可能被硬编码进 Prompt。</li><li>标签查看与任务执行语义未进入统一 Policy。</li></ul></div><div class="card"><h3>行为问题</h3><ul><li>缺少统一 Observe → Decide → Act → Verify → Report 循环。</li><li>工具协议细节与 Tool Schema 重复。</li><li>Skill、Profile、Runtime facts 没有信任等级。</li><li>没有稳定前缀、预算或裁剪规则。</li></ul></div></div></section>
+
+<section id="architecture-impact"><h2>2. Architecture impact map</h2><table><thead><tr><th>Surface</th><th>Action</th><th>Evidence</th></tr></thead><tbody>
+<tr><td>Core Prompt Policy</td><td>add</td><td>所有宿主共用；禁止宿主专属词。</td></tr>
+<tr><td>Workspace Policy</td><td>modify</td><td>Portable/Legacy 作为配置，不直接拼接实现细节。</td></tr>
+<tr><td>Chrome Host Adapter</td><td>modify</td><td>Tab、executionTabId、页面验证 Policy。</td></tr>
+<tr><td>TUI / Headless Host Adapter</td><td>add</td><td>Process/PTY、非交互和输出 Policy。</td></tr>
+<tr><td>Tool / Action Registry</td><td>read-only input</td><td>动态 Capability Context 只来自实际注册结果。</td></tr>
+<tr><td>Mode / Agent Profile / Skill</td><td>modify binding</td><td>独立 Section，不能扩大权限。</td></tr>
+<tr><td>PromptAssembler</td><td>add</td><td>确定性顺序、去重、预算、缓存键。</td></tr>
+<tr><td>Session / Capsule</td><td>none</td><td>Prompt metadata 可选记录，不改变传输格式。</td></tr>
+<tr><td>Tests</td><td>add</td><td>Unit、Golden、Integration、Chrome/TUI E2E、信任与预算。</td></tr>
+</tbody></table><div class="rule"><b>禁止部分交付：</b>只把 Chrome Prompt 改名后复用；一个巨型条件字符串；Prompt 静态声明未注册工具；Profile/Skill 越权；为不同宿主复制同一行为规则。</div></section>
+
+<section id="layers"><h2>3. 八层模型</h2>
+<table><thead><tr><th>层</th><th>内容</th><th>变化频率</th></tr></thead><tbody>
+<tr><td>1 Core Policy</td><td>身份、观察/行动循环、真实性、完成和沟通</td><td>极低，所有宿主相同</td></tr>
+<tr><td>2 Workspace Policy</td><td>相对路径、Inspect-before-edit、Patch、Search、VCS、验证</td><td>按 Workspace profile</td></tr>
+<tr><td>3 Host Policy</td><td>Chrome Tab、TUI PTY、Headless、iOS Native Bridge</td><td>每宿主不同</td></tr>
+<tr><td>4 Execution Policy</td><td>Named Actions、Legacy Shell、Browser tools、Code Intelligence</td><td>由 Registry 动态决定</td></tr>
+<tr><td>5 Mode Policy</td><td>Plan、Build、Read-only、Research、Review、Debug</td><td>每任务/模式</td></tr>
+<tr><td>6 Agent Profile</td><td>主 Agent 或任意通用子 Agent 职责</td><td>每 Session/子任务</td></tr>
+<tr><td>7 Capability / Skill Context</td><td>可用 Action、LSP、工具摘要、Skill 列表和选中正文</td><td>动态</td></tr>
+<tr><td>8 Runtime Context</td><td>Session、Workspace generation、标签、队列等当前事实</td><td>每次请求可变</td></tr>
+</tbody></table></section>
+
+<section id="objects"><h2>4. 核心对象</h2><pre>interface PromptSection {
+  id: string;
+  kind: 'policy'|'instructions'|'capabilities'|'runtime';
+  priority: number;
+  required: boolean;
+  trust: 'core'|'project'|'profile'|'skill'|'runtime-data';
+  cache: 'stable'|'session'|'request';
+  render(context: PromptBuildContext): string | Promise&lt;string&gt;;
+}
+
+interface PromptBuildContext {
+  hostProfile: 'chrome'|'tui'|'headless'|'ios'|'sandbox';
+  workspaceProfile: 'portable'|'legacy';
+  mode: string;
+  agentProfile?: ResolvedAgentProfile;
+  tools: readonly ToolDefinition[];
+  actions: readonly AvailableHostAction[];
+  codeIntelligence: CodeIntelligenceCapabilities;
+  skills: readonly SkillDefinition[];
+  selectedSkill?: SkillDefinition;
+  runtime: Record&lt;string, JsonValue&gt;;
+}
+
+interface PromptAssembler {
+  build(context: PromptBuildContext): Promise&lt;PromptEnvelope&gt;;
+}
+
+interface PromptEnvelope {
+  stablePrefix: string;
+  sessionContext: string;
+  requestContext: string;
+  manifest: PromptManifest;
+}</pre><table><tbody><tr><td><code>PromptSection</code></td><td>单一职责、可单测策略片段。</td></tr><tr><td><code>PromptProfileAdapter</code></td><td>只提供宿主差异 Policy。</td></tr><tr><td><code>PromptAssembler</code></td><td>顺序、去重、冲突、预算和缓存键的唯一所有者。</td></tr><tr><td><code>PromptManifest</code></td><td>section ids、版本、token 估算、裁剪和 trust。</td></tr></tbody></table></section>
+
+<section id="composition"><h2>5. 组合顺序</h2><pre>Core Policy
+  → Workspace Policy
+  → Host Policy
+  → Execution Policy
+  → Mode Policy
+  → Agent Profile
+  → Project Instructions
+  → Capability Context
+  → Selected Skill
+  → Runtime Context</pre><p>稳定 Policy 在前，Session 内容次之，每次请求变化的 Runtime facts 在最后，以便利用 Provider Prompt Cache。</p><h3>去重规则</h3><ul><li>同一 section id 最多出现一次。</li><li>重复身份和完成规则由 Assembler 拒绝。</li><li>Patch 协议只在 Coding Workspace 已启用时出现。</li><li>工具说明只保留选择策略，参数交给 Schema。</li></ul></section>
+
+<section id="hosts"><h2>6. 宿主 Policy 差异</h2><table><thead><tr><th>Host</th><th>专属内容</th><th>禁止泄漏</th></tr></thead><tbody>
+<tr><td>Chrome</td><td>activeTabId/executionTabId、组内标签、页面验证</td><td>PTY、host filesystem absolute path</td></tr>
+<tr><td>TUI</td><td>working directory、PTY、process cancellation</td><td>Chrome tabs、Side Panel</td></tr>
+<tr><td>Headless</td><td>machine-readable output、non-interactive approvals</td><td>UI-only assumptions</td></tr>
+<tr><td>iOS</td><td>Native File/Blob/Secret Bridge、无 Process</td><td>PTY、默认本地二进制</td></tr>
+<tr><td>Sandbox</td><td>remote/process isolation、workspace mounts</td><td>宿主专属路径</td></tr>
+</tbody></table><h3>Chrome Tab 语义</h3><pre>activeTabId = 用户当前查看的标签
+executionTabId = 当前任务执行标签
+
+组内切换查看标签：
+  activeTabId 改变
+  executionTabId 与 Session 不变
+
+用户要求处理当前标签：
+  Agent 必须通过 switch_tab 显式修改 executionTabId</pre></section>
+
+<section id="trust"><h2>7. 信任与冲突优先级</h2><pre>Runtime hard enforcement
+  &gt; Core Policy
+  &gt; 当前用户明确要求
+  &gt; Project instructions
+  &gt; Agent Profile / Skill
+  &gt; Capability Context
+  &gt; Runtime facts</pre><ul><li>Capability Context 与 Runtime Context 是数据，不是覆盖 Core 的指令。</li><li>Profile/Skill 只能收窄行为和工具范围。</li><li>网页、文件、工具输出按不可信内容处理，不能获得系统权限。</li><li>Runtime 在模型外执行权限、标签、审批和完成门禁。</li></ul></section>
+
+<section id="budget"><h2>8. 预算、裁剪与缓存</h2><table><tbody><tr><td>必须完整</td><td>Core、Host、Workspace、当前 Mode</td></tr><tr><td>高优先</td><td>当前用户要求、Project instructions、Agent Profile</td></tr><tr><td>可压缩</td><td>Capability 摘要、Skill 描述、Runtime 非关键字段</td></tr><tr><td>仅选择后注入</td><td>完整 Skill 正文</td></tr></tbody></table><p>每段提供 character/token 估算。超预算时按 priority 和 cache 级别裁剪，禁止截断 Core。缓存键由 section id、version、host、workspace、mode 和 capability fingerprint 组成。</p></section>
+
+<section id="lifecycle"><h2>9. 生命周期</h2><ol><li>Runtime 构建 Host/Workspace/Mode/Profile 输入。</li><li>Tool、Action、LSP 和 Skill Registry 完成当前探测。</li><li>Assembler 收集并校验 section。</li><li>生成 stablePrefix、sessionContext、requestContext 和 manifest。</li><li>Session 可在 trace 中记录 prompt manifest，不记录非必要敏感正文。</li><li>运行中容量或 Registry 变化时只重建受影响的动态 section。</li></ol></section>
+
+<section id="migration"><h2>10. 模块与迁移</h2><pre>src/prompts/
+├── core-policy.ts
+├── workspace-policy.ts
+├── mode-policy.ts
+├── prompt-context.ts
+├── prompt-assembler.ts
+└── adapters/
+    ├── chrome-policy.ts
+    ├── tui-policy.ts
+    ├── headless-policy.ts
+    └── ios-policy.ts</pre><p>现有 <code>PromptProfile</code> 先保留兼容包装，迁移后只允许 <code>PromptAssembler</code> 输出最终系统提示词。Chrome Runtime、TUI 和 Headless 使用相同 Core/Workspace，按宿主注入不同 Host Policy。</p></section>
+
+<section id="acceptance"><h2>11. 验收</h2><ul><li>Core 无宿主专属词。</li><li>Chrome Prompt 不含 TUI/PTY，TUI Prompt 不含 Tab。</li><li>Capability 声明与实际 Registry 完全一致。</li><li>Profile/Skill 无法扩大工具或权限。</li><li>稳定前缀和动态上下文可区分并缓存。</li><li>所有宿主通过同一行为契约与各自 E2E。</li><li>标签执行语义在 Chrome Prompt 和行为 E2E 中成立。</li></ul><p class="foot">REQ-PROMPT-001 · Target 0.13.0 · ADR-020 Proposed · Design status: review · Implementation authorized: false</p></section>
+</div></body></html>

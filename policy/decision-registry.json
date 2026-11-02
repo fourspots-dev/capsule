@@ -247,6 +247,25 @@
       "supersedes": [],
       "supersededBy": null,
       "file": "docs/decisions/DEC-013-chrome-for-testing-baseline.md"
+    },
+    {
+      "id": "DEC-014",
+      "title": "Layered host-neutral prompt composition",
+      "statement": "浏览器插件的完整 Prompt 不能直接复用于其他宿主；需要拆分通用策略、宿主策略和动态能力。",
+      "normalizedDecision": "Replace monolithic host prompts with a structured assembler using host-neutral Core/Workspace/Mode policies, isolated host adapters, typed capability context and bounded profile/skill/runtime sections.",
+      "capturedAt": "2026-11-02",
+      "source": "discussion",
+      "scope": ["prompts", "runtime", "browser", "tui", "headless", "subagents"],
+      "status": "promoted",
+      "triage": {
+        "disposition": "adr_and_requirement",
+        "adrs": ["ADR-020"],
+        "requirements": ["REQ-PROMPT-001"],
+        "rationale": "The prompt architecture affects every host and requires a new composition contract before implementation."
+      },
+      "supersedes": [],
+      "supersededBy": null,
+      "file": "docs/decisions/DEC-014-layered-prompt-composition.md"
     }
   ]
 }
