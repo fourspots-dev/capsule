@@ -43,6 +43,7 @@ export interface TabSessionActivation {
   windowId: number;
   groupId?: number;
   activeTabId: string;
+  executionTabId: string;
   memberTabIds: string[];
   sessionId: string;
   projection: ProductProjection;

@@ -55,7 +55,7 @@ export class ChromeRuntimeExtension implements RuntimeExtension {
       return { handled: true, data: await this.browser.listTabs() };
     }
     if (request.type === 'select_tab') {
-      await this.browser.setWorkingTab(
+      await this.tabs.selectExecutionTab(
         requiredString(request, 'sessionId'),
         requiredString(request, 'tabId')
       );

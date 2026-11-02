@@ -101,6 +101,7 @@ export async function initKernelUi(): Promise<void> {
   const drafts = new Map<string, ComposerDraft>();
   let windowId: number | undefined;
   let activeTabId: string | undefined;
+  let executionTabId: string | undefined;
   let activeGroupId: number | undefined;
   let activeScope: 'group' | 'tab' = 'tab';
   let workspaceMemberTabIds: string[] = [];
@@ -317,6 +318,7 @@ export async function initKernelUi(): Promise<void> {
       activeTabId: string;
       groupId?: number;
       scope: 'group' | 'tab';
+      executionTabId: string;
       memberTabIds: string[];
       projection: ProductProjection;
     }>
@@ -339,10 +341,12 @@ export async function initKernelUi(): Promise<void> {
     }
     sessionId = activation.sessionId;
     activeTabId = activation.activeTabId;
+    executionTabId = activation.executionTabId;
     activeGroupId = activation.groupId;
     activeScope = activation.scope;
     workspaceMemberTabIds = [...activation.memberTabIds];
     document.documentElement.dataset.tinyaiTabId = activeTabId;
+    document.documentElement.dataset.tinyaiExecutionTabId = executionTabId;
     document.documentElement.dataset.tinyaiSessionId = sessionId;
     projection = activation.projection;
     approvals = [...(approvalsBySession.get(sessionId) ?? [])];
@@ -1984,7 +1988,7 @@ export async function initKernelUi(): Promise<void> {
     const workspaceIds = new Set(workspaceTabs.map((tab) => tab.id));
     const otherTabs = tabs.filter((tab) => !workspaceIds.has(tab.id));
     const tabButton = (tab: (typeof tabs)[number]): string =>
-      `<button type="button" class="wb-pop-item${tab.id === activeTabId ? ' selected' : ''}" data-kernel-tab="${escapeHtml(tab.id)}"><span class="wb-pop-copy"><span class="wb-pop-title">${escapeHtml(tab.title || tab.url || tab.id)}</span><span class="wb-pop-desc">${escapeHtml(tab.url ?? '')}</span></span></button>`;
+      `<button type="button" class="wb-pop-item${tab.id === activeTabId ? ' selected' : ''}" data-kernel-tab="${escapeHtml(tab.id)}"><span class="wb-pop-copy"><span class="wb-pop-title">${escapeHtml(tab.title || tab.url || tab.id)}</span><span class="wb-pop-desc">${escapeHtml(tab.url ?? '')}</span></span>${tab.id === executionTabId ? `<span class="wb-badge">${zh ? '任务标签' : 'Task tab'}</span>` : ''}</button>`;
     menu.innerHTML =
       (workspaceTabs.length
         ? `<div class="wb-menu-heading">${zh ? '当前工作区' : 'Current workspace'}</div>${workspaceTabs

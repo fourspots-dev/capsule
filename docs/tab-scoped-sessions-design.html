@@ -79,6 +79,13 @@
       <tr><td><code>ChromeBrowserProvider</code></td><td>Session 对应工作标签及浏览器操作</td><td>Session 生命周期</td></tr>
       <tr><td><code>Side Panel</code></td><td>订阅当前 Session、恢复草稿、处理标签事件</td><td>持久化标签事实</td></tr>
     </tbody></table>
+    <h3>查看标签与执行标签</h3>
+    <pre>TabSessionBinding
+├── activeTabId       当前用户正在查看的标签
+├── executionTabId    任务实际执行的发起标签
+├── memberTabIds      当前工作区成员
+└── sessionId         共享的会话</pre>
+    <div class="callout">标签组共享 Session，但任务仍固定在 <code>executionTabId</code>。在组内切换查看标签只更新 <code>activeTabId</code>，不得调用 <code>setWorkingTab</code> 偷换 BrowserProvider 的目标。只有显式 <code>switch_tab</code>、创建新任务、绑定历史/子 Agent Session，或原执行标签已关闭时才改变执行标签。</div>
   </section>
 
   <section id="startup">
@@ -88,6 +95,7 @@
     <h3>切换标签</h3>
     <ol><li><code>tabs.onActivated</code> 过滤当前窗口。</li><li>保存旧 Session 的草稿、附件和 Skill 选择。</li><li>用切换代次取消过期异步结果。</li><li>解除旧 Projection 订阅。</li><li>订阅新 Session，恢复缓存草稿并渲染。</li></ol>
     <div class="callout">关键约束：绑定工作标签时必须传 <code>activate:false</code>。否则 <code>setWorkingTab</code> 内部的再次激活会触发 <code>tabs.onActivated</code>，形成切换递归。</div>
+    <p>同一组内 A→B 切换时，Session ID 与 <code>executionTabId=A</code> 保持不变，仅 <code>activeTabId=B</code>。从组外切换到组内时，显示的 Session 变为该组 Session，但执行目标仍为该 Session 原任务标签。用户明确说“处理当前标签”时，Agent 必须通过 <code>switch_tab</code> 显式设置 <code>executionTabId=B</code>。</p>
     <h3>运行中的旧标签</h3>
     <p>切走不会停止任务。旧 Session 继续在 Runtime 中运行；切回时通过 Projection 恢复最新状态。审批和接管事件按 Session 缓存，不被新标签清空。</p>
   </section>

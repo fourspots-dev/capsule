@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.12.1
+
+### Fixes
+
+- `REQ-CHROME-001`: separate the Side Panel's viewed tab (`activeTabId`) from
+  the task execution tab (`executionTabId`).
+- Switching between members of the same tab group now changes only the viewed
+  Session projection; it no longer changes the BrowserProvider working tab.
+- Only an explicit `switch_tab`/`select_tab`, new task, historical Session bind,
+  explicit child Session open, or loss of the original execution tab can change
+  `executionTabId`.
+- Add a Task tab marker to the tab menu and a real Chrome regression verifying
+  that navigating between group tabs preserves the execution target.
+
+### Verification
+
+- `npm run check`.
+- `npm run test:e2e`.
+
 ## 0.12.0
 
 ### Features

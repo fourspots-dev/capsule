@@ -15320,9 +15320,18 @@ ${lines.join("\n")}
           const session = await this.options.runtime.hydrateSession(currentBinding.sessionId);
           if (session) {
             await this.options.runtime.ensureSessionReady(currentBinding.sessionId);
-            await this.options.browser.setWorkingTab(currentBinding.sessionId, context.tabId, {
-              activate: false
-            });
+            const executionTabId = currentBinding.executionTabId || currentBinding.activeTabId;
+            const executionTab = await this.options.browser.getTab(executionTabId);
+            if (!executionTab) {
+              currentBinding.executionTabId = context.tabId;
+              currentBinding.activeTabId = context.tabId;
+            }
+            await this.options.browser.setWorkingTab(
+              currentBinding.sessionId,
+              currentBinding.executionTabId || context.tabId,
+              { activate: false }
+            );
+            currentBinding.activeTabId = context.tabId;
             return this.refreshBinding(currentBinding, context);
           }
           this.bindings.delete(tabKey(context));
@@ -15391,6 +15400,9 @@ ${lines.join("\n")}
             if (!binding.memberTabIds.includes(binding.activeTabId)) {
               binding.activeTabId = binding.memberTabIds[0];
             }
+            if (!tabs.some((tab2) => tab2.id === binding.executionTabId)) {
+              binding.executionTabId = binding.activeTabId;
+            }
             binding.updatedAt = this.now();
             changed = true;
           }
@@ -15446,7 +15458,7 @@ ${lines.join("\n")}
         const group = await this.options.browser.addTabToSession?.(
           sessionId,
           tab.id,
-          { owned: true, baseTabId: existing.activeTabId }
+          { owned: true, baseTabId: existing.executionTabId }
         );
         if (!group) {
           throw new AgentError(
@@ -15461,6 +15473,7 @@ ${lines.join("\n")}
           windowId: group.groupId !== void 0 ? tab.windowId ?? existing.windowId : existing.windowId,
           ...group.groupId !== void 0 ? { groupId: group.groupId } : {},
           activeTabId: tab.id,
+          executionTabId: tab.id,
           memberTabIds: tabs.map((item) => item.id),
           sessionId,
           updatedAt: this.now()
@@ -15489,6 +15502,7 @@ ${lines.join("\n")}
         );
         if (binding) {
           binding.activeTabId = tabId;
+          binding.executionTabId = tabId;
           binding.updatedAt = this.now();
           await this.persist();
         }
@@ -15518,6 +15532,7 @@ ${lines.join("\n")}
         windowId: context.windowId,
         ...context.groupId !== void 0 && context.groupId >= 0 ? { groupId: context.groupId } : {},
         activeTabId: context.tabId,
+        executionTabId: context.tabId,
         memberTabIds: context.groupId !== void 0 && context.groupId >= 0 ? groupTabs.filter(
           (tab) => tab.windowId === context.windowId && tab.groupId === context.groupId
         ).map((tab) => tab.id) : [context.tabId],
@@ -15567,6 +15582,7 @@ ${lines.join("\n")}
           windowId,
           ...scopedGroupId !== void 0 ? { groupId: scopedGroupId } : {},
           activeTabId: tabId,
+          executionTabId: typeof item.executionTabId === "string" && item.executionTabId ? item.executionTabId : tabId,
           memberTabIds: Array.isArray(item.memberTabIds) ? item.memberTabIds.map(String) : [tabId],
           sessionId,
           updatedAt: Number(item.updatedAt ?? this.now())
@@ -15606,11 +15622,36 @@ ${lines.join("\n")}
           if (!binding.memberTabIds.includes(binding.activeTabId)) {
             binding.activeTabId = binding.memberTabIds[0];
           }
+          if (!tabs.some((tab) => tab.id === binding.executionTabId)) {
+            binding.executionTabId = binding.activeTabId;
+          }
           binding.updatedAt = this.now();
           changed = true;
         }
       }
       if (changed) await this.persist();
+    }
+    async selectExecutionTab(sessionId, tabId) {
+      return this.serialized(async () => {
+        await this.ensureLoaded();
+        await this.options.browser.assertSessionTab?.(sessionId, tabId);
+        await this.options.browser.setWorkingTab(sessionId, tabId, {
+          activate: true
+        });
+        const binding = [...this.bindings.values()].find(
+          (item) => item.sessionId === sessionId
+        );
+        if (!binding) {
+          throw new AgentError(
+            "WORKSPACE_NOT_FOUND",
+            `No browser workspace is bound to session ${sessionId}`
+          );
+        }
+        binding.activeTabId = tabId;
+        binding.executionTabId = tabId;
+        binding.updatedAt = this.now();
+        await this.persist();
+      });
     }
     serialized(operation) {
       const next = this.tail.then(operation, operation);
@@ -15625,7 +15666,7 @@ ${lines.join("\n")}
     return context.groupId !== void 0 && context.groupId >= 0 ? `group:${context.windowId}:${context.groupId}` : `tab:${context.windowId}:${context.tabId}`;
   }
   function tabKeyFromBinding(binding) {
-    return binding.scope === "group" && binding.groupId !== void 0 ? `group:${binding.windowId}:${binding.groupId}` : `tab:${binding.windowId}:${binding.activeTabId}`;
+    return binding.scope === "group" && binding.groupId !== void 0 ? `group:${binding.windowId}:${binding.groupId}` : `tab:${binding.windowId}:${binding.executionTabId}`;
   }
 
   // src/adapters/chrome-runtime-extension.ts
@@ -15663,7 +15704,7 @@ ${lines.join("\n")}
         return { handled: true, data: await this.browser.listTabs() };
       }
       if (request.type === "select_tab") {
-        await this.browser.setWorkingTab(
+        await this.tabs.selectExecutionTab(
           requiredString7(request, "sessionId"),
           requiredString7(request, "tabId")
         );
@@ -17354,7 +17395,7 @@ ${lines.join("\n")}
       artifacts: artifactStore,
       environmentId: "chrome-extension-v1",
       hostProfile: "browser-agent",
-      agentVersion: "0.12.0",
+      agentVersion: "0.12.1",
       newId: () => `capsule_${crypto.randomUUID()}`,
       beforeExport: async () => {
         if (!activeRuntime) return;

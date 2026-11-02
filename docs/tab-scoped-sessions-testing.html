@@ -47,7 +47,9 @@
       <tr><td>TAB-07</td><td>A 任务运行中切到 B</td><td>A 继续运行；B 可独立发送；切回 A 看到最新 Projection</td><td><span class="pill">E2E</span></td></tr>
       <tr><td>TAB-08</td><td>关闭当前标签</td><td>映射删除，自动选择同窗口 active tab</td><td><span class="risk">Manual + E2E</span></td></tr>
       <tr><td>TAB-09</td><td>标签跨窗口移动</td><td>旧映射删除，新窗口重新解析</td><td><span class="risk">Manual</span></td></tr>
-      <tr><td>TAB-10</td><td>Agent 调用 switch_tab/new_tab</td><td>返回 <code>TAB_SCOPED_SESSION</code>，不能越过标签边界</td><td><span class="pill">Unit</span></td></tr>
+      <tr><td>TAB-10</td><td>Agent 在 workspace group 内调用 switch_tab/new_tab</td><td>只能操作组成员；显式更新 executionTabId</td><td><span class="pill">Unit + E2E</span></td></tr>
+      <tr><td>TAB-11</td><td>组内 A→B 仅查看</td><td>activeTabId=B，executionTabId 仍为 A，Session 不变</td><td><span class="pill">Unit + E2E</span></td></tr>
+      <tr><td>TAB-12</td><td>用户要求处理当前活动标签</td><td>switch_tab 显式把 executionTabId 改为 activeTabId</td><td><span class="pill">Integration</span></td></tr>
     </tbody></table>
   </section>
 
@@ -56,7 +58,7 @@
     <table><thead><tr><th>检查项</th><th>断言</th></tr></thead><tbody>
       <tr><td>启动门禁</td><td>标签 Session 未完成激活时发送按钮禁用，不能产生临时 Session</td></tr>
       <tr><td>自动切换</td><td><code>tabs.onActivated</code> 仅处理当前 window；切到另一窗口不干扰当前 Panel</td></tr>
-      <tr><td>@ 标签菜单</td><td>选择标签后 active tab、sessionId、Projection 三者一致</td></tr>
+      <tr><td>@ 标签菜单</td><td>选中项更新 activeTabId；任务执行标签用独立标记，sessionId/Projection 保持一致</td></tr>
       <tr><td>草稿隔离</td><td>A 中未发送文本、附件、Skill 在切到 B 后不可见，切回 A 恢复</td></tr>
       <tr><td>运行状态隔离</td><td>A 的计时器、工具进度、Reasoning 不显示在 B</td></tr>
       <tr><td>审批隔离</td><td>后台 Session 的 Approval/Handoff 不被当前 Session 清空，切回后重新出现</td></tr>
@@ -106,7 +108,8 @@ then:
       <li>旧标签任务在后台运行，不被新标签停止或污染。</li>
       <li>Runtime/Gateway 重建后，仍在同一浏览器会话中的标签保持原 Session。</li>
       <li>完整浏览器重启后不误用旧 tabId；历史仍可从 History 打开。</li>
-      <li>Agent 工具无法绕过标签隔离控制另一标签。</li>
+      <li>Agent 工具无法绕过组边界；组内切换必须显式改变 executionTabId。</li>
+      <li>用户仅查看其他组内标签时，不得改变任务执行标签。</li>
       <li>全量清理后没有旧 Snapshot、标签映射、Legacy 分组标题或残留 Projection。</li>
     </ul>
     <div class="note">当前自动化已验证 A/B 标签独立对话、从 History 恢复 Legacy 会话、Runtime 重建、审批和全量清理。关标签自动选下一标签与跨窗口移动仍建议加入发布前手工回归。</div>

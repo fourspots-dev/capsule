@@ -16,6 +16,7 @@ export interface TabSessionBinding {
   windowId: number;
   groupId?: number;
   activeTabId: string;
+  executionTabId: string;
   memberTabIds: string[];
   sessionId: string;
   updatedAt: number;
@@ -93,9 +94,19 @@ export class TabSessionRegistry {
         const session = await this.options.runtime.hydrateSession(currentBinding.sessionId);
         if (session) {
           await this.options.runtime.ensureSessionReady(currentBinding.sessionId);
-          await this.options.browser.setWorkingTab(currentBinding.sessionId, context.tabId, {
-            activate: false,
-          });
+          const executionTabId =
+            currentBinding.executionTabId || currentBinding.activeTabId;
+          const executionTab = await this.options.browser.getTab(executionTabId);
+          if (!executionTab) {
+            currentBinding.executionTabId = context.tabId;
+            currentBinding.activeTabId = context.tabId;
+          }
+          await this.options.browser.setWorkingTab(
+            currentBinding.sessionId,
+            currentBinding.executionTabId || context.tabId,
+            { activate: false }
+          );
+          currentBinding.activeTabId = context.tabId;
           return this.refreshBinding(currentBinding, context);
         }
         this.bindings.delete(tabKey(context));
@@ -170,6 +181,9 @@ export class TabSessionRegistry {
           if (!binding.memberTabIds.includes(binding.activeTabId)) {
             binding.activeTabId = binding.memberTabIds[0];
           }
+          if (!tabs.some((tab) => tab.id === binding.executionTabId)) {
+            binding.executionTabId = binding.activeTabId;
+          }
           binding.updatedAt = this.now();
           changed = true;
         }
@@ -229,7 +243,7 @@ export class TabSessionRegistry {
       const group = await this.options.browser.addTabToSession?.(
         sessionId,
         tab.id,
-        { owned: true, baseTabId: existing.activeTabId }
+        { owned: true, baseTabId: existing.executionTabId }
       );
       if (!group) {
         throw new AgentError(
@@ -246,6 +260,7 @@ export class TabSessionRegistry {
           : existing.windowId,
         ...(group.groupId !== undefined ? { groupId: group.groupId } : {}),
         activeTabId: tab.id,
+        executionTabId: tab.id,
         memberTabIds: tabs.map((item) => item.id),
         sessionId,
         updatedAt: this.now(),
@@ -275,6 +290,7 @@ export class TabSessionRegistry {
       );
       if (binding) {
         binding.activeTabId = tabId;
+        binding.executionTabId = tabId;
         binding.updatedAt = this.now();
         await this.persist();
       }
@@ -315,6 +331,7 @@ export class TabSessionRegistry {
         ? { groupId: context.groupId }
         : {}),
       activeTabId: context.tabId,
+      executionTabId: context.tabId,
       memberTabIds:
         context.groupId !== undefined && context.groupId >= 0
           ? groupTabs
@@ -386,6 +403,10 @@ export class TabSessionRegistry {
         windowId,
         ...(scopedGroupId !== undefined ? { groupId: scopedGroupId } : {}),
         activeTabId: tabId,
+        executionTabId:
+          typeof item.executionTabId === 'string' && item.executionTabId
+            ? item.executionTabId
+            : tabId,
         memberTabIds: Array.isArray(item.memberTabIds)
           ? item.memberTabIds.map(String)
           : [tabId],
@@ -432,11 +453,37 @@ export class TabSessionRegistry {
         if (!binding.memberTabIds.includes(binding.activeTabId)) {
           binding.activeTabId = binding.memberTabIds[0];
         }
+        if (!tabs.some((tab) => tab.id === binding.executionTabId)) {
+          binding.executionTabId = binding.activeTabId;
+        }
         binding.updatedAt = this.now();
         changed = true;
       }
     }
     if (changed) await this.persist();
+  }
+
+  async selectExecutionTab(sessionId: string, tabId: string): Promise<void> {
+    return this.serialized(async () => {
+      await this.ensureLoaded();
+      await this.options.browser.assertSessionTab?.(sessionId, tabId);
+      await this.options.browser.setWorkingTab(sessionId, tabId, {
+        activate: true,
+      });
+      const binding = [...this.bindings.values()].find(
+        (item) => item.sessionId === sessionId
+      );
+      if (!binding) {
+        throw new AgentError(
+          'WORKSPACE_NOT_FOUND',
+          `No browser workspace is bound to session ${sessionId}`
+        );
+      }
+      binding.activeTabId = tabId;
+      binding.executionTabId = tabId;
+      binding.updatedAt = this.now();
+      await this.persist();
+    });
   }
 
   private serialized<T>(operation: () => Promise<T>): Promise<T> {
@@ -458,5 +505,5 @@ function tabKey(context: TabContext): string {
 function tabKeyFromBinding(binding: TabSessionBinding): string {
   return binding.scope === 'group' && binding.groupId !== undefined
     ? `group:${binding.windowId}:${binding.groupId}`
-    : `tab:${binding.windowId}:${binding.activeTabId}`;
+    : `tab:${binding.windowId}:${binding.executionTabId}`;
 }

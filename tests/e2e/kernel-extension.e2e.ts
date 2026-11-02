@@ -917,6 +917,7 @@ describe('kernel extension E2E', () => {
           active: tab.active,
         })),
         uiTabId: document.documentElement.dataset.tinyaiTabId,
+        executionTabId: document.documentElement.dataset.tinyaiExecutionTabId,
         toolText: [...document.querySelectorAll('.kernel-tool-step')]
           .map((node) => node.textContent?.trim())
           .filter(Boolean),
@@ -939,6 +940,7 @@ describe('kernel extension E2E', () => {
     expect(groupWorkspace.uiTabId).toBe(
       groupWorkspace.members.find((tab) => tab.active)?.id
     );
+    expect(groupWorkspace.executionTabId).toBe(groupWorkspace.uiTabId);
     await reopened.click('#kernel-tabs');
     await reopened.waitForSelector('#kernel-tab-menu:not([hidden])');
     await reopened.click(`[data-kernel-tab="${initialTab}"]`);
@@ -953,6 +955,15 @@ describe('kernel extension E2E', () => {
     expect(await reopened.textContent('#kernel-workspace')).toContain(
       'Workspace · 2 tabs'
     );
+    expect(
+      await reopened.evaluate(() => ({
+        active: document.documentElement.dataset.tinyaiTabId,
+        execution: document.documentElement.dataset.tinyaiExecutionTabId,
+      }))
+    ).toEqual({
+      active: initialTab,
+      execution: groupWorkspace.executionTabId,
+    });
     await reopened.click('#kernel-tabs');
     await reopened.waitForSelector('#kernel-tab-menu:not([hidden])');
     expect(await reopened.textContent('#kernel-tab-menu')).toContain('Current workspace');

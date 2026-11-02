@@ -98,9 +98,27 @@ describe('TabSessionRegistry', () => {
       scope: 'group',
       groupId: 5,
       activeTabId: '11',
+      executionTabId: '10',
       memberTabIds: ['10', '11'],
     });
+    expect(tabs.setWorkingTab).not.toHaveBeenCalledWith(
+      'session_1',
+      '11',
+      expect.anything()
+    );
     expect(sequence).toBe(1);
+
+    await registry.selectExecutionTab('session_1', '11');
+    expect(await registry.list()).toEqual([
+      expect.objectContaining({
+        sessionId: 'session_1',
+        activeTabId: '11',
+        executionTabId: '11',
+      }),
+    ]);
+    expect(tabs.setWorkingTab).toHaveBeenCalledWith('session_1', '11', {
+      activate: true,
+    });
   });
 
   it('promotes the active standalone conversation when its tab is grouped', async () => {
@@ -267,5 +285,12 @@ describe('TabSessionRegistry', () => {
       '40',
       { activate: true }
     );
+    expect(await registry.list()).toEqual([
+      expect.objectContaining({
+        sessionId: 'session_group',
+        activeTabId: '40',
+        executionTabId: '40',
+      }),
+    ]);
   });
 });

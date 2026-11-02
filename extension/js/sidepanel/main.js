@@ -974,6 +974,7 @@
     const drafts = /* @__PURE__ */ new Map();
     let windowId;
     let activeTabId;
+    let executionTabId;
     let activeGroupId;
     let activeScope = "tab";
     let workspaceMemberTabIds = [];
@@ -1136,10 +1137,12 @@
       }
       sessionId = activation.sessionId;
       activeTabId = activation.activeTabId;
+      executionTabId = activation.executionTabId;
       activeGroupId = activation.groupId;
       activeScope = activation.scope;
       workspaceMemberTabIds = [...activation.memberTabIds];
       document.documentElement.dataset.tinyaiTabId = activeTabId;
+      document.documentElement.dataset.tinyaiExecutionTabId = executionTabId;
       document.documentElement.dataset.tinyaiSessionId = sessionId;
       projection = activation.projection;
       approvals = [...approvalsBySession.get(sessionId) ?? []];
@@ -2534,7 +2537,7 @@
       const workspaceTabs = currentTabs.length ? currentTabs : groupMembers;
       const workspaceIds = new Set(workspaceTabs.map((tab) => tab.id));
       const otherTabs = tabs.filter((tab) => !workspaceIds.has(tab.id));
-      const tabButton = (tab) => `<button type="button" class="wb-pop-item${tab.id === activeTabId ? " selected" : ""}" data-kernel-tab="${escapeHtml(tab.id)}"><span class="wb-pop-copy"><span class="wb-pop-title">${escapeHtml(tab.title || tab.url || tab.id)}</span><span class="wb-pop-desc">${escapeHtml(tab.url ?? "")}</span></span></button>`;
+      const tabButton = (tab) => `<button type="button" class="wb-pop-item${tab.id === activeTabId ? " selected" : ""}" data-kernel-tab="${escapeHtml(tab.id)}"><span class="wb-pop-copy"><span class="wb-pop-title">${escapeHtml(tab.title || tab.url || tab.id)}</span><span class="wb-pop-desc">${escapeHtml(tab.url ?? "")}</span></span>${tab.id === executionTabId ? `<span class="wb-badge">${zh ? "\u4EFB\u52A1\u6807\u7B7E" : "Task tab"}</span>` : ""}</button>`;
       menu.innerHTML = (workspaceTabs.length ? `<div class="wb-menu-heading">${zh ? "\u5F53\u524D\u5DE5\u4F5C\u533A" : "Current workspace"}</div>${workspaceTabs.map(tabButton).join("")}` : "") + (otherTabs.length ? `<div class="wb-menu-heading">${zh ? "\u5176\u4ED6\u72EC\u7ACB\u6807\u7B7E" : "Other independent tabs"}</div>${otherTabs.map(tabButton).join("")}` : "") || `<div class="wb-menu-empty">${zh ? "\u6CA1\u6709\u53EF\u7528\u7684\u7F51\u9875\u6807\u7B7E\u9875" : "No browser tabs"}</div>`;
       menu.hidden = false;
     }

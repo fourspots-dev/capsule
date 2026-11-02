@@ -12,6 +12,7 @@ function setup() {
       scope: 'tab' as const,
       windowId: 1,
       activeTabId: '10',
+      executionTabId: '10',
       memberTabIds: ['10'],
       updatedAt: 1,
     })),
@@ -20,6 +21,7 @@ function setup() {
       scope: 'tab' as const,
       windowId: 1,
       activeTabId: '11',
+      executionTabId: '11',
       memberTabIds: ['11'],
       updatedAt: 1,
     })),
@@ -28,11 +30,13 @@ function setup() {
       scope: 'tab' as const,
       windowId: 1,
       activeTabId: '10',
+      executionTabId: '10',
       memberTabIds: ['10'],
       updatedAt: 1,
     })),
     releaseSession: vi.fn(async () => undefined),
     clear: vi.fn(async () => undefined),
+    selectExecutionTab: vi.fn(async () => undefined),
   };
   const runtime = {
     loadProjection: vi.fn(async (sessionId: string) => ({
@@ -106,6 +110,10 @@ describe('ChromeRuntimeExtension', () => {
         tabId: '10',
       })
     ).resolves.toEqual({ handled: true, data: true });
+    expect(h.tabs.selectExecutionTab).toHaveBeenCalledWith(
+      'session_1',
+      '10'
+    );
     await expect(
       h.extension.tryHandle({
         type: 'resolve_tab_session',
