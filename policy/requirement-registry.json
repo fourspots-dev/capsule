@@ -491,6 +491,50 @@
         "reviewedAt": "2026-11-01"
       },
       "architectureImpact": true
+    },
+    {
+      "id": "REQ-OBS-001",
+      "title": "Read-only execution debug hub and live event pull",
+      "type": "feature",
+      "priority": "P1",
+      "status": "verified",
+      "designStatus": "approved_unreviewed",
+      "approvalNote": "User requested design, development and delivery according to the implementation standard.",
+      "implementationAuthorized": true,
+      "targetVersion": "0.12.0",
+      "design": "docs/observability/REQ-OBS-001-design.html#architecture-impact",
+      "testDesign": "docs/observability/REQ-OBS-001-testing.html#architecture-completeness",
+      "acceptance": "Agent execution events are normalized, redacted and emitted by outbound transport; a read-only Debug Hub persists and exposes cursor pagination, SSE streaming and NDJSON export; Chrome exposes configuration without listening on a port; external consumers can inspect live and historical execution.",
+      "legacyAliases": [],
+      "adrReview": {
+        "status": "existing",
+        "adrs": ["ADR-017"],
+        "rationale": "ADR-017 defines the outbound ingestion and read-only cursor-pull debug boundary.",
+        "reviewedAt": "2026-11-02"
+      },
+      "architectureImpact": true
+    },
+    {
+      "id": "REQ-PERF-001",
+      "title": "Bounded streaming runtime and Browser memory",
+      "type": "bugfix",
+      "priority": "P0",
+      "status": "verified",
+      "designStatus": "approved_unreviewed",
+      "approvalNote": "User reported approximately 11 GB browser memory usage and explicitly required a complete fix.",
+      "implementationAuthorized": true,
+      "targetVersion": "0.12.0",
+      "design": "docs/performance/REQ-PERF-001-design.html#architecture-impact",
+      "testDesign": "docs/performance/REQ-PERF-001-testing.html#architecture-completeness",
+      "acceptance": "Streaming updates use source projection deltas without recurring full history clones, Side Panel and persistence are bounded and coalesced, EventLog/network/debug/resident Session caches have explicit limits, and long Chrome tasks no longer grow memory with every token across the complete history.",
+      "legacyAliases": [],
+      "adrReview": {
+        "status": "existing",
+        "adrs": ["ADR-018"],
+        "rationale": "ADR-018 defines the bounded streaming and resident-memory invariants required by the P0 incident.",
+        "reviewedAt": "2026-11-02"
+      },
+      "architectureImpact": true
     }
   ]
 }

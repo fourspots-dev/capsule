@@ -47,6 +47,12 @@ import { CONFIG_KEY, migrateLegacyStorage } from './storage-migration';
 import { PortableGitBackend } from '../git/backend';
 import { WorkspaceContinuityService } from '../workspace/continuity';
 import { serializeWorkspaceCapsuleV2 } from '../workspace/capsule-v2';
+import {
+  DEBUG_SERVICE_KEY,
+  parseDebugServiceConfig,
+} from '../observability/debug-service-config';
+import { ChromeHttpEventTransport } from '../observability/chrome-http-event-transport';
+import { ProjectionExecutionTracker } from '../observability/projection-execution-tracker';
 
 export const KERNEL_PORT_NAME = 'tinyai-runtime-v1';
 export const REMOTE_ACTIONS_KEY = 'tinyai-remote-actions';
@@ -169,7 +175,25 @@ export async function createChromeRuntimeBundle(
   await migrateLegacyStorage(storage, sessionStore, systemClock.now());
   const stored = await storage.get(CONFIG_KEY);
   const remoteActionStored = await storage.get(REMOTE_ACTIONS_KEY);
+  const debugServiceStored = await storage.get(DEBUG_SERVICE_KEY);
   const config = parseKernelConfig(stored[CONFIG_KEY]);
+  const debugServiceConfig = parseDebugServiceConfig(
+    debugServiceStored[DEBUG_SERVICE_KEY]
+  );
+  const debugTransport = debugServiceConfig?.enabled
+    ? new ChromeHttpEventTransport({ config: debugServiceConfig })
+    : undefined;
+  const debugTracker = debugTransport
+    ? new ProjectionExecutionTracker()
+    : undefined;
+
+  const onProjectionChange = debugTransport && debugTracker
+    ? (change: Parameters<ProjectionExecutionTracker['observeChange']>[0]) => {
+        for (const event of debugTracker.observeChange(change)) {
+          debugTransport.emit(event);
+        }
+      }
+    : undefined;
   const profiles = await storage.get('tinyai-agent-profiles');
   const mcpConfig = await storage.get('tinyai-mcp-servers');
   const hookConfig = await storage.get('tinyai-declarative-hooks');
@@ -268,7 +292,7 @@ export async function createChromeRuntimeBundle(
     artifacts: artifactStore,
     environmentId: 'chrome-extension-v1',
     hostProfile: 'browser-agent',
-    agentVersion: '0.11.2',
+    agentVersion: '0.12.0',
     newId: () => `capsule_${crypto.randomUUID()}`,
     beforeExport: async () => {
       if (!activeRuntime) return;
@@ -395,6 +419,7 @@ export async function createChromeRuntimeBundle(
         ],
         completionGuard,
         tabScoped: true,
+        onProjectionChange,
       }).runtime,
   });
   let mainWorkspace: ReturnType<typeof createBrowserWorkspace>;
@@ -479,6 +504,7 @@ export async function createChromeRuntimeBundle(
     ],
     completionGuard,
     workspaceTabs,
+    onProjectionChange,
   });
   activeRuntime = mainWorkspace.runtime;
   const unsubscribeChildren = coordinator.subscribe((child) => {
@@ -543,6 +569,7 @@ export async function createChromeRuntimeBundle(
       await virtualWorkspace.jobs.dispose();
       await mainWorkspace.dispose();
       await Promise.all(mcpClients.map((client) => client.close()));
+      await debugTransport?.dispose();
     },
   };
 }

@@ -441,6 +441,32 @@ describe('ChromeBrowserProvider', () => {
     expect(info.url).toBe('https://example.com');
   });
 
+  it('bounds per-tab network capture entries', async () => {
+    const debuggerApi = fakeDebugger();
+    const browser = new ChromeBrowserProvider({
+      tabs: fakeTabs([tab(1)]),
+      debugger: debuggerApi,
+    });
+    await browser.network('1', { cmd: 'start' });
+    for (let index = 0; index < 450; index += 1) {
+      debuggerApi.emit(
+        { tabId: 1 },
+        'Network.requestWillBeSent',
+        {
+          requestId: `request_${index}`,
+          request: { url: `https://example.com/${index}`, method: 'GET' },
+          type: 'Fetch',
+        }
+      );
+    }
+    const state = (
+      browser as unknown as {
+        networkStates: Map<string, { entries: Map<string, unknown> }>;
+      }
+    ).networkStates.get('1');
+    expect(state?.entries.size).toBe(300);
+  });
+
   it('removes debugger listeners on dispose', () => {
     const debuggerApi = fakeDebugger();
     const browser = new ChromeBrowserProvider({

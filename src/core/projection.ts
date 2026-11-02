@@ -28,6 +28,15 @@ function availabilityFor(view: SessionView): ActionAvailability {
 }
 
 export function buildProjection(view: SessionView): ProductProjection {
+  return {
+    ...buildProjectionState(view),
+    rows: view.rows.map(cloneRow),
+  };
+}
+
+export function buildProjectionState(
+  view: SessionView
+): Omit<ProductProjection, 'rows'> {
   const availability = availabilityFor(view);
   const active = view.taskStatus === 'queued' || view.taskStatus === 'running' || view.taskStatus === 'waiting';
   return {
@@ -51,13 +60,16 @@ export function buildProjection(view: SessionView): ProductProjection {
     ...(view.children?.length
       ? { children: view.children.map((child) => ({ ...child })) }
       : {}),
-    rows: view.rows.map(cloneRow),
     availability,
   };
 }
 
 export type ProjectionDelta =
-  | { type: 'row.appended'; row: ProductProjection['rows'][number] }
+  | {
+      type: 'row.appended';
+      row: ProductProjection['rows'][number];
+      index?: number;
+    }
   | { type: 'row.upserted'; row: ProductProjection['rows'][number] }
   | { type: 'row.removed'; fromRowId: string }
   | { type: 'row.delta'; rowId: string; path: 'text'; append: string }
@@ -86,7 +98,10 @@ export function applyProjectionDelta(
     ...current,
     rows: current.rows.map(cloneRow),
   };
-  if (delta.type === 'row.appended') next.rows.push(cloneRow(delta.row));
+  if (delta.type === 'row.appended') {
+    if (delta.index === undefined) next.rows.push(cloneRow(delta.row));
+    else next.rows.splice(delta.index, 0, cloneRow(delta.row));
+  }
   if (delta.type === 'row.upserted') {
     const index = next.rows.findIndex((row) => row.id === delta.row.id);
     if (index >= 0) next.rows[index] = cloneRow(delta.row);
@@ -102,6 +117,42 @@ export function applyProjectionDelta(
   }
   if (delta.type === 'state.updated') Object.assign(next, delta.patch);
   return next;
+}
+
+export function applyProjectionDeltaInPlace(
+  current: ProductProjection,
+  delta: ProjectionDelta
+): ProductProjection {
+  if (delta.type === 'row.appended') {
+    if (delta.index === undefined) current.rows.push(cloneRow(delta.row));
+    else current.rows.splice(delta.index, 0, cloneRow(delta.row));
+  }
+  if (delta.type === 'row.upserted') {
+    const index = current.rows.findIndex((row) => row.id === delta.row.id);
+    if (index >= 0) current.rows[index] = cloneRow(delta.row);
+    else current.rows.push(cloneRow(delta.row));
+  }
+  if (delta.type === 'row.removed') {
+    const index = current.rows.findIndex(
+      (row) => row.id === delta.fromRowId
+    );
+    if (index >= 0) current.rows.splice(index, 1);
+  }
+  if (delta.type === 'row.delta') {
+    const row = current.rows.find((candidate) => candidate.id === delta.rowId);
+    if (!row) throw new Error(`Cannot apply row delta: ${delta.rowId}`);
+    if (delta.path === 'text') row.text += delta.append;
+  }
+  if (delta.type === 'state.updated') {
+    for (const [key, value] of Object.entries(delta.patch)) {
+      if (value === undefined) {
+        delete (current as unknown as Record<string, unknown>)[key];
+      } else {
+        (current as unknown as Record<string, unknown>)[key] = value;
+      }
+    }
+  }
+  return current;
 }
 
 export function createProjectionFrame(
@@ -200,8 +251,8 @@ export function applyProjectionFrame(
       `Projection frame gap: expected ${current.revision}, received ${frame.baseRevision}`
     );
   }
-  let next = cloneProjection(current);
-  for (const delta of frame.deltas) next = applyProjectionDelta(next, delta);
+  const next = current;
+  for (const delta of frame.deltas) applyProjectionDeltaInPlace(next, delta);
   next.revision = frame.revision;
   next.eventSeq = frame.eventSeq;
   return next;
@@ -209,12 +260,10 @@ export function applyProjectionFrame(
 
 export class ProjectionStore {
   private current?: ProductProjection;
-  private previous?: ProductProjection;
 
   apply(frame: ProjectionFrame): ProductProjection {
-    this.previous = this.current;
     this.current = applyProjectionFrame(this.current, frame);
-    return cloneProjection(this.current);
+    return this.current;
   }
 
   snapshot(): ProductProjection | undefined {
@@ -222,7 +271,7 @@ export class ProjectionStore {
   }
 
   frame(next: ProductProjection): ProjectionFrame {
-    return createProjectionFrame(this.previous ?? this.current, next);
+    return { type: 'snapshot', projection: cloneProjection(next) };
   }
 }
 

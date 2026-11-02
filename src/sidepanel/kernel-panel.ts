@@ -7,6 +7,12 @@ import {
 } from '../runtime/chrome-runtime';
 import { CONFIG_KEY } from '../runtime/storage-migration';
 import type { RuntimeCapabilityStatus } from '../runtime/runtime-gateway';
+import {
+  DEBUG_SERVICE_KEY,
+  normalizeEndpoint,
+  testDebugService,
+  type DebugServiceConfig,
+} from '../observability/debug-service-config';
 import type { KernelApprovalEvent, KernelHandoffEvent } from './kernel-client';
 import { KernelClient, connectChromeKernelPort } from './kernel-client';
 import { icons } from './icons';
@@ -21,6 +27,11 @@ import {
   settingsSeparator,
   settingsSubpage,
 } from './settings-components';
+import {
+  STREAM_RENDER_INTERVAL_MS,
+  excerptText,
+  selectRenderWindow,
+} from './render-window';
 import {
   buildTurnRenderUnits,
   toolFamily,
@@ -74,6 +85,7 @@ export async function initKernelUi(): Promise<void> {
   if (!root) throw new Error('Missing #root');
   let pageConfig: KernelStoredConfig = await readPageConfig();
   let remoteActionConfig = await readRemoteActionConfig();
+  let debugServiceConfig = await readDebugServiceConfig();
   root.innerHTML = shell(pageConfig);
   applyPageAppearance();
 
@@ -109,10 +121,12 @@ export async function initKernelUi(): Promise<void> {
     | 'history'
     | 'capabilities'
     | 'remote-actions'
+    | 'debug-service'
     | null = null;
   let pageSessions: Awaited<ReturnType<KernelClient['listSessions']>> = [];
   let editingConnectionId: string | null | undefined;
   let connectionTestMessage = '';
+  let debugServiceTestMessage = '';
   let capabilityStatus: RuntimeCapabilityStatus | undefined;
   let capabilityStatusError = '';
   let pageError = '';
@@ -120,6 +134,7 @@ export async function initKernelUi(): Promise<void> {
   let busy = false;
   let busyStartedAt = 0;
   let reconnectAttempts = 0;
+  let renderScheduled = false;
   const detailState = new Map<string, boolean>();
 
   const activationTargetCount = (): number =>
@@ -198,6 +213,15 @@ export async function initKernelUi(): Promise<void> {
           `<span class="wb-chip"><span class="wb-chip-name">${escapeHtml(attachment.name)}</span><button type="button" data-remove-attachment="${escapeHtml(attachment.name)}" aria-label="Remove">×</button></span>`
       ),
     ].join('');
+    const windowed = selectRenderWindow(projection?.rows ?? []);
+    const hiddenRowCount = windowed.hiddenCount;
+    const renderedProjection =
+      projection
+        ? {
+            ...projection,
+            rows: windowed.rows,
+          }
+        : projection;
     const conversationHtml =
       (projection?.plan?.text
         ? `<section class="kernel-plan-card">
@@ -205,8 +229,11 @@ export async function initKernelUi(): Promise<void> {
             <div class="kernel-plan-body">${md(projection.plan.text)}</div>
           </section>`
         : '') +
-      (projection
-        ? buildTurnRenderUnits(projection)
+      (hiddenRowCount > 0
+        ? `<div class="kernel-history-window">${zh ? `较早的 ${hiddenRowCount} 条记录已省略` : `${hiddenRowCount} earlier rows hidden`}</div>`
+        : '') +
+      (renderedProjection
+        ? buildTurnRenderUnits(renderedProjection)
             .map((unit) =>
               renderTurnUnit(unit, pageConfig.language, pageConfig.showReasoning)
             )
@@ -247,6 +274,15 @@ export async function initKernelUi(): Promise<void> {
     rows.innerHTML = conversationHtml || emptyHtml(pageConfig.language);
     restoreDetailState(rows, detailState);
     if (scroll && stickToBottom) scroll.scrollTop = scroll.scrollHeight;
+  };
+
+  const scheduleRender = (): void => {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    window.setTimeout(() => {
+      renderScheduled = false;
+      render();
+    }, STREAM_RENDER_INTERVAL_MS);
   };
 
   const saveCurrentDraft = (): void => {
@@ -397,7 +433,7 @@ export async function initKernelUi(): Promise<void> {
     if (!nextBusy) busyStartedAt = 0;
     busy = nextBusy;
     error = '';
-    render();
+    scheduleRender();
   });
   client.onApproval((approval) => {
     const pending = [
@@ -877,17 +913,25 @@ export async function initKernelUi(): Promise<void> {
   }
 
   async function showPage(
-    view: 'settings' | 'connections' | 'history' | 'capabilities' | 'remote-actions'
+    view:
+      | 'settings'
+      | 'connections'
+      | 'history'
+      | 'capabilities'
+      | 'remote-actions'
+      | 'debug-service'
   ): Promise<void> {
     pageConfig = await readPageConfig();
     remoteActionConfig = await readRemoteActionConfig();
+    debugServiceConfig = await readDebugServiceConfig();
     if (view === 'history') pageSessions = await client.listSessions();
     capabilityStatus = undefined;
     capabilityStatusError = '';
     if (
       (view === 'settings' ||
         view === 'capabilities' ||
-        view === 'remote-actions') &&
+        view === 'remote-actions' ||
+        view === 'debug-service') &&
       sessionActivated
     ) {
       try {
@@ -899,6 +943,7 @@ export async function initKernelUi(): Promise<void> {
     pageView = view;
     pageError = '';
     connectionTestMessage = '';
+    debugServiceTestMessage = '';
     renderPage();
   }
 
@@ -919,6 +964,7 @@ export async function initKernelUi(): Promise<void> {
     if (pageView === 'history') return historyPageMarkup();
     if (pageView === 'capabilities') return capabilitiesPageMarkup();
     if (pageView === 'remote-actions') return remoteActionsPageMarkup();
+    if (pageView === 'debug-service') return debugServicePageMarkup();
     return settingsPageMarkup();
   }
 
@@ -1053,6 +1099,20 @@ export async function initKernelUi(): Promise<void> {
                 : 'Not configured',
             action: 'remote-actions',
           }),
+          settingsSeparator(),
+          settingsNavRow({
+            label: zh ? '调试服务' : 'Debug Service',
+            icon: icons.info,
+            value:
+              debugServiceConfig?.enabled
+                ? zh
+                  ? '已启用'
+                  : 'Enabled'
+                : zh
+                  ? '未启用'
+                  : 'Disabled',
+            action: 'debug-service',
+          }),
         ].join(''),
       })}
       ${settingsGroup({
@@ -1118,6 +1178,45 @@ export async function initKernelUi(): Promise<void> {
       backIcon: icons.back,
       theme: effectiveTheme(),
       body: `${remoteActionFormMarkup(zh)}${pageAlertMarkup()}`,
+    });
+  }
+
+  function debugServicePageMarkup(): string {
+    const zh = pageConfig.language.startsWith('zh');
+    return settingsSubpage({
+      title: zh ? '调试服务' : 'Debug Service',
+      backAction: 'back-runtime',
+      backLabel: zh ? '返回' : 'Back',
+      backIcon: icons.back,
+      theme: effectiveTheme(),
+      body: `${debugServiceFormMarkup(zh)}${pageAlertMarkup()}`,
+    });
+  }
+
+  function debugServiceFormMarkup(zh: boolean): string {
+    return settingsForm({
+      id: 'kernel-debug-service-form',
+      content: `${settingsField({
+        label: zh ? '服务地址' : 'Service endpoint',
+        control: `<input id="kernel-debug-endpoint" type="url" value="${escapeHtml(debugServiceConfig?.endpoint ?? '')}" placeholder="http://127.0.0.1:4399">`,
+      })}
+      ${settingsField({
+        label: 'Pairing Token',
+        control: `<input id="kernel-debug-token" type="password" value="" placeholder="${debugServiceConfig?.token ? (zh ? '已保存，留空保持不变' : 'Saved — leave blank to keep') : 'optional for health check'}" autocomplete="off">`,
+      })}
+      ${settingsField({
+        label: zh ? '启用实时上报' : 'Enable live reporting',
+        className: 'wb-row',
+        control: `<input id="kernel-debug-enabled" type="checkbox" ${debugServiceConfig?.enabled ? 'checked' : ''}>`,
+        controlFirst: true,
+      })}
+      <div class="wb-form-actions">
+        <button type="button" class="wb-btn wb-btn--primary" data-page-action="debug-save">${zh ? '保存并应用' : 'Save and apply'}</button>
+        <button type="button" class="wb-ghost-btn" data-page-action="debug-test">${zh ? '测试连接' : 'Test connection'}</button>
+        <button type="button" class="wb-ghost-btn" data-page-action="debug-disable">${zh ? '停用' : 'Disable'}</button>
+        ${debugServiceTestMessage ? `<span class="wb-form-ok">${escapeHtml(debugServiceTestMessage)}</span>` : ''}
+      </div>
+      <div class="wb-conn-url">${zh ? '服务启动命令：tinyai debug serve；密码用于服务端鉴权。' : 'Start with tinyai debug serve. The token authenticates event ingestion and queries.'}</div>`,
     });
   }
 
@@ -1375,6 +1474,24 @@ export async function initKernelUi(): Promise<void> {
     };
   }
 
+  async function readDebugServiceConfig(): Promise<
+    DebugServiceConfig | undefined
+  > {
+    const stored = await chrome.storage.local.get(DEBUG_SERVICE_KEY);
+    const raw = stored[DEBUG_SERVICE_KEY];
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+    const value = raw as Record<string, unknown>;
+    const endpoint = normalizeEndpoint(value.endpoint);
+    if (!endpoint) return undefined;
+    return {
+      enabled: value.enabled !== false,
+      endpoint,
+      ...(typeof value.token === 'string' && value.token
+        ? { token: value.token }
+        : {}),
+    };
+  }
+
   async function writePageConfig(config = pageConfig): Promise<void> {
     await chrome.storage.local.set({ [CONFIG_KEY]: config });
     pageConfig = config;
@@ -1494,6 +1611,24 @@ export async function initKernelUi(): Promise<void> {
       pageView = 'remote-actions';
       pageError = '';
       renderPage();
+      return;
+    }
+    if (action === 'debug-service') {
+      pageView = 'debug-service';
+      pageError = '';
+      renderPage();
+      return;
+    }
+    if (action === 'debug-save') {
+      await saveDebugServiceConfig(true);
+      return;
+    }
+    if (action === 'debug-test') {
+      await testDebugServiceForm();
+      return;
+    }
+    if (action === 'debug-disable') {
+      await saveDebugServiceConfig(false);
       return;
     }
     if (action === 'remote-save') {
@@ -1744,6 +1879,74 @@ export async function initKernelUi(): Promise<void> {
     } else {
       await reloadRuntimeForCurrentTab();
     }
+  }
+
+  async function saveDebugServiceConfig(enabled: boolean): Promise<void> {
+    const endpoint = normalizeEndpoint(pageValue('#kernel-debug-endpoint'));
+    if (!endpoint) {
+      throw new Error(
+        pageConfig.language.startsWith('zh')
+          ? '调试服务地址必须是 HTTP(S) 地址；非本机地址必须使用 HTTPS。'
+          : 'Debug Service must use HTTP(S); non-local endpoints require HTTPS.'
+      );
+    }
+    const tokenInput = pageValue('#kernel-debug-token');
+    const retainedToken =
+      debugServiceConfig?.endpoint === endpoint
+        ? debugServiceConfig.token
+        : undefined;
+    const token = tokenInput || retainedToken;
+    if (enabled && !token) {
+      throw new Error(
+        pageConfig.language.startsWith('zh')
+          ? '启用实时上报需要 Pairing Token。'
+          : 'A Pairing Token is required to enable live reporting.'
+      );
+    }
+    const config: DebugServiceConfig = {
+      enabled,
+      endpoint,
+      ...(token ? { token } : {}),
+    };
+    await chrome.storage.local.set({ [DEBUG_SERVICE_KEY]: config });
+    debugServiceConfig = config;
+    await reloadRuntimeForCurrentTab();
+    debugServiceTestMessage = enabled
+      ? pageConfig.language.startsWith('zh')
+        ? '已保存并启用'
+        : 'Saved and enabled'
+      : pageConfig.language.startsWith('zh')
+        ? '已停用'
+        : 'Disabled';
+    renderPage();
+  }
+
+  async function testDebugServiceForm(): Promise<void> {
+    const endpoint = normalizeEndpoint(pageValue('#kernel-debug-endpoint'));
+    if (!endpoint) {
+      throw new Error(
+        pageConfig.language.startsWith('zh')
+          ? '调试服务地址无效。'
+          : 'Debug Service endpoint is invalid.'
+      );
+    }
+    const token =
+      pageValue('#kernel-debug-token') ||
+      (debugServiceConfig?.endpoint === endpoint
+        ? debugServiceConfig.token
+        : undefined);
+    await testDebugService({ endpoint, ...(token ? { token } : {}) });
+    debugServiceConfig = {
+      enabled:
+        document.querySelector<HTMLInputElement>('#kernel-debug-enabled')
+          ?.checked ?? true,
+      endpoint,
+      ...(token ? { token } : {}),
+    };
+    debugServiceTestMessage = pageConfig.language.startsWith('zh')
+      ? '连接成功'
+      : 'Connection OK';
+    renderPage();
   }
 
   function pageValue(selector: string): string {
@@ -2034,7 +2237,7 @@ function renderWorkSegment(
 
 function renderUserRow(text: string): string {
   return `<div class="wb-stream-row kernel-message-row kernel-message-row--user">
-    <div class="wb-msg wb-msg-user"><div class="wb-user-bubble">${escapeHtml(text)}</div></div>
+    <div class="wb-msg wb-msg-user"><div class="wb-user-bubble">${escapeHtml(excerptText(text))}</div></div>
   </div>`;
 }
 
@@ -2106,7 +2309,7 @@ function renderReasoningRow(
       ${running ? `<span class="kernel-reasoning-running">${zh ? '思考中' : 'Thinking'}</span>` : ''}
       <span class="kernel-work-chevron" aria-hidden="true">${icons.chevronRight}</span>
     </summary>
-    <div class="kernel-reasoning-body">${escapeHtml(row.text)}</div>
+    <div class="kernel-reasoning-body">${escapeHtml(excerptText(row.text))}</div>
   </details>`;
 }
 
@@ -2168,7 +2371,7 @@ function renderAssistantRow(
   if (!row.text && !withFeedback) return '';
   const zh = language.startsWith('zh');
   const body = row.text
-    ? `${md(row.text)}${row.status === 'streaming' ? '<span class="wb-cursor"></span>' : ''}`
+    ? `${md(excerptText(row.text))}${row.status === 'streaming' ? '<span class="wb-cursor"></span>' : ''}`
     : '';
   const feedback = withFeedback && row.status === 'completed'
     ? `<div class="wb-feedback">
@@ -2188,7 +2391,7 @@ function renderPlanRow(
   const zh = language.startsWith('zh');
   return `<details class="kernel-plan-inline" data-ui-key="plan:${escapeHtml(row.id)}">
     <summary>${zh ? '计划' : 'Plan'} · ${escapeHtml(statusLabel(row.status, language))}</summary>
-    <div>${md(row.text)}</div>
+    <div>${md(excerptText(row.text))}</div>
   </details>`;
 }
 
@@ -2526,6 +2729,7 @@ function bytesToBase64(value: Uint8Array): string {
   for (const byte of value) binary += String.fromCharCode(byte);
   return btoa(binary);
 }
+
 
 function isMissingTabError(cause: unknown): boolean {
   return cause instanceof Error && cause.name === 'BROWSER_TAB_NOT_FOUND';

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>REQ-PERF-001 内存修复测试设计</title>
+<style>
+:root{--bg:#f4f6f8;--paper:#fff;--text:#17191d;--muted:#69707a;--line:#e0e4e9;--accent:#137a4b;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1120px;margin:auto;padding:36px 24px 90px}header{padding:36px;border-radius:24px;background:linear-gradient(135deg,#102019,#235d45 60%,#318362);color:#fff}header small{opacity:.72;letter-spacing:.1em}h1{font-size:35px;margin:10px 0}header p{margin:0;max-width:850px;color:#effbf5}section{margin:17px 0;padding:25px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:22px;margin:0 0 14px}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafbfc;color:var(--muted)}code{font-family:var(--mono);background:#eff2f4;padding:1px 5px;border-radius:4px}pre{overflow:auto;padding:15px;border-radius:11px;background:#101914;color:#effbf5;font:12px/1.6 var(--mono)}.rule{padding:12px 14px;border-left:3px solid var(--accent);background:#edf8f2;border-radius:0 9px 9px 0}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafbfc}
+</style>
+</head>
+<body><div class="wrap">
+<header><small>TINYAI / MEMORY SAFETY / TEST DESIGN</small><h1>内存有界化测试</h1><p>验证增量 Projection 与全量状态等价、UI/日志/队列/常驻 Session 均有硬边界，并执行真实 Chrome 长流回归。</p></header>
+
+<section id="trace"><h2>1. Trace matrix</h2><table><thead><tr><th>Case</th><th>Expected</th><th>Level</th></tr></thead><tbody>
+<tr><td>PERF-001</td><td>source delta 重放后等于完整 Projection</td><td>Integration</td></tr>
+<tr><td>PERF-002</td><td>流式文本只发送 append delta</td><td>Integration</td></tr>
+<tr><td>PERF-003</td><td>无 listener 时不构造全量 Projection</td><td>Unit/Guard</td></tr>
+<tr><td>PERF-004</td><td>Side Panel 最多渲染 500 rows/100k chars</td><td>Unit + E2E</td></tr>
+<tr><td>PERF-005</td><td>ProjectionStore delta 原地更新</td><td>Unit</td></tr>
+<tr><td>PERF-006</td><td>EventLog 20k retention，seq 单调</td><td>Unit</td></tr>
+<tr><td>PERF-007</td><td>Persistence 高流不丢最终状态且写次数有界</td><td>Integration</td></tr>
+<tr><td>PERF-008</td><td>idle Session 最多常驻 6 个</td><td>Integration</td></tr>
+<tr><td>PERF-009</td><td>Network entries 最多 300/tab</td><td>Adapter</td></tr>
+<tr><td>PERF-010</td><td>Debug queue 最多 2MB/2k，delta-only</td><td>Unit</td></tr>
+<tr><td>PERF-011</td><td>Chrome 2000+ 流式片段不产生错误/UI 卡死</td><td>E2E</td></tr>
+<tr><td>PERF-012</td><td>Capsule/history/session resume 保持兼容</td><td>Regression</td></tr>
+</tbody></table></section>
+
+<section id="equivalence"><h2>2. State equivalence</h2><p>从一次 initial snapshot 开始，依次应用所有 SessionProjectionChange，最终 ProductProjection 必须与 `runtime.getProjection(sessionId)` 深度相等。覆盖文本 delta、状态、子 Agent、tool metadata 和终态。</p></section>
+
+<section id="stress"><h2>3. 压力测试</h2><div class="grid"><div class="card"><h3>Long text</h3><p>至少 2,000 个 reasoning/message delta；检查每条 change 只含增量，不重复累计全文。</p></div><div class="card"><h3>Many rows</h3><p>创建 1,000+ rows；Side Panel 只构建最近 500 行 DOM。</p></div><div class="card"><h3>Many sessions</h3><p>8 个已持久化 idle Session；resident 数保持 ≤6，list/history 仍返回全部。</p></div><div class="card"><h3>Disconnected debug</h3><p>无服务端 ACK 时队列保持 ≤2MB，不阻塞任务。</p></div></div></section>
+
+<section id="architecture-completeness"><h2>4. Architecture completeness</h2><table><thead><tr><th>Surface</th><th>Proof</th><th>Case</th></tr></thead><tbody>
+<tr><td>Runtime</td><td>delta/full equivalence</td><td>PERF-001/002</td></tr>
+<tr><td>Gateway</td><td>initial snapshot + delta only</td><td>RuntimeGateway tests</td></tr>
+<tr><td>UI</td><td>window/truncation/coalescing</td><td>PERF-004/011</td></tr>
+<tr><td>Persistence</td><td>bounded write count and final state</td><td>PERF-007</td></tr>
+<tr><td>Residency</td><td>LRU idle eviction only</td><td>PERF-008</td></tr>
+<tr><td>Debug/Browser</td><td>byte/network caps</td><td>PERF-009/010</td></tr>
+<tr><td>Compatibility</td><td>Session/Capsule/TUI</td><td>PERF-012 + full suite</td></tr>
+</tbody></table></section>
+
+<section id="gates"><h2>5. Gates</h2><pre>npm run typecheck
+npm test
+npm run test:e2e
+npm run check
+npm run verify:tui</pre><div class="rule">发布阻断：全量/增量状态不等价、仍存在 per-token full snapshot、任一无界缓存、Chrome Side Panel 功能性回归或长流内存持续线性飙升。</div></section>
+
+<section id="evidence"><h2>6. Evidence</h2><p><b>Observed 0.12.0 evidence:</b> <code>npm run check</code> 458 passed / 3 skipped；Chrome E2E 10 passed；<code>npm run verify:tui</code> passed；真实 Chrome 执行 2,000 组 reasoning/answer delta 后，GC 后 renderer heap 增量为 <b>0 MB</b>。仅“看起来变快”不构成验收。</p><p>Target 0.12.0 · P0 · Architecture impact yes · ADR-018 · Verified</p></section>
+</div></body></html>

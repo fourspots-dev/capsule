@@ -60,6 +60,7 @@
     a3: [11.69, 16.54],
     tabloid: [11, 17]
   };
+  var MAX_NETWORK_ENTRIES = 300;
   var ChromeBrowserProvider = class {
     tabs;
     debuggerApi;
@@ -783,7 +784,11 @@
       if (!state?.enabled) return;
       const requestId = String(params.requestId ?? "");
       const request = params.request ?? {};
-      state.order = [...state.order, requestId].slice(-300);
+      state.order = [...state.order, requestId].slice(-MAX_NETWORK_ENTRIES);
+      const retained = new Set(state.order);
+      for (const id of state.entries.keys()) {
+        if (!retained.has(id)) state.entries.delete(id);
+      }
       state.entries.set(requestId, {
         requestId,
         url: String(request.url ?? ""),
@@ -10729,125 +10734,6 @@ ${skillListing}` : ""
     }
   };
 
-  // src/core/projection.ts
-  function phaseFor(view) {
-    if (view.lifecycle === "faulted") return "error";
-    if (view.lifecycle === "starting") return "prewarming";
-    if (!view.activeTaskId && view.rows.length === 0) return "draft";
-    if (view.taskStatus === "running" || view.taskStatus === "queued") return "running";
-    if (view.taskStatus === "waiting" || view.pendingApproval) return "waiting";
-    if (view.taskStatus === "failed") return "error";
-    if (view.taskStatus === "completed" || view.taskStatus === "cancelled") return "completed";
-    return "draft";
-  }
-  function availabilityFor(view) {
-    const ready = view.lifecycle === "ready";
-    const active = view.taskStatus === "queued" || view.taskStatus === "running" || view.taskStatus === "waiting";
-    return {
-      canSend: ready,
-      canStop: ready && active,
-      canApprove: ready && view.pendingApproval,
-      canQueue: ready && view.taskStatus === "running"
-    };
-  }
-  function buildProjection(view) {
-    const availability = availabilityFor(view);
-    const active = view.taskStatus === "queued" || view.taskStatus === "running" || view.taskStatus === "waiting";
-    return {
-      sessionId: view.sessionId,
-      revision: view.revision,
-      eventSeq: view.eventSeq,
-      logEpoch: view.logEpoch,
-      phase: phaseFor(view),
-      lifecycle: view.lifecycle,
-      taskStatus: view.taskStatus,
-      inputRouting: !availability.canSend ? "blocked" : active ? "queue" : "startNow",
-      queueLength: view.queueLength,
-      ...view.activeTaskId ? { activeTaskId: view.activeTaskId } : {},
-      ...view.lastError ? { lastError: view.lastError } : {},
-      permissionMode: view.permissionMode,
-      ...view.plan ? { plan: { ...view.plan } } : {},
-      ...view.children?.length ? { children: view.children.map((child) => ({ ...child })) } : {},
-      rows: view.rows.map(cloneRow),
-      availability
-    };
-  }
-  function createProjectionFrame(previous, next) {
-    if (!previous || previous.sessionId !== next.sessionId || previous.logEpoch !== next.logEpoch || next.revision <= previous.revision) {
-      return { type: "snapshot", projection: cloneProjection(next) };
-    }
-    const deltas = [];
-    const statePatch = {};
-    for (const key of [
-      "phase",
-      "lifecycle",
-      "taskStatus",
-      "inputRouting",
-      "queueLength",
-      "activeTaskId",
-      "lastError",
-      "permissionMode",
-      "plan",
-      "children",
-      "availability"
-    ]) {
-      if (JSON.stringify(previous[key]) !== JSON.stringify(next[key])) {
-        statePatch[key] = next[key];
-      }
-    }
-    if (Object.keys(statePatch).length) {
-      deltas.push({ type: "state.updated", patch: statePatch });
-    }
-    const previousRows = new Map(previous.rows.map((row) => [row.id, row]));
-    const nextRows = new Map(next.rows.map((row) => [row.id, row]));
-    for (const row of previous.rows) {
-      if (!nextRows.has(row.id)) deltas.push({ type: "row.removed", fromRowId: row.id });
-    }
-    for (const row of next.rows) {
-      const old = previousRows.get(row.id);
-      if (!old) {
-        deltas.push({ type: "row.appended", row: cloneRow(row) });
-        continue;
-      }
-      if (old.kind === row.kind && old.entityId === row.entityId && old.productTurnId === row.productTurnId && old.status === row.status && old.callId === row.callId && old.toolName === row.toolName && row.text.startsWith(old.text)) {
-        if (row.text !== old.text) {
-          deltas.push({
-            type: "row.delta",
-            rowId: row.id,
-            path: "text",
-            append: row.text.slice(old.text.length)
-          });
-        }
-      } else if (JSON.stringify(old) !== JSON.stringify(row)) {
-        deltas.push({ type: "row.upserted", row: cloneRow(row) });
-      }
-    }
-    return {
-      type: "delta",
-      sessionId: next.sessionId,
-      logEpoch: next.logEpoch,
-      baseRevision: previous.revision,
-      revision: next.revision,
-      eventSeq: next.eventSeq,
-      deltas
-    };
-  }
-  function cloneProjection(projection) {
-    return {
-      ...projection,
-      ...projection.lastError ? { lastError: { ...projection.lastError } } : {},
-      availability: { ...projection.availability },
-      ...projection.children ? { children: projection.children.map((child) => ({ ...child })) } : {},
-      rows: projection.rows.map(cloneRow)
-    };
-  }
-  function cloneRow(row) {
-    return {
-      ...row,
-      ...row.toolMetadata ? { toolMetadata: structuredClone(row.toolMetadata) } : {}
-    };
-  }
-
   // src/runtime/runtime-gateway.ts
   var RuntimeGateway = class {
     constructor(createBundle, clock = { now: () => Date.now() }) {
@@ -11066,33 +10952,69 @@ ${skillListing}` : ""
       }
     }
     async subscribe(port, runtime, sessionId, subscriptionId, requestId) {
-      const current = runtime.getProjection(sessionId);
       const listeners = this.subscriptions.get(port) ?? /* @__PURE__ */ new Map();
       this.subscriptions.set(port, listeners);
       const existing = listeners.get(sessionId);
       existing?.unsubscribe();
-      const subscription = {
-        unsubscribe: () => void 0,
-        previous: current
-      };
-      subscription.unsubscribe = await runtime.subscribe(sessionId, (next) => {
-        const frame = createProjectionFrame(subscription.previous, next);
-        subscription.previous = next;
+      let pendingDeltas = [];
+      let pendingRevision = 0;
+      let pendingEventSeq = 0;
+      let baseRevision = 0;
+      let flushTimer;
+      const changes = await runtime.subscribeChanges(
+        sessionId,
+        (change) => {
+          pendingDeltas.push(...change.deltas);
+          pendingRevision = change.revision;
+          pendingEventSeq = change.eventSeq;
+          if (flushTimer === void 0) {
+            flushTimer = setTimeout(() => {
+              flushTimer = void 0;
+              flushChanges();
+            }, 16);
+          }
+        }
+      );
+      if (!changes) {
+        throw new AgentError("SESSION_NOT_FOUND", `Session not found: ${sessionId}`);
+      }
+      baseRevision = changes.initial.revision;
+      const flushChanges = () => {
+        if (!changes || pendingDeltas.length === 0) return;
+        const deltas = coalesceProjectionDeltas(pendingDeltas);
+        pendingDeltas = [];
         port.postMessage({
           type: "projection",
           sessionId,
-          logEpoch: next.logEpoch,
+          logEpoch: changes.initial.logEpoch,
           ...subscriptionId ? { subscriptionId } : {},
-          frame
+          frame: {
+            type: "delta",
+            sessionId,
+            logEpoch: changes.initial.logEpoch,
+            baseRevision,
+            revision: pendingRevision,
+            eventSeq: pendingEventSeq,
+            deltas
+          }
         });
-      });
+        baseRevision = pendingRevision;
+      };
+      const subscription = {
+        unsubscribe: () => {
+          if (flushTimer !== void 0) clearTimeout(flushTimer);
+          flushTimer = void 0;
+          flushChanges();
+          changes.unsubscribe();
+        }
+      };
       listeners.set(sessionId, subscription);
       port.postMessage({
         type: "projection",
         sessionId,
-        logEpoch: current.logEpoch,
+        logEpoch: changes.initial.logEpoch,
         ...subscriptionId ? { subscriptionId } : {},
-        frame: this.snapshotFrame(current)
+        frame: this.snapshotFrame(changes.initial)
       });
       this.reply(port, requestId, true);
     }
@@ -11176,6 +11098,46 @@ ${skillListing}` : ""
     "approval_response",
     "handoff_response"
   ]);
+  function coalesceProjectionDeltas(input) {
+    const output = [];
+    const rowDeltaIndexes = /* @__PURE__ */ new Map();
+    let stateIndex;
+    for (const delta of input) {
+      if (delta.type === "state.updated") {
+        if (stateIndex === void 0) {
+          stateIndex = output.length;
+          output.push({
+            type: "state.updated",
+            patch: { ...delta.patch }
+          });
+        } else {
+          const state = output[stateIndex];
+          if (state.type === "state.updated") {
+            Object.assign(state.patch, delta.patch);
+          }
+        }
+        continue;
+      }
+      if (delta.type === "row.delta") {
+        const index = rowDeltaIndexes.get(delta.rowId);
+        if (index === void 0) {
+          rowDeltaIndexes.set(delta.rowId, output.length);
+          output.push({ ...delta });
+        } else {
+          const previous = output[index];
+          if (previous.type === "row.delta") {
+            output[index] = {
+              ...previous,
+              append: previous.append + delta.append
+            };
+          }
+        }
+        continue;
+      }
+      output.push(delta);
+    }
+    return output;
+  }
 
   // src/core/tool-executor.ts
   var ToolExecutor = class {
@@ -12261,32 +12223,39 @@ ${stringContent(item.content)}`
 
   // src/core/event-log.ts
   var EventLog = class {
-    constructor(logEpoch, now) {
+    constructor(logEpoch, now, maxEvents = Number.POSITIVE_INFINITY) {
       this.logEpoch = logEpoch;
       this.now = now;
+      this.maxEvents = maxEvents;
     }
     logEpoch;
     now;
+    maxEvents;
     events = [];
+    nextSequence = 1;
     append(type, revision, payload) {
       const event = {
-        seq: this.events.length + 1,
+        seq: this.nextSequence++,
         type,
         revision,
         occurredAt: this.now(),
         ...payload === void 0 ? {} : { payload }
       };
       this.events.push(event);
+      if (this.events.length > this.maxEvents) {
+        this.events.splice(0, this.events.length - this.maxEvents);
+      }
       return { ...event };
     }
     get seq() {
-      return this.events.length;
+      return this.nextSequence - 1;
     }
     list() {
       return this.events.map((event) => ({ ...event }));
     }
     restore(events) {
       this.events = events.map((event) => ({ ...event }));
+      this.nextSequence = events.reduce((maximum, event) => Math.max(maximum, event.seq), 0) + 1;
     }
   };
 
@@ -12378,6 +12347,61 @@ ${stringContent(item.content)}`
       return { ...updated };
     }
   };
+
+  // src/core/projection.ts
+  function phaseFor(view) {
+    if (view.lifecycle === "faulted") return "error";
+    if (view.lifecycle === "starting") return "prewarming";
+    if (!view.activeTaskId && view.rows.length === 0) return "draft";
+    if (view.taskStatus === "running" || view.taskStatus === "queued") return "running";
+    if (view.taskStatus === "waiting" || view.pendingApproval) return "waiting";
+    if (view.taskStatus === "failed") return "error";
+    if (view.taskStatus === "completed" || view.taskStatus === "cancelled") return "completed";
+    return "draft";
+  }
+  function availabilityFor(view) {
+    const ready = view.lifecycle === "ready";
+    const active = view.taskStatus === "queued" || view.taskStatus === "running" || view.taskStatus === "waiting";
+    return {
+      canSend: ready,
+      canStop: ready && active,
+      canApprove: ready && view.pendingApproval,
+      canQueue: ready && view.taskStatus === "running"
+    };
+  }
+  function buildProjection(view) {
+    return {
+      ...buildProjectionState(view),
+      rows: view.rows.map(cloneRow)
+    };
+  }
+  function buildProjectionState(view) {
+    const availability = availabilityFor(view);
+    const active = view.taskStatus === "queued" || view.taskStatus === "running" || view.taskStatus === "waiting";
+    return {
+      sessionId: view.sessionId,
+      revision: view.revision,
+      eventSeq: view.eventSeq,
+      logEpoch: view.logEpoch,
+      phase: phaseFor(view),
+      lifecycle: view.lifecycle,
+      taskStatus: view.taskStatus,
+      inputRouting: !availability.canSend ? "blocked" : active ? "queue" : "startNow",
+      queueLength: view.queueLength,
+      ...view.activeTaskId ? { activeTaskId: view.activeTaskId } : {},
+      ...view.lastError ? { lastError: view.lastError } : {},
+      permissionMode: view.permissionMode,
+      ...view.plan ? { plan: { ...view.plan } } : {},
+      ...view.children?.length ? { children: view.children.map((child) => ({ ...child })) } : {},
+      availability
+    };
+  }
+  function cloneRow(row) {
+    return {
+      ...row,
+      ...row.toolMetadata ? { toolMetadata: structuredClone(row.toolMetadata) } : {}
+    };
+  }
 
   // src/core/session-lifecycle.ts
   var SessionLifecycleController = class {
@@ -12684,7 +12708,11 @@ ${stringContent(item.content)}`
       this.clock = options.clock;
       this.ids = options.ids;
       this.logEpoch = options.initialSnapshot?.logEpoch ?? options.logEpoch ?? this.ids.next("epoch");
-      this.events = new EventLog(this.logEpoch, () => this.clock.now());
+      this.events = new EventLog(
+        this.logEpoch,
+        () => this.clock.now(),
+        2e4
+      );
       this.sessionStore = options.sessionStore;
       this.permissionModes = options.permissionModes ?? new PermissionModeRegistry("guarded", () => this.clock.now());
       this.sessionTree = new SessionTree({
@@ -12731,6 +12759,10 @@ ${stringContent(item.content)}`
     rows = [];
     messages = [];
     listeners = /* @__PURE__ */ new Set();
+    changeListeners = /* @__PURE__ */ new Set();
+    dirtyRows = /* @__PURE__ */ new Map();
+    removedRows = /* @__PURE__ */ new Set();
+    lastProjectionState;
     idleWaiters = /* @__PURE__ */ new Set();
     children = /* @__PURE__ */ new Map();
     status = "completed";
@@ -12793,6 +12825,11 @@ ${stringContent(item.content)}`
     contextMessages() {
       return buildModelContext(this.sessionTree, this.systemPrompt);
     }
+    canEvict() {
+      return !this.running && this.queue.length === 0 && !this.rows.some(
+        (row) => row.status === "pending" || row.status === "streaming"
+      );
+    }
     updateChildTask(parentTaskId, child) {
       if (!this.taskGraph.get(parentTaskId) && !this.rows.some((row) => row.productTurnId === parentTaskId)) {
         return false;
@@ -12810,6 +12847,15 @@ ${stringContent(item.content)}`
       this.touch("session.renamed");
     }
     view() {
+      return {
+        ...this.baseView(),
+        rows: this.rows.map((row) => ({ ...row }))
+      };
+    }
+    projection() {
+      return buildProjection(this.view());
+    }
+    baseView() {
       const mode = this.permissionModes.get(this.sessionId).getState();
       return {
         sessionId: this.sessionId,
@@ -12830,13 +12876,9 @@ ${stringContent(item.content)}`
           }
         } : {},
         ...this.children.size ? { children: [...this.children.values()].map((child) => ({ ...child })) } : {},
-        rows: this.rows.map((row) => ({ ...row })),
         pendingApproval: false,
         ledger: this.ledger.list()
       };
-    }
-    projection() {
-      return buildProjection(this.view());
     }
     summary() {
       return summarizeSnapshot(this.snapshot());
@@ -12868,6 +12910,16 @@ ${stringContent(item.content)}`
     subscribe(listener) {
       this.listeners.add(listener);
       return () => this.listeners.delete(listener);
+    }
+    subscribeChanges(listener) {
+      const initial = this.projection();
+      this.lastProjectionState = this.projectionState();
+      this.dirtyRows.clear();
+      this.changeListeners.add(listener);
+      return {
+        initial,
+        unsubscribe: () => this.changeListeners.delete(listener)
+      };
     }
     async waitForIdle() {
       if (!this.running && this.queue.length === 0) return;
@@ -12916,7 +12968,7 @@ ${stringContent(item.content)}`
         delivery: payload.delivery ?? (this.activeTaskId ? "queue" : "startNow"),
         admittedAt: this.clock.now()
       });
-      this.rows.push({
+      this.appendRow({
         id: this.ids.next("row"),
         entityId: inputId,
         productTurnId: taskId,
@@ -12937,7 +12989,10 @@ ${stringContent(item.content)}`
         this.status = "failed";
         this.lastError = toStructuredError(error2, "PERSISTENCE_FAILED");
         const row = this.rows.find((candidate) => candidate.entityId === inputId);
-        if (row) row.status = "failed";
+        if (row) {
+          this.markRowChanged(row.id);
+          row.status = "failed";
+        }
         this.touch("persistence.failed");
         return this.ack(
           command,
@@ -12959,7 +13014,7 @@ ${stringContent(item.content)}`
         delivery: "guide",
         admittedAt: this.clock.now()
       });
-      this.rows.push({
+      this.appendRow({
         id: this.ids.next("row"),
         entityId: inputId,
         productTurnId: this.activeTaskId,
@@ -13082,7 +13137,7 @@ ${stringContent(item.content)}`
           ...buildModelContext(this.sessionTree, this.systemPrompt)
         );
         const activityId = this.ids.next("activity");
-        this.rows.push({
+        this.appendRow({
           id: activityId,
           entityId: activityId,
           productTurnId: "session_compaction",
@@ -13262,14 +13317,17 @@ ${stringContent(item.content)}`
       } finally {
         this.running = false;
         this.abort = void 0;
-        this.notifyIdle();
         this.emit();
+        await this.flushPersistence().catch((error2) => {
+          this.persistenceError = toStructuredError(error2, "PERSISTENCE_FAILED");
+        });
+        this.notifyIdle();
       }
     }
     async onLoopEvent(taskId, event) {
       if (event.type === "turn_start") {
         const startedAt = this.clock.now();
-        this.rows.push({
+        this.appendRow({
           id: `activity_${taskId}_${event.turn}`,
           entityId: `activity_${taskId}_${event.turn}`,
           productTurnId: taskId,
@@ -13281,7 +13339,7 @@ ${stringContent(item.content)}`
         this.taskGraph.recordUsage(taskId, { turns: 1 });
         this.touch(event.type);
       } else if (event.type === "message_start") {
-        this.rows.push({
+        this.appendRow({
           id: event.messageId,
           entityId: event.messageId,
           productTurnId: taskId,
@@ -13308,18 +13366,23 @@ ${stringContent(item.content)}`
           const assistantIndex = this.rows.findIndex(
             (candidate) => candidate.id === event.messageId
           );
-          if (assistantIndex >= 0) this.rows.splice(assistantIndex, 0, reasoningRow);
-          else this.rows.push(reasoningRow);
+          if (assistantIndex >= 0) this.insertRow(assistantIndex, reasoningRow);
+          else this.appendRow(reasoningRow);
         }
+        this.markRowChanged(reasoningRow.id);
         reasoningRow.text += event.delta;
         this.touch("reasoning.delta");
       } else if (event.type === "message_update") {
         const row = this.rows.find((candidate) => candidate.id === event.messageId);
-        if (row) row.text += event.delta;
+        if (row) {
+          this.markRowChanged(row.id);
+          row.text += event.delta;
+        }
         this.touch("message.delta");
       } else if (event.type === "message_end") {
         const row = this.rows.find((candidate) => candidate.id === event.messageId);
         if (row) {
+          this.markRowChanged(row.id);
           row.text = event.message.role === "assistant" ? event.message.content : row.text;
           row.status = "completed";
           row.completedAt = this.clock.now();
@@ -13329,6 +13392,7 @@ ${stringContent(item.content)}`
             (candidate) => candidate.id === `reasoning_${event.messageId}`
           );
           if (reasoningRow) {
+            this.markRowChanged(reasoningRow.id);
             reasoningRow.text = event.message.reasoning ?? reasoningRow.text;
             reasoningRow.status = "completed";
             reasoningRow.completedAt = this.clock.now();
@@ -13352,6 +13416,7 @@ ${stringContent(item.content)}`
           (row) => row.id === `activity_${taskId}_${event.turn}`
         );
         if (activity) {
+          this.markRowChanged(activity.id);
           activity.text = "Thinking complete";
           activity.status = "completed";
           activity.completedAt = this.clock.now();
@@ -13365,7 +13430,7 @@ ${stringContent(item.content)}`
           toolName: event.result.name
         });
         if (span) this.toolSpans.set(event.result.callId, span.spanId);
-        this.rows.push({
+        this.appendRow({
           id: `row_${event.result.callId}`,
           entityId: event.result.callId,
           productTurnId: taskId,
@@ -13380,6 +13445,7 @@ ${stringContent(item.content)}`
       } else if (event.type === "tool_execution_end") {
         const row = this.rows.find((candidate) => candidate.callId === event.result.callId);
         if (row) {
+          this.markRowChanged(row.id);
           row.status = event.result.status === "succeeded" ? "completed" : event.result.status === "denied" ? "denied" : event.result.status === "cancelled" ? "cancelled" : "failed";
           row.text = event.result.status === "succeeded" ? typeof event.result.output === "string" ? event.result.output : JSON.stringify(event.result.output ?? null) : event.result.error?.message ?? "Tool failed";
           if (event.result.metadata) {
@@ -13415,6 +13481,7 @@ ${stringContent(item.content)}`
     setRowsForTask(taskId, status) {
       for (const row of this.rows) {
         if (row.productTurnId === taskId && (row.status === "pending" || row.status === "streaming")) {
+          this.markRowChanged(row.id);
           row.status = status;
           row.completedAt ??= this.clock.now();
         }
@@ -13425,7 +13492,10 @@ ${stringContent(item.content)}`
         this.taskGraph.cancelTree(item.taskId, reason);
         this.ledger.cancel(item.inputId, reason);
         const row = this.rows.find((candidate) => candidate.entityId === item.inputId);
-        if (row) row.status = "cancelled";
+        if (row) {
+          this.markRowChanged(row.id);
+          row.status = "cancelled";
+        }
       }
     }
     ack(command, status, code, message, inputId, taskId) {
@@ -13459,7 +13529,7 @@ ${stringContent(item.content)}`
       this.persistTimer = this.options.clock.setTimeout(() => {
         this.persistTimer = void 0;
         this.enqueuePersistence();
-      }, 100);
+      }, Math.max(250, this.options.persistenceDelayMs ?? 500));
     }
     enqueuePersistence() {
       if (!this.sessionStore || !this.persistRequested || this.persistActive) {
@@ -13556,6 +13626,7 @@ ${stringContent(item.content)}`
       }
       for (const row of this.rows) {
         if (row.status === "pending" || row.status === "streaming") {
+          this.markRowChanged(row.id);
           row.status = "cancelled";
           reconciled = true;
         }
@@ -13563,8 +13634,82 @@ ${stringContent(item.content)}`
       if (reconciled) this.touch("session.reconciled");
     }
     emit() {
-      const projection = this.projection();
-      for (const listener of this.listeners) listener(projection);
+      if (this.changeListeners.size > 0) {
+        const nextState = this.projectionState();
+        const deltas = [];
+        const statePatch = projectionStatePatch(
+          this.lastProjectionState,
+          nextState
+        );
+        if (statePatch) deltas.push({ type: "state.updated", patch: statePatch });
+        for (const [index, row] of this.rows.entries()) {
+          if (!this.dirtyRows.has(row.id)) continue;
+          const previous = this.dirtyRows.get(row.id);
+          if (!previous) {
+            deltas.push({
+              type: "row.appended",
+              row: cloneConversationRow(row),
+              index
+            });
+          } else if (rowDiffersOnlyByAppendedText(previous, row)) {
+            deltas.push({
+              type: "row.delta",
+              rowId: row.id,
+              path: "text",
+              append: row.text.slice(previous.text.length)
+            });
+          } else if (JSON.stringify(previous) !== JSON.stringify(row)) {
+            deltas.push({ type: "row.upserted", row: cloneConversationRow(row) });
+          }
+        }
+        for (const rowId of this.removedRows) {
+          deltas.push({ type: "row.removed", fromRowId: rowId });
+        }
+        const baseRevision = this.lastProjectionState?.revision ?? Math.max(0, this.revision - 1);
+        this.lastProjectionState = nextState;
+        if (deltas.length > 0) {
+          const change = {
+            type: "delta",
+            sessionId: this.sessionId,
+            logEpoch: this.logEpoch,
+            baseRevision,
+            revision: this.revision,
+            eventSeq: this.eventSeq,
+            deltas
+          };
+          for (const listener of this.changeListeners) listener(change);
+        }
+      }
+      this.dirtyRows.clear();
+      this.removedRows.clear();
+      if (this.listeners.size > 0) {
+        const projection = this.projection();
+        for (const listener of this.listeners) listener(projection);
+      }
+    }
+    projectionState() {
+      return buildProjectionState({
+        ...this.baseView(),
+        rows: this.rows
+      });
+    }
+    markRowChanged(rowId) {
+      if (this.listeners.size === 0 && this.changeListeners.size === 0) return;
+      if (this.dirtyRows.has(rowId)) return;
+      const row = this.rows.find((candidate) => candidate.id === rowId);
+      this.dirtyRows.set(rowId, row ? cloneConversationRow(row) : void 0);
+    }
+    appendRow(row) {
+      this.rows.push(row);
+      if (this.listeners.size > 0 || this.changeListeners.size > 0) {
+        this.dirtyRows.set(row.id, void 0);
+      }
+    }
+    insertRow(index, row) {
+      this.rows.splice(index, 0, row);
+      if (this.listeners.size > 0 || this.changeListeners.size > 0) {
+        this.dirtyRows.set(row.id, void 0);
+      }
     }
     transitionTask(taskId, status) {
       const task = this.taskGraph.get(taskId);
@@ -13641,6 +13786,40 @@ ${lines.join("\n")}
     }
     return blocks.filter(Boolean).join("\n\n");
   }
+  function cloneConversationRow(row) {
+    return {
+      ...row,
+      ...row.toolMetadata ? { toolMetadata: structuredClone(row.toolMetadata) } : {}
+    };
+  }
+  function rowDiffersOnlyByAppendedText(previous, next) {
+    return next.text.startsWith(previous.text) && next.text !== previous.text && JSON.stringify({ ...previous, text: "" }) === JSON.stringify({ ...next, text: "" });
+  }
+  function projectionStatePatch(previous, next) {
+    if (!previous) return next;
+    const patch = {};
+    for (const key of [
+      "revision",
+      "eventSeq",
+      "logEpoch",
+      "phase",
+      "lifecycle",
+      "taskStatus",
+      "inputRouting",
+      "queueLength",
+      "activeTaskId",
+      "lastError",
+      "permissionMode",
+      "plan",
+      "children",
+      "availability"
+    ]) {
+      if (JSON.stringify(previous[key]) !== JSON.stringify(next[key])) {
+        patch[key] = next[key];
+      }
+    }
+    return Object.keys(patch).length ? patch : void 0;
+  }
 
   // src/core/workspace-runtime.ts
   var WorkspaceRuntime = class {
@@ -13651,12 +13830,16 @@ ${lines.join("\n")}
     sessions = /* @__PURE__ */ new Map();
     loading = /* @__PURE__ */ new Map();
     commandTails = /* @__PURE__ */ new Map();
+    lastAccess = /* @__PURE__ */ new Map();
     getSessionView(sessionId) {
-      return this.sessions.get(sessionId)?.view();
+      const runtime = this.sessions.get(sessionId);
+      if (runtime) this.touchAccess(sessionId);
+      return runtime?.view();
     }
     getProjection(sessionId) {
       const runtime = this.sessions.get(sessionId);
       if (!runtime) throw new AgentError("SESSION_NOT_FOUND", `Session not found: ${sessionId}`);
+      this.touchAccess(sessionId);
       return runtime.projection();
     }
     async loadProjection(sessionId) {
@@ -13738,6 +13921,10 @@ ${lines.join("\n")}
       const runtime = await this.ensureSession(sessionId, false);
       if (!runtime) return () => void 0;
       return runtime.subscribe(listener);
+    }
+    async subscribeChanges(sessionId, listener) {
+      const runtime = await this.ensureSession(sessionId, false);
+      return runtime?.subscribeChanges(listener);
     }
     async stop(sessionId) {
       const runtime = this.sessions.get(sessionId);
@@ -13826,12 +14013,18 @@ ${lines.join("\n")}
         sessionId,
         initialSnapshot
       });
+      if (this.options.onProjectionChange) {
+        runtime.subscribeChanges(this.options.onProjectionChange);
+      }
       this.sessions.set(sessionId, runtime);
       return runtime;
     }
     async ensureSession(sessionId, createWhenMissing) {
       const existing = this.sessions.get(sessionId);
-      if (existing) return existing;
+      if (existing) {
+        this.touchAccess(sessionId);
+        return existing;
+      }
       const pending = this.loading.get(sessionId);
       if (pending) return pending;
       const load = (async () => {
@@ -13841,14 +14034,40 @@ ${lines.join("\n")}
         } catch {
           initialSnapshot = void 0;
         }
-        if (initialSnapshot) return this.createRuntime(sessionId, initialSnapshot);
-        return createWhenMissing ? this.createRuntime(sessionId) : void 0;
+        if (initialSnapshot) {
+          const created2 = this.createRuntime(sessionId, initialSnapshot);
+          this.touchAccess(sessionId);
+          await this.evictInactiveSessions(sessionId);
+          return created2;
+        }
+        if (!createWhenMissing) return void 0;
+        const created = this.createRuntime(sessionId);
+        this.touchAccess(sessionId);
+        await this.evictInactiveSessions(sessionId);
+        return created;
       })();
       this.loading.set(sessionId, load);
       try {
         return await load;
       } finally {
         this.loading.delete(sessionId);
+      }
+    }
+    touchAccess(sessionId) {
+      this.lastAccess.set(sessionId, Date.now());
+    }
+    async evictInactiveSessions(keepSessionId) {
+      if (!this.options.sessionStore) return;
+      const maximum = Math.max(1, this.options.maxResidentSessions ?? 6);
+      if (this.sessions.size <= maximum) return;
+      const candidates = [...this.sessions.entries()].filter(([sessionId, runtime]) => sessionId !== keepSessionId && runtime.canEvict()).sort(
+        ([left], [right]) => (this.lastAccess.get(left) ?? 0) - (this.lastAccess.get(right) ?? 0)
+      );
+      for (const [sessionId, runtime] of candidates) {
+        if (this.sessions.size <= maximum) break;
+        await runtime.flushPersistence();
+        this.sessions.delete(sessionId);
+        this.lastAccess.delete(sessionId);
       }
     }
   };
@@ -14544,6 +14763,7 @@ ${lines.join("\n")}
       ids: options.ids,
       sessionStore: options.sessionStore,
       completionGuard: options.completionGuard,
+      onProjectionChange: options.onProjectionChange,
       permissionModes,
       trace: options.trace,
       maxSteps: options.maxSteps,
@@ -16594,6 +16814,381 @@ ${lines.join("\n")}
     );
   }
 
+  // src/observability/debug-service-config.ts
+  var DEBUG_SERVICE_KEY = "tinyai-debug-service";
+  function parseDebugServiceConfig(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return void 0;
+    }
+    const raw = value;
+    const endpoint = normalizeEndpoint(raw.endpoint);
+    if (!endpoint) return void 0;
+    return {
+      enabled: raw.enabled !== false,
+      endpoint,
+      ...typeof raw.token === "string" && raw.token ? { token: raw.token } : {}
+    };
+  }
+  function normalizeEndpoint(value) {
+    if (typeof value !== "string" || !value.trim()) return void 0;
+    try {
+      const url = new URL(value.trim());
+      if (url.protocol !== "http:" && url.protocol !== "https:") return void 0;
+      if (url.protocol === "http:" && !["127.0.0.1", "localhost", "[::1]", "::1"].includes(url.hostname)) {
+        return void 0;
+      }
+      url.pathname = url.pathname.replace(/\/+$/, "");
+      url.search = "";
+      url.hash = "";
+      return url.toString().replace(/\/$/, "");
+    } catch {
+      return void 0;
+    }
+  }
+
+  // src/observability/chrome-http-event-transport.ts
+  var ChromeHttpEventTransport = class {
+    config;
+    fetchImpl;
+    maxQueue;
+    maxQueuedBytes;
+    batchSize;
+    retryBaseMs;
+    retryMaxMs;
+    now;
+    scheduleTimeout;
+    clearSchedule;
+    queue = [];
+    queuedBytes = 0;
+    timer;
+    flushing;
+    retryAttempt = 0;
+    disposed = false;
+    lastError;
+    connectionState = "idle";
+    constructor(options) {
+      this.config = options.config;
+      this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
+      this.maxQueue = Math.max(1, options.maxQueue ?? 2e3);
+      this.maxQueuedBytes = Math.max(1, options.maxQueuedBytes ?? 2 * 1024 * 1024);
+      this.batchSize = Math.max(1, options.batchSize ?? 100);
+      this.retryBaseMs = Math.max(10, options.retryBaseMs ?? 500);
+      this.retryMaxMs = Math.max(this.retryBaseMs, options.retryMaxMs ?? 3e4);
+      this.now = options.now ?? (() => Date.now());
+      this.scheduleTimeout = options.setTimeout ?? ((callback, ms) => globalThis.setTimeout(callback, ms));
+      this.clearSchedule = options.clearTimeout ?? ((timer) => globalThis.clearTimeout(timer));
+      if (!this.config.enabled) this.connectionState = "disabled";
+    }
+    emit(event) {
+      if (this.disposed || !this.config.enabled) return;
+      const normalized = event.timestamp ? event : { ...event, timestamp: this.now() };
+      const bytes = JSON.stringify(normalized).length * 2;
+      this.queue.push({ event: normalized, bytes });
+      this.queuedBytes += bytes;
+      while (this.queue.length > this.maxQueue || this.queuedBytes > this.maxQueuedBytes) {
+        const removed = this.queue.shift();
+        if (!removed) break;
+        this.queuedBytes -= removed.bytes;
+      }
+      this.scheduleFlush(0);
+    }
+    flush() {
+      if (this.disposed || !this.config.enabled) return Promise.resolve();
+      if (this.flushing) return this.flushing;
+      if (this.queue.length === 0) return Promise.resolve();
+      this.clearScheduledFlush();
+      const batch = this.queue.slice(0, this.batchSize);
+      this.connectionState = "sending";
+      this.flushing = (async () => {
+        try {
+          const response = await this.fetchImpl(`${this.config.endpoint}/v1/ingest`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              ...this.config.token ? { Authorization: `Bearer ${this.config.token}` } : {}
+            },
+            body: JSON.stringify({ events: batch.map((item) => item.event) })
+          });
+          if (!response.ok) {
+            throw new Error(`Debug ingest failed: HTTP ${response.status}`);
+          }
+          const acknowledged = new Set(
+            batch.map(({ event }) => `${event.sessionId}:${event.clientEventId}`)
+          );
+          for (let index = this.queue.length - 1; index >= 0; index -= 1) {
+            const item = this.queue[index];
+            if (acknowledged.has(
+              `${item.event.sessionId}:${item.event.clientEventId}`
+            )) {
+              this.queue.splice(index, 1);
+              this.queuedBytes -= item.bytes;
+            }
+          }
+          this.retryAttempt = 0;
+          this.lastError = void 0;
+          this.connectionState = "ready";
+          if (this.queue.length) this.scheduleFlush(0);
+        } catch (error2) {
+          this.lastError = error2 instanceof Error ? error2.message : String(error2);
+          console.warn("tinyai debug event upload failed", error2);
+          this.connectionState = "retrying";
+          const delay2 = Math.min(
+            this.retryMaxMs,
+            this.retryBaseMs * 2 ** this.retryAttempt++
+          );
+          this.scheduleFlush(delay2);
+        } finally {
+          this.flushing = void 0;
+        }
+      })();
+      return this.flushing;
+    }
+    status() {
+      return {
+        enabled: this.config.enabled,
+        state: this.connectionState,
+        queued: this.queue.length,
+        queuedBytes: this.queuedBytes,
+        ...this.lastError ? { lastError: this.lastError } : {}
+      };
+    }
+    async dispose() {
+      this.clearScheduledFlush();
+      await this.flush();
+      this.disposed = true;
+    }
+    scheduleFlush(delayMs) {
+      if (this.disposed || this.timer !== void 0 || this.flushing) return;
+      this.timer = this.scheduleTimeout(() => {
+        this.timer = void 0;
+        void this.flush();
+      }, delayMs);
+    }
+    clearScheduledFlush() {
+      if (this.timer === void 0) return;
+      this.clearSchedule(this.timer);
+      this.timer = void 0;
+    }
+  };
+
+  // src/observability/projection-execution-tracker.ts
+  var ProjectionExecutionTracker = class {
+    sessions = /* @__PURE__ */ new Map();
+    rowKinds = /* @__PURE__ */ new Map();
+    rowLengths = /* @__PURE__ */ new Map();
+    observeChange(change) {
+      const events = [];
+      for (const delta of change.deltas) {
+        if (delta.type === "state.updated") {
+          if (delta.patch.taskStatus || delta.patch.phase || delta.patch.lastError) {
+            const taskStatus = delta.patch.taskStatus ?? "updated";
+            events.push({
+              clientEventId: `${change.sessionId}:${change.revision}:state`,
+              timestamp: Date.now(),
+              sessionId: change.sessionId,
+              ...delta.patch.activeTaskId ? { taskId: delta.patch.activeTaskId } : {},
+              kind: taskStatus === "failed" ? "error" : "status",
+              phase: taskStatus === "failed" ? "failed" : taskStatus === "cancelled" ? "cancelled" : taskStatus === "completed" ? "completed" : "updated",
+              actor: "system",
+              payload: {
+                ...delta.patch.taskStatus ? { taskStatus: delta.patch.taskStatus } : {},
+                ...delta.patch.phase ? { phase: delta.patch.phase } : {},
+                ...delta.patch.queueLength !== void 0 ? { queueLength: delta.patch.queueLength } : {}
+              }
+            });
+          }
+          for (const child of delta.patch.children ?? []) {
+            events.push({
+              clientEventId: `${change.sessionId}:${change.revision}:child:${child.taskId}:${child.status}`,
+              timestamp: child.updatedAt ?? Date.now(),
+              sessionId: change.sessionId,
+              taskId: child.taskId,
+              parentId: child.parentTaskId,
+              kind: "child-agent",
+              phase: childPhase(child.status),
+              actor: "child-agent",
+              payload: { ...child }
+            });
+          }
+          continue;
+        }
+        if (delta.type === "row.removed") {
+          const kind2 = this.rowKinds.get(delta.fromRowId) ?? "status";
+          this.rowKinds.delete(delta.fromRowId);
+          this.rowLengths.delete(delta.fromRowId);
+          events.push({
+            clientEventId: `${change.sessionId}:${change.revision}:removed:${delta.fromRowId}`,
+            timestamp: Date.now(),
+            sessionId: change.sessionId,
+            kind: kind2,
+            phase: "cancelled",
+            actor: "system",
+            payload: { rowId: delta.fromRowId, removed: true }
+          });
+          continue;
+        }
+        if (delta.type === "row.delta") {
+          const kind2 = this.rowKinds.get(delta.rowId) ?? "assistant";
+          const textLength = (this.rowLengths.get(delta.rowId) ?? 0) + delta.append.length;
+          this.rowLengths.set(delta.rowId, textLength);
+          events.push({
+            clientEventId: `${change.sessionId}:${change.revision}:row:${delta.rowId}:delta`,
+            timestamp: Date.now(),
+            sessionId: change.sessionId,
+            kind: kind2,
+            phase: "updated",
+            actor: kind2 === "reasoning" || kind2 === "assistant" ? "agent" : "tool",
+            ...kind2 === "reasoning" ? { visibility: "displayed-reasoning" } : {},
+            payload: {
+              rowId: delta.rowId,
+              delta: delta.append,
+              textLength,
+              status: "streaming"
+            }
+          });
+          continue;
+        }
+        const row = delta.row;
+        const kind = rowKind(row);
+        this.rowKinds.set(row.id, kind);
+        this.rowLengths.set(row.id, row.text.length);
+        events.push({
+          clientEventId: `${change.sessionId}:${change.revision}:row:${row.id}:${row.status}`,
+          timestamp: row.completedAt ?? row.startedAt ?? Date.now(),
+          sessionId: change.sessionId,
+          taskId: row.productTurnId,
+          productTurnId: row.productTurnId,
+          ...row.callId ? { callId: row.callId } : {},
+          kind,
+          phase: rowPhase(row, delta.type === "row.upserted" ? row : void 0),
+          actor: kind === "user" ? "user" : kind === "tool" ? "tool" : kind === "reasoning" || kind === "assistant" ? "agent" : "system",
+          ...kind === "reasoning" ? { visibility: "displayed-reasoning" } : {},
+          payload: toRowPayload(row, void 0)
+        });
+      }
+      return events;
+    }
+    observe(projection) {
+      const id = (suffix) => `${projection.sessionId}:${projection.revision}:${suffix}`;
+      const previous = this.sessions.get(projection.sessionId);
+      const events = [];
+      const previousRows = previous?.rows ?? /* @__PURE__ */ new Map();
+      const nextRows = new Map(projection.rows.map((row) => [row.id, row]));
+      if (!previous || previous.taskStatus !== projection.taskStatus || previous.revision === 0) {
+        events.push({
+          clientEventId: id(`status:${projection.taskStatus}`),
+          timestamp: Date.now(),
+          sessionId: projection.sessionId,
+          ...projection.activeTaskId ? { taskId: projection.activeTaskId } : {},
+          kind: projection.taskStatus === "failed" ? "error" : "status",
+          phase: projection.taskStatus === "failed" ? "failed" : projection.taskStatus === "cancelled" ? "cancelled" : ["completed"].includes(projection.taskStatus) ? "completed" : "updated",
+          actor: "system",
+          payload: {
+            taskStatus: projection.taskStatus,
+            phase: projection.phase
+          }
+        });
+      }
+      for (const row of projection.rows) {
+        this.rowKinds.set(row.id, rowKind(row));
+        this.rowLengths.set(row.id, row.text.length);
+        const old = previousRows.get(row.id);
+        if (old && sameRowState(old, row)) continue;
+        const kind = rowKind(row);
+        const phase = rowPhase(row, old);
+        const delta = old && row.text.startsWith(old.text) ? row.text.slice(old.text.length) : void 0;
+        events.push({
+          clientEventId: id(`row:${row.id}:${row.status}`),
+          timestamp: row.completedAt ?? row.startedAt ?? Date.now(),
+          sessionId: projection.sessionId,
+          taskId: row.productTurnId,
+          productTurnId: row.productTurnId,
+          ...row.callId ? { callId: row.callId } : {},
+          kind,
+          phase,
+          actor: kind === "user" ? "user" : kind === "tool" ? "tool" : kind === "reasoning" || kind === "assistant" ? "agent" : "system",
+          ...kind === "reasoning" ? { visibility: "displayed-reasoning" } : {},
+          payload: toRowPayload(row, delta)
+        });
+      }
+      for (const [rowId, row] of previousRows) {
+        if (nextRows.has(rowId)) continue;
+        events.push({
+          clientEventId: id(`removed:${rowId}`),
+          timestamp: Date.now(),
+          sessionId: projection.sessionId,
+          taskId: row.productTurnId,
+          kind: rowKind(row),
+          phase: "cancelled",
+          actor: "system",
+          payload: { rowId, removed: true, status: row.status }
+        });
+      }
+      const previousChildren = previous?.children ?? /* @__PURE__ */ new Map();
+      for (const child of projection.children ?? []) {
+        const old = previousChildren.get(child.taskId);
+        if (old && old.status === child.status && old.summary === child.summary) {
+          continue;
+        }
+        events.push({
+          clientEventId: id(`child:${child.taskId}:${child.status}`),
+          timestamp: child.updatedAt ?? Date.now(),
+          sessionId: projection.sessionId,
+          taskId: child.taskId,
+          parentId: child.parentTaskId,
+          kind: "child-agent",
+          phase: childPhase(child.status),
+          actor: "child-agent",
+          payload: { ...child }
+        });
+      }
+      this.sessions.set(projection.sessionId, {
+        revision: projection.revision,
+        taskStatus: projection.taskStatus,
+        rows: nextRows,
+        children: new Map(
+          (projection.children ?? []).map((child) => [child.taskId, { ...child }])
+        )
+      });
+      return events;
+    }
+  };
+  function sameRowState(left, right) {
+    return left.status === right.status && left.text === right.text && JSON.stringify(left.toolMetadata) === JSON.stringify(right.toolMetadata);
+  }
+  function rowKind(row) {
+    if (row.kind === "user") return "user";
+    if (row.kind === "assistant") return "assistant";
+    if (row.kind === "reasoning") return "reasoning";
+    if (row.kind === "tool") return "tool";
+    return row.status === "failed" ? "error" : "status";
+  }
+  function rowPhase(row, previous) {
+    if (row.status === "failed" || row.status === "denied") return "failed";
+    if (row.status === "cancelled") return "cancelled";
+    if (row.status === "completed") return "completed";
+    return previous ? "updated" : "started";
+  }
+  function childPhase(status) {
+    if (status === "failed") return "failed";
+    if (status === "cancelled") return "cancelled";
+    if (status === "completed") return "completed";
+    if (status === "running") return "updated";
+    return "started";
+  }
+  function toRowPayload(row, delta) {
+    return {
+      rowId: row.id,
+      entityId: row.entityId,
+      text: row.text,
+      status: row.status,
+      ...delta ? { delta } : {},
+      ...row.callId ? { callId: row.callId } : {},
+      ...row.toolName ? { toolName: row.toolName } : {},
+      ...row.toolMetadata ? { toolMetadata: structuredClone(row.toolMetadata) } : {}
+    };
+  }
+
   // src/runtime/chrome-runtime.ts
   var KERNEL_PORT_NAME = "tinyai-runtime-v1";
   var REMOTE_ACTIONS_KEY = "tinyai-remote-actions";
@@ -16659,7 +17254,18 @@ ${lines.join("\n")}
     await migrateLegacyStorage(storage, sessionStore, systemClock.now());
     const stored = await storage.get(CONFIG_KEY);
     const remoteActionStored = await storage.get(REMOTE_ACTIONS_KEY);
+    const debugServiceStored = await storage.get(DEBUG_SERVICE_KEY);
     const config = parseKernelConfig(stored[CONFIG_KEY]);
+    const debugServiceConfig = parseDebugServiceConfig(
+      debugServiceStored[DEBUG_SERVICE_KEY]
+    );
+    const debugTransport = debugServiceConfig?.enabled ? new ChromeHttpEventTransport({ config: debugServiceConfig }) : void 0;
+    const debugTracker = debugTransport ? new ProjectionExecutionTracker() : void 0;
+    const onProjectionChange = debugTransport && debugTracker ? (change) => {
+      for (const event of debugTracker.observeChange(change)) {
+        debugTransport.emit(event);
+      }
+    } : void 0;
     const profiles = await storage.get("tinyai-agent-profiles");
     const mcpConfig = await storage.get("tinyai-mcp-servers");
     const hookConfig = await storage.get("tinyai-declarative-hooks");
@@ -16748,7 +17354,7 @@ ${lines.join("\n")}
       artifacts: artifactStore,
       environmentId: "chrome-extension-v1",
       hostProfile: "browser-agent",
-      agentVersion: "0.11.2",
+      agentVersion: "0.12.0",
       newId: () => `capsule_${crypto.randomUUID()}`,
       beforeExport: async () => {
         if (!activeRuntime) return;
@@ -16873,7 +17479,8 @@ ${lines.join("\n")}
           }))
         ],
         completionGuard,
-        tabScoped: true
+        tabScoped: true,
+        onProjectionChange
       }).runtime
     });
     let mainWorkspace;
@@ -16954,7 +17561,8 @@ ${lines.join("\n")}
         }))
       ],
       completionGuard,
-      workspaceTabs
+      workspaceTabs,
+      onProjectionChange
     });
     activeRuntime = mainWorkspace.runtime;
     const unsubscribeChildren = coordinator.subscribe((child) => {
@@ -17016,6 +17624,7 @@ ${lines.join("\n")}
         await virtualWorkspace.jobs.dispose();
         await mainWorkspace.dispose();
         await Promise.all(mcpClients.map((client) => client.close()));
+        await debugTransport?.dispose();
       }
     };
   }

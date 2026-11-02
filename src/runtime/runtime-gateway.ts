@@ -1,4 +1,7 @@
-import { createProjectionFrame, type ProjectionFrame } from '../core/projection';
+import type {
+  ProjectionDelta,
+  ProjectionFrame,
+} from '../core/projection';
 import type { ProductProjection } from '../core/types';
 import type { WorkspaceRuntime } from '../core/workspace-runtime';
 import type { SkillDefinition } from '../core/extension-registry';
@@ -69,12 +72,16 @@ export interface RuntimeBundle {
   dispose(): Promise<void>;
 }
 
+interface ProjectionSubscription {
+  unsubscribe(): void;
+}
+
 export class RuntimeGateway {
   private runtime?: Promise<RuntimeBundle>;
   private readonly ports = new Set<RuntimePort>();
   private readonly subscriptions = new Map<
     RuntimePort,
-    Map<string, { unsubscribe: () => void; previous?: ProductProjection }>
+    Map<string, ProjectionSubscription>
   >();
 
   constructor(
@@ -86,7 +93,7 @@ export class RuntimeGateway {
     this.ports.add(port);
     const listeners = new Map<
       string,
-      { unsubscribe: () => void; previous?: ProductProjection }
+      ProjectionSubscription
     >();
     this.subscriptions.set(port, listeners);
     const onMessage = (
@@ -317,33 +324,69 @@ export class RuntimeGateway {
     subscriptionId: string | undefined,
     requestId: string
   ): Promise<void> {
-    const current = runtime.getProjection(sessionId);
     const listeners = this.subscriptions.get(port) ?? new Map();
     this.subscriptions.set(port, listeners);
     const existing = listeners.get(sessionId);
     existing?.unsubscribe();
-    const subscription: { unsubscribe: () => void; previous?: ProductProjection } = {
-      unsubscribe: () => undefined,
-      previous: current,
-    };
-    subscription.unsubscribe = await runtime.subscribe(sessionId, (next) => {
-      const frame = createProjectionFrame(subscription.previous, next);
-      subscription.previous = next;
+    let pendingDeltas: ProjectionDelta[] = [];
+    let pendingRevision = 0;
+    let pendingEventSeq = 0;
+    let baseRevision = 0;
+    let flushTimer: ReturnType<typeof setTimeout> | undefined;
+    const changes = await runtime.subscribeChanges(
+      sessionId,
+      (change) => {
+        pendingDeltas.push(...change.deltas);
+        pendingRevision = change.revision;
+        pendingEventSeq = change.eventSeq;
+        if (flushTimer === undefined) {
+          flushTimer = setTimeout(() => {
+            flushTimer = undefined;
+            flushChanges();
+          }, 16);
+        }
+      }
+    );
+    if (!changes) {
+      throw new AgentError('SESSION_NOT_FOUND', `Session not found: ${sessionId}`);
+    }
+    baseRevision = changes.initial.revision;
+    const flushChanges = (): void => {
+      if (!changes || pendingDeltas.length === 0) return;
+      const deltas = coalesceProjectionDeltas(pendingDeltas);
+      pendingDeltas = [];
       port.postMessage({
         type: 'projection',
         sessionId,
-        logEpoch: next.logEpoch,
+        logEpoch: changes.initial.logEpoch,
         ...(subscriptionId ? { subscriptionId } : {}),
-        frame,
+        frame: {
+          type: 'delta',
+          sessionId,
+          logEpoch: changes.initial.logEpoch,
+          baseRevision,
+          revision: pendingRevision,
+          eventSeq: pendingEventSeq,
+          deltas,
+        },
       });
-    });
+      baseRevision = pendingRevision;
+    };
+    const subscription: ProjectionSubscription = {
+      unsubscribe: () => {
+        if (flushTimer !== undefined) clearTimeout(flushTimer);
+        flushTimer = undefined;
+        flushChanges();
+        changes.unsubscribe();
+      },
+    };
     listeners.set(sessionId, subscription);
     port.postMessage({
       type: 'projection',
       sessionId,
-      logEpoch: current.logEpoch,
+      logEpoch: changes.initial.logEpoch,
       ...(subscriptionId ? { subscriptionId } : {}),
-      frame: this.snapshotFrame(current),
+      frame: this.snapshotFrame(changes.initial),
     });
     this.reply(port, requestId, true);
   }
@@ -445,3 +488,46 @@ const CORE_REQUEST_TYPES = new Set<string>([
   'approval_response',
   'handoff_response',
 ]);
+
+function coalesceProjectionDeltas(
+  input: readonly ProjectionDelta[]
+): ProjectionDelta[] {
+  const output: ProjectionDelta[] = [];
+  const rowDeltaIndexes = new Map<string, number>();
+  let stateIndex: number | undefined;
+  for (const delta of input) {
+    if (delta.type === 'state.updated') {
+      if (stateIndex === undefined) {
+        stateIndex = output.length;
+        output.push({
+          type: 'state.updated',
+          patch: { ...delta.patch },
+        });
+      } else {
+        const state = output[stateIndex];
+        if (state.type === 'state.updated') {
+          Object.assign(state.patch, delta.patch);
+        }
+      }
+      continue;
+    }
+    if (delta.type === 'row.delta') {
+      const index = rowDeltaIndexes.get(delta.rowId);
+      if (index === undefined) {
+        rowDeltaIndexes.set(delta.rowId, output.length);
+        output.push({ ...delta });
+      } else {
+        const previous = output[index];
+        if (previous.type === 'row.delta') {
+          output[index] = {
+            ...previous,
+            append: previous.append + delta.append,
+          };
+        }
+      }
+      continue;
+    }
+    output.push(delta);
+  }
+  return output;
+}

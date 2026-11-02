@@ -18,6 +18,7 @@ export interface TestWorkspaceOptions {
   maxSteps?: number;
   sessionStore?: SessionStore;
   completionGuard?: CompletionGuard;
+  maxResidentSessions?: number;
 }
 
 export function createTestWorkspace(options: TestWorkspaceOptions) {
@@ -35,6 +36,7 @@ export function createTestWorkspace(options: TestWorkspaceOptions) {
     maxSteps: options.maxSteps,
     sessionStore: options.sessionStore,
     completionGuard: options.completionGuard,
+    maxResidentSessions: options.maxResidentSessions,
   });
 
   return { clock, ids, model, approval, tools, runtime };

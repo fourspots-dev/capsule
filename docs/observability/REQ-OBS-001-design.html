@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>REQ-OBS-001 Execution Debug Hub 详细设计</title>
+<style>
+:root{--bg:#f4f6f8;--paper:#fff;--text:#171a1f;--muted:#69707a;--line:#e0e4e9;--accent:#2563eb;--ok:#117a4b;--warn:#9a6500;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;color:var(--text);background:var(--bg);font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1180px;margin:auto;padding:36px 24px 90px}
+header{padding:38px;border-radius:25px;background:radial-gradient(circle at 88% 8%,#86b9ff 0,transparent 26%),linear-gradient(135deg,#101722,#173b69 58%,#2563a8);color:#fff}header small{opacity:.72;letter-spacing:.1em}h1{font-size:36px;line-height:1.2;margin:10px 0}header p{max-width:900px;margin:0;color:#edf5ff}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}
+nav{position:sticky;top:0;z-index:3;display:flex;gap:14px;overflow:auto;margin:17px 0;padding:10px 14px;border:1px solid var(--line);border-radius:13px;background:#f4f6f8ed;backdrop-filter:blur(12px)}nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}
+section{margin:17px 0;padding:25px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:23px;margin:0 0 14px}h3{font-size:16px;margin:20px 0 8px}p{color:#424851}code{font-family:var(--mono);font-size:.92em;padding:1px 5px;border-radius:4px;background:#eff2f5}pre{overflow:auto;padding:16px;border-radius:11px;background:#101923;color:#edf6ff;font:12px/1.6 var(--mono)}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--muted);background:#fafbfc}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafbfc}.card h3{margin:0 0 8px}.rule{padding:12px 14px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#eef5ff}.warn{border-color:var(--warn);background:#fff8e8}.foot{color:var(--muted);font-size:12px}@media(max-width:800px){.grid{grid-template-columns:1fr}.wrap{padding:18px 12px 70px}header h1{font-size:28px}}
+</style>
+</head>
+<body><div class="wrap">
+<header><small>TINYAI / EXECUTION DEBUG / DETAILED DESIGN</small><h1>Execution Debug Hub</h1><p>通过出站事件上报和只读 cursor API，让外部服务实时观察 Agent 执行，同时保持 Chrome 沙盒、Runtime 权威性和安全边界。</p><div class="chips"><span class="chip">REQ-OBS-001</span><span class="chip">0.12.0 verified</span><span class="chip">ADR-017</span><span class="chip">Read-only</span></div></header>
+<nav><a href="#requirements">目标</a><a href="#architecture-impact">影响面</a><a href="#architecture">架构</a><a href="#events">事件</a><a href="#server">服务</a><a href="#browser">Chrome</a><a href="#ui">设置 UI</a><a href="#security">安全</a><a href="#failure">失败恢复</a><a href="#rollout">交付</a><a href="#acceptance">验收</a></nav>
+
+<section id="requirements"><h2>1. 目标与非目标</h2><div class="grid"><div class="card"><h3>目标</h3><ul><li>Chrome 仅通过出站 HTTP 上报执行事件。</li><li>外部服务可通过 cursor 增量拉取，并通过 SSE 实时订阅。</li><li>记录思考展示、工具、子 Agent、审批、Evidence、Artifact 引用和错误。</li><li>服务可持久化、去重、限流、轮转和导出 NDJSON。</li><li>设置页提供 Debug Service 配置和连通测试。</li></ul></div><div class="card"><h3>非目标</h3><ul><li>不让 Chrome 扩展监听端口。</li><li>不提供远程控制、审批或停止接口。</li><li>不导出模型内部隐藏的 chain-of-thought。</li><li>不把 Debug Hub 作为 Session 状态事实源。</li><li>第一版不实现云端多租户 Relay。</li></ul></div></div></section>
+
+<section id="architecture-impact"><h2>2. Architecture impact map</h2><table><thead><tr><th>Surface</th><th>Action</th><th>Evidence</th></tr></thead><tbody>
+<tr><td>Core Runtime</td><td>modify</td><td>Projection observer hook；不改变任务语义。</td></tr>
+<tr><td>Observability schema</td><td>add</td><td><code>src/observability/*</code> 事件、redaction、tracker、hub。</td></tr>
+<tr><td>Node CLI</td><td>add</td><td><code>tinyai debug serve</code> 与 <code>dist/tinyai-debug-server.cjs</code>。</td></tr>
+<tr><td>Chrome background</td><td>modify</td><td>出站 HTTP transport；不监听端口。</td></tr>
+<tr><td>Chrome Side Panel</td><td>modify</td><td>Debug Service 设置和状态测试。</td></tr>
+<tr><td>Session / Capsule</td><td>none</td><td>Debug 数据不进入 continuation 格式。</td></tr>
+<tr><td>Tool / Action registry</td><td>none</td><td>Agent 不获得 debug tool。</td></tr>
+<tr><td>Tests</td><td>add</td><td>unit、HTTP integration、真实 Chrome E2E。</td></tr>
+</tbody></table><div class="rule"><b>禁止部分交付：</b>只做本地文件导出；让扩展自己监听端口；由外部进程直接读扩展 storage；让模型调用 debug API；把 Debug 事件写进 Workspace Capsule。</div></section>
+
+<section id="architecture"><h2>3. 模块与对象</h2><pre>Runtime Projection
+  → ProjectionExecutionTracker
+  → ExecutionEventSink
+      ├─ ChromeHttpEventTransport ─POST /v1/ingest→ Debug Hub
+      └─ future Host sinks
+
+Debug Hub
+  ├─ ExecutionEventHub (seq / dedupe / retention)
+  ├─ ExecutionEventStore (NDJSON)
+  ├─ HTTP Ingest
+  ├─ Cursor Query
+  ├─ SSE Subscribers
+  └─ NDJSON Export</pre><table><tbody><tr><td><code>ExecutionEvent</code></td><td>稳定 envelope、关联 ID、kind、phase、visibility、payload。</td></tr><tr><td><code>ProjectionExecutionTracker</code></td><td>比较连续 Projection，生成 row/status/child 事件。</td></tr><tr><td><code>ExecutionEventHub</code></td><td>服务端 cursor、eventId 去重、有界 retention、订阅。</td></tr><tr><td><code>ChromeHttpEventTransport</code></td><td>批量、ACK、重试和有界 outbox。</td></tr><tr><td><code>ExecutionLogServer</code></td><td>只读 HTTP/SSE 和认证边界。</td></tr></tbody></table></section>
+
+<section id="events"><h2>4. 事件协议</h2><pre>interface ExecutionEvent {
+  schemaVersion: 1;
+  eventId: string;
+  clientEventId: string;
+  sequence: number;
+  cursor: string;
+  timestamp: number;
+  sessionId: string;
+  taskId?: string;
+  productTurnId?: string;
+  callId?: string;
+  traceId?: string;
+  parentId?: string;
+  kind: 'session'|'user'|'assistant'|'reasoning'|'tool'|
+        'approval'|'handoff'|'child-agent'|'evidence'|
+        'artifact'|'error'|'status';
+  phase: 'started'|'updated'|'completed'|'failed'|'cancelled';
+  actor: 'user'|'agent'|'tool'|'child-agent'|'system';
+  visibility?: 'public'|'displayed-reasoning'|'summary';
+  payload: JsonValue;
+}</pre><p>Projection tracker 对新增 Row 发出 started，对流式文本发出 updated/delta，对终态发出 completed/failed/cancelled。子 Agent 和 Session 状态分别形成 child-agent 与 status 事件。</p></section>
+
+<section id="server"><h2>5. Debug Service</h2><pre>tinyai debug serve \
+  --host 127.0.0.1 \
+  --port 4399 \
+  --data-dir .tinyai/debug \
+  --token &lt;pairing-token&gt;
+
+POST /v1/ingest
+GET  /v1/sessions
+GET  /v1/sessions/:id/events?after=&lt;cursor&gt;&amp;limit=500
+GET  /v1/sessions/:id/stream?after=&lt;cursor&gt;
+GET  /v1/sessions/:id/export
+GET  /healthz</pre><p>Hub 分配全局单调 sequence；cursor 为不透明 Base64URL 数据，包含 version、epoch 和 sequence。Ingest 按 clientEventId/eventId 去重。Retention 默认 100,000 事件，超过时从最旧事件淘汰并让旧 cursor 返回 expired 或 truncated 语义。</p><p>NDJSON 第 1 版采用单目录分段文件；写入先进入内存 Hub，再异步 durable append。慢 SSE 客户端不阻塞 ingest，队列满时断开并允许 cursor 重连。</p></section>
+
+<section id="browser"><h2>6. Chrome 集成</h2><p><code>createChromeRuntimeBundle</code> 读取独立 <code>tinyai-debug-service</code> 配置，创建 transport 和 tracker，并将 observer 注入主/子 WorkspaceRuntime。Projection observer 只观察，不改变 Runtime。</p><pre>Runtime emit projection
+  → tracker produces events
+  → transport.enqueue
+  → 100ms / 批量 flush
+  → POST /v1/ingest with Bearer token
+  → ACK
+
+fetch 失败:
+  queue retained
+  → exponential retry
+  → bounded capacity
+  → status visible in Settings</pre><p>关闭或未配置 transport 时，行为与当前版本完全一致。service worker 重启后丢失的内存队列不阻止 Agent；后续事件重新开始上报。</p></section>
+
+<section id="ui"><h2>7. Settings UI</h2><p>在 Runtime 设置组新增 “Debug Service” 子页，遵循 <code>docs/ui/tinyai-sidepanel-ui-contract.md</code>。字段为 endpoint、token、enabled；操作为 Save、Test、Disable。首页只显示 Configured/Not configured，不占用会话空间。</p><p>UI impact: yes。复用 <code>settingsSubpage</code>、<code>settingsGroup</code>、<code>settingsForm</code>、<code>settingsField</code>，不新增视觉原语。</p></section>
+
+<section id="security"><h2>8. 安全与脱敏</h2><table><tbody><tr><td>监听地址</td><td>默认 <code>127.0.0.1</code>，非 loopback 需显式配置。</td></tr><tr><td>认证</td><td>Ingest 与 Query 要求 Bearer Token；constant-time compare。</td></tr><tr><td>写入能力</td><td>HTTP API 无 stop/approve/command 路由。</td></tr><tr><td>脱敏</td><td>key 名匹配 token/apiKey/authorization/cookie/secret/password；字符串 Bearer/sk- 模式也替换。</td></tr><tr><td>Artifact</td><td>第一版只记录引用和 metadata，不自动上传二进制。</td></tr><tr><td>Reasoning</td><td>visibility=displayed-reasoning；不包含内部隐藏推理。</td></tr><tr><td>CORS</td><td>允许扩展 Origin 的 Authorization preflight；不启用 credentials。</td></tr></tbody></table></section>
+
+<section id="failure"><h2>9. 失败恢复与兼容</h2><ul><li>Debug Service 离线：Agent 正常执行，transport 保持有界队列。</li><li>ACK 丢失：重试相同 eventId，服务端去重。</li><li>服务重启：读取 NDJSON、恢复 sequence 和 cursor epoch。</li><li>旧 cursor 被 retention 淘汰：返回明确 <code>CURSOR_EXPIRED</code> 与当前 earliest cursor。</li><li>事件过大：拒绝单批，不阻塞后续小事件。</li><li>Schema 升级：事件包含 schemaVersion，未知版本拒绝并报告。</li></ul></section>
+
+<section id="rollout"><h2>10. 交付切片</h2><ol><li>事件 schema、redactor、Projection tracker。</li><li>Hub、cursor、retention、NDJSON store。</li><li>Node HTTP/SSE server、CLI、认证。</li><li>Chrome transport、Runtime observer、Settings UI。</li><li>单元/集成/真实 Chrome E2E。</li><li>全量检查与 0.12.0 发布。</li></ol></section>
+
+<section id="acceptance"><h2>11. 验收</h2><ul><li>外部服务可先拉历史再通过 SSE 接收实时事件。</li><li>cursor 断线续传、eventId 去重、retention 行为可测试。</li><li>Chrome 不监听端口且不直接读扩展 storage。</li><li>设置页可配置并测试 Debug Service。</li><li>调试 API 无写控制能力。</li><li>真实 Chrome E2E 中，Agent 事件到达外部 Hub。</li></ul><p class="foot">REQ-OBS-001 · 0.12.0 verified · ADR-017 · tests 458 passed / Chrome E2E 10 passed</p></section>
+</div></body></html>

@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.12.0
+
+### Features
+
+- `REQ-OBS-001`: add a normalized execution-event protocol with redaction,
+  ordering, cursor pagination, SSE streaming and NDJSON export.
+- Add an authenticated, read-only `tinyai-debug-server` with bounded storage,
+  deduplication, restart recovery and `npm run debug:serve`.
+- Add Chrome outbound event transport and a canonical Debug Service settings
+  page. The extension never listens on a network port.
+- Capture displayed reasoning, tool calls, child agents, status and final output
+  from real Chrome tasks without exposing hidden model chain-of-thought.
+
+### Performance and reliability
+
+- `REQ-PERF-001`: replace per-token full Projection cloning with source-generated
+  row deltas and initial-snapshot plus delta delivery.
+- Coalesce Runtime Gateway deltas and Side Panel rendering; bound visible history
+  to 500 rows and 100,000 characters per row.
+- Bound Event Log to 20,000 entries, persistence to a 500ms stream throttle,
+  resident Sessions to six idle instances, browser network capture to 300
+  entries per tab and Debug transport to 2 MB.
+- Preserve row ordering across reasoning/assistant inserts with indexed row
+  deltas and force final persistence before a task becomes idle.
+
+### Verification
+
+- `npm run check`: 458 tests passed, 3 skipped.
+- `npm run test:e2e`: 10 Chrome E2E tests passed.
+- Real Chrome long-stream test completed 2,000 reasoning/answer deltas with
+  **0 MB renderer heap growth after GC**.
+- `npm run verify:tui` passed.
+
 ## 0.11.2
 
 ### Fixes

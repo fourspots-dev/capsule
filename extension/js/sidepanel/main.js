@@ -176,87 +176,37 @@
   ].join("\n");
 
   // src/core/projection.ts
-  function applyProjectionDelta(current, delta) {
-    const next = {
-      ...current,
-      rows: current.rows.map(cloneRow)
-    };
-    if (delta.type === "row.appended") next.rows.push(cloneRow(delta.row));
+  function applyProjectionDeltaInPlace(current, delta) {
+    if (delta.type === "row.appended") {
+      if (delta.index === void 0) current.rows.push(cloneRow(delta.row));
+      else current.rows.splice(delta.index, 0, cloneRow(delta.row));
+    }
     if (delta.type === "row.upserted") {
-      const index = next.rows.findIndex((row) => row.id === delta.row.id);
-      if (index >= 0) next.rows[index] = cloneRow(delta.row);
-      else next.rows.push(cloneRow(delta.row));
+      const index = current.rows.findIndex((row) => row.id === delta.row.id);
+      if (index >= 0) current.rows[index] = cloneRow(delta.row);
+      else current.rows.push(cloneRow(delta.row));
     }
     if (delta.type === "row.removed") {
-      next.rows = next.rows.filter((row) => row.id !== delta.fromRowId);
+      const index = current.rows.findIndex(
+        (row) => row.id === delta.fromRowId
+      );
+      if (index >= 0) current.rows.splice(index, 1);
     }
     if (delta.type === "row.delta") {
-      const row = next.rows.find((candidate) => candidate.id === delta.rowId);
+      const row = current.rows.find((candidate) => candidate.id === delta.rowId);
       if (!row) throw new Error(`Cannot apply row delta: ${delta.rowId}`);
       if (delta.path === "text") row.text += delta.append;
     }
-    if (delta.type === "state.updated") Object.assign(next, delta.patch);
-    return next;
-  }
-  function createProjectionFrame(previous, next) {
-    if (!previous || previous.sessionId !== next.sessionId || previous.logEpoch !== next.logEpoch || next.revision <= previous.revision) {
-      return { type: "snapshot", projection: cloneProjection(next) };
-    }
-    const deltas = [];
-    const statePatch = {};
-    for (const key of [
-      "phase",
-      "lifecycle",
-      "taskStatus",
-      "inputRouting",
-      "queueLength",
-      "activeTaskId",
-      "lastError",
-      "permissionMode",
-      "plan",
-      "children",
-      "availability"
-    ]) {
-      if (JSON.stringify(previous[key]) !== JSON.stringify(next[key])) {
-        statePatch[key] = next[key];
-      }
-    }
-    if (Object.keys(statePatch).length) {
-      deltas.push({ type: "state.updated", patch: statePatch });
-    }
-    const previousRows = new Map(previous.rows.map((row) => [row.id, row]));
-    const nextRows = new Map(next.rows.map((row) => [row.id, row]));
-    for (const row of previous.rows) {
-      if (!nextRows.has(row.id)) deltas.push({ type: "row.removed", fromRowId: row.id });
-    }
-    for (const row of next.rows) {
-      const old = previousRows.get(row.id);
-      if (!old) {
-        deltas.push({ type: "row.appended", row: cloneRow(row) });
-        continue;
-      }
-      if (old.kind === row.kind && old.entityId === row.entityId && old.productTurnId === row.productTurnId && old.status === row.status && old.callId === row.callId && old.toolName === row.toolName && row.text.startsWith(old.text)) {
-        if (row.text !== old.text) {
-          deltas.push({
-            type: "row.delta",
-            rowId: row.id,
-            path: "text",
-            append: row.text.slice(old.text.length)
-          });
+    if (delta.type === "state.updated") {
+      for (const [key, value] of Object.entries(delta.patch)) {
+        if (value === void 0) {
+          delete current[key];
+        } else {
+          current[key] = value;
         }
-      } else if (JSON.stringify(old) !== JSON.stringify(row)) {
-        deltas.push({ type: "row.upserted", row: cloneRow(row) });
       }
     }
-    return {
-      type: "delta",
-      sessionId: next.sessionId,
-      logEpoch: next.logEpoch,
-      baseRevision: previous.revision,
-      revision: next.revision,
-      eventSeq: next.eventSeq,
-      deltas
-    };
+    return current;
   }
   function applyProjectionFrame(current, frame) {
     if (frame.type === "snapshot") return cloneProjection(frame.projection);
@@ -268,25 +218,23 @@
         `Projection frame gap: expected ${current.revision}, received ${frame.baseRevision}`
       );
     }
-    let next = cloneProjection(current);
-    for (const delta of frame.deltas) next = applyProjectionDelta(next, delta);
+    const next = current;
+    for (const delta of frame.deltas) applyProjectionDeltaInPlace(next, delta);
     next.revision = frame.revision;
     next.eventSeq = frame.eventSeq;
     return next;
   }
   var ProjectionStore = class {
     current;
-    previous;
     apply(frame) {
-      this.previous = this.current;
       this.current = applyProjectionFrame(this.current, frame);
-      return cloneProjection(this.current);
+      return this.current;
     }
     snapshot() {
       return this.current ? cloneProjection(this.current) : void 0;
     }
     frame(next) {
-      return createProjectionFrame(this.previous ?? this.current, next);
+      return { type: "snapshot", projection: cloneProjection(next) };
     }
   };
   function cloneProjection(projection) {
@@ -314,6 +262,51 @@
   // src/workspace/capsule-v2.ts
   var CAPSULE_V2_MAGIC = new TextEncoder().encode("TNYCAP2\n");
   var DEFAULT_CHUNK_BYTES = 256 * 1024;
+
+  // src/observability/debug-service-config.ts
+  var DEBUG_SERVICE_KEY = "tinyai-debug-service";
+  function normalizeEndpoint(value) {
+    if (typeof value !== "string" || !value.trim()) return void 0;
+    try {
+      const url = new URL(value.trim());
+      if (url.protocol !== "http:" && url.protocol !== "https:") return void 0;
+      if (url.protocol === "http:" && !["127.0.0.1", "localhost", "[::1]", "::1"].includes(url.hostname)) {
+        return void 0;
+      }
+      url.pathname = url.pathname.replace(/\/+$/, "");
+      url.search = "";
+      url.hash = "";
+      return url.toString().replace(/\/$/, "");
+    } catch {
+      return void 0;
+    }
+  }
+  async function testDebugService(config, fetchImpl = fetch) {
+    if (!config.token) {
+      throw new Error("Pairing Token is required");
+    }
+    const response = await fetchImpl(`${config.endpoint}/healthz`, {
+      headers: { Authorization: `Bearer ${config.token}` }
+    });
+    if (!response.ok) {
+      throw new Error(`Debug Service health check failed: HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    if (payload.ok !== true || payload.service !== "tinyai-debug-hub") {
+      throw new Error("Endpoint is not a compatible tinyai Debug Hub");
+    }
+    const authenticated = await fetchImpl(`${config.endpoint}/v1/sessions`, {
+      headers: { Authorization: `Bearer ${config.token}` }
+    });
+    if (authenticated.status === 401) {
+      throw new Error("Debug Service rejected the Pairing Token");
+    }
+    if (!authenticated.ok) {
+      throw new Error(
+        `Debug Service authentication check failed: HTTP ${authenticated.status}`
+      );
+    }
+  }
 
   // src/runtime/chrome-runtime.ts
   var KERNEL_PORT_NAME = "tinyai-runtime-v1";
@@ -745,6 +738,25 @@
     return values.filter(Boolean).join(" ");
   }
 
+  // src/sidepanel/render-window.ts
+  var MAX_RENDERED_ROWS = 500;
+  var MAX_RENDERED_TEXT = 1e5;
+  var STREAM_RENDER_INTERVAL_MS = 50;
+  function selectRenderWindow(rows) {
+    if (rows.length <= MAX_RENDERED_ROWS) {
+      return { rows, hiddenCount: 0 };
+    }
+    return {
+      rows: rows.slice(-MAX_RENDERED_ROWS),
+      hiddenCount: rows.length - MAX_RENDERED_ROWS
+    };
+  }
+  function excerptText(value) {
+    return value.length > MAX_RENDERED_TEXT ? `${value.slice(0, MAX_RENDERED_TEXT)}
+
+\u2026(display truncated; export the Capsule or execution log for the full content)` : value;
+  }
+
   // src/sidepanel/turn-render-model.ts
   var EXPLORE_TOOLS = /* @__PURE__ */ new Set([
     "list_tabs",
@@ -947,6 +959,7 @@
     if (!root) throw new Error("Missing #root");
     let pageConfig = await readPageConfig();
     let remoteActionConfig = await readRemoteActionConfig();
+    let debugServiceConfig = await readDebugServiceConfig();
     root.innerHTML = shell(pageConfig);
     applyPageAppearance();
     const client = new KernelClient(() => connectChromeKernelPort(chrome, KERNEL_PORT_NAME), {
@@ -974,6 +987,7 @@
     let pageSessions = [];
     let editingConnectionId;
     let connectionTestMessage = "";
+    let debugServiceTestMessage = "";
     let capabilityStatus;
     let capabilityStatusError = "";
     let pageError = "";
@@ -981,6 +995,7 @@
     let busy = false;
     let busyStartedAt = 0;
     let reconnectAttempts = 0;
+    let renderScheduled = false;
     const detailState = /* @__PURE__ */ new Map();
     const activationTargetCount = () => Math.max(1, workspaceMemberTabIds.length);
     const render = () => {
@@ -1032,10 +1047,16 @@
           (attachment) => `<span class="wb-chip"><span class="wb-chip-name">${escapeHtml(attachment.name)}</span><button type="button" data-remove-attachment="${escapeHtml(attachment.name)}" aria-label="Remove">\xD7</button></span>`
         )
       ].join("");
+      const windowed = selectRenderWindow(projection?.rows ?? []);
+      const hiddenRowCount = windowed.hiddenCount;
+      const renderedProjection = projection ? {
+        ...projection,
+        rows: windowed.rows
+      } : projection;
       const conversationHtml = (projection?.plan?.text ? `<section class="kernel-plan-card">
             <div class="kernel-plan-head"><span>${zh ? "\u8BA1\u5212" : "Plan"}</span><span>${projection.plan.approvedAt ? zh ? "\u5DF2\u6279\u51C6" : "Approved" : zh ? "\u8349\u7A3F" : "Draft"}</span></div>
             <div class="kernel-plan-body">${md(projection.plan.text)}</div>
-          </section>` : "") + (projection ? buildTurnRenderUnits(projection).map(
+          </section>` : "") + (hiddenRowCount > 0 ? `<div class="kernel-history-window">${zh ? `\u8F83\u65E9\u7684 ${hiddenRowCount} \u6761\u8BB0\u5F55\u5DF2\u7701\u7565` : `${hiddenRowCount} earlier rows hidden`}</div>` : "") + (renderedProjection ? buildTurnRenderUnits(renderedProjection).map(
         (unit) => renderTurnUnit(unit, pageConfig.language, pageConfig.showReasoning)
       ).join("") : "") + approvals.map(
         (approval) => `<article class="wb-permission-card kernel-approval" data-ui-key="approval:${escapeHtml(approval.approvalId)}">
@@ -1065,6 +1086,14 @@
       rows.innerHTML = conversationHtml || emptyHtml(pageConfig.language);
       restoreDetailState(rows, detailState);
       if (scroll && stickToBottom) scroll.scrollTop = scroll.scrollHeight;
+    };
+    const scheduleRender = () => {
+      if (renderScheduled) return;
+      renderScheduled = true;
+      window.setTimeout(() => {
+        renderScheduled = false;
+        render();
+      }, STREAM_RENDER_INTERVAL_MS);
     };
     const saveCurrentDraft = () => {
       const input = document.querySelector("#kernel-input");
@@ -1187,7 +1216,7 @@
       if (!nextBusy) busyStartedAt = 0;
       busy = nextBusy;
       error = "";
-      render();
+      scheduleRender();
     });
     client.onApproval((approval) => {
       const pending = [
@@ -1613,10 +1642,11 @@
     async function showPage(view) {
       pageConfig = await readPageConfig();
       remoteActionConfig = await readRemoteActionConfig();
+      debugServiceConfig = await readDebugServiceConfig();
       if (view === "history") pageSessions = await client.listSessions();
       capabilityStatus = void 0;
       capabilityStatusError = "";
-      if ((view === "settings" || view === "capabilities" || view === "remote-actions") && sessionActivated) {
+      if ((view === "settings" || view === "capabilities" || view === "remote-actions" || view === "debug-service") && sessionActivated) {
         try {
           capabilityStatus = await client.capabilityStatus(sessionId);
         } catch (cause) {
@@ -1626,6 +1656,7 @@
       pageView = view;
       pageError = "";
       connectionTestMessage = "";
+      debugServiceTestMessage = "";
       renderPage();
     }
     function closePage() {
@@ -1643,6 +1674,7 @@
       if (pageView === "history") return historyPageMarkup();
       if (pageView === "capabilities") return capabilitiesPageMarkup();
       if (pageView === "remote-actions") return remoteActionsPageMarkup();
+      if (pageView === "debug-service") return debugServicePageMarkup();
       return settingsPageMarkup();
     }
     function pageAlertMarkup() {
@@ -1753,6 +1785,13 @@
             icon: icons.link,
             value: remoteActionConfig ? zh ? "\u5DF2\u914D\u7F6E" : "Configured" : zh ? "\u672A\u914D\u7F6E" : "Not configured",
             action: "remote-actions"
+          }),
+          settingsSeparator(),
+          settingsNavRow({
+            label: zh ? "\u8C03\u8BD5\u670D\u52A1" : "Debug Service",
+            icon: icons.info,
+            value: debugServiceConfig?.enabled ? zh ? "\u5DF2\u542F\u7528" : "Enabled" : zh ? "\u672A\u542F\u7528" : "Disabled",
+            action: "debug-service"
           })
         ].join("")
       })}
@@ -1817,6 +1856,43 @@
         backIcon: icons.back,
         theme: effectiveTheme(),
         body: `${remoteActionFormMarkup(zh)}${pageAlertMarkup()}`
+      });
+    }
+    function debugServicePageMarkup() {
+      const zh = pageConfig.language.startsWith("zh");
+      return settingsSubpage({
+        title: zh ? "\u8C03\u8BD5\u670D\u52A1" : "Debug Service",
+        backAction: "back-runtime",
+        backLabel: zh ? "\u8FD4\u56DE" : "Back",
+        backIcon: icons.back,
+        theme: effectiveTheme(),
+        body: `${debugServiceFormMarkup(zh)}${pageAlertMarkup()}`
+      });
+    }
+    function debugServiceFormMarkup(zh) {
+      return settingsForm({
+        id: "kernel-debug-service-form",
+        content: `${settingsField({
+          label: zh ? "\u670D\u52A1\u5730\u5740" : "Service endpoint",
+          control: `<input id="kernel-debug-endpoint" type="url" value="${escapeHtml(debugServiceConfig?.endpoint ?? "")}" placeholder="http://127.0.0.1:4399">`
+        })}
+      ${settingsField({
+          label: "Pairing Token",
+          control: `<input id="kernel-debug-token" type="password" value="" placeholder="${debugServiceConfig?.token ? zh ? "\u5DF2\u4FDD\u5B58\uFF0C\u7559\u7A7A\u4FDD\u6301\u4E0D\u53D8" : "Saved \u2014 leave blank to keep" : "optional for health check"}" autocomplete="off">`
+        })}
+      ${settingsField({
+          label: zh ? "\u542F\u7528\u5B9E\u65F6\u4E0A\u62A5" : "Enable live reporting",
+          className: "wb-row",
+          control: `<input id="kernel-debug-enabled" type="checkbox" ${debugServiceConfig?.enabled ? "checked" : ""}>`,
+          controlFirst: true
+        })}
+      <div class="wb-form-actions">
+        <button type="button" class="wb-btn wb-btn--primary" data-page-action="debug-save">${zh ? "\u4FDD\u5B58\u5E76\u5E94\u7528" : "Save and apply"}</button>
+        <button type="button" class="wb-ghost-btn" data-page-action="debug-test">${zh ? "\u6D4B\u8BD5\u8FDE\u63A5" : "Test connection"}</button>
+        <button type="button" class="wb-ghost-btn" data-page-action="debug-disable">${zh ? "\u505C\u7528" : "Disable"}</button>
+        ${debugServiceTestMessage ? `<span class="wb-form-ok">${escapeHtml(debugServiceTestMessage)}</span>` : ""}
+      </div>
+      <div class="wb-conn-url">${zh ? "\u670D\u52A1\u542F\u52A8\u547D\u4EE4\uFF1Atinyai debug serve\uFF1B\u5BC6\u7801\u7528\u4E8E\u670D\u52A1\u7AEF\u9274\u6743\u3002" : "Start with tinyai debug serve. The token authenticates event ingestion and queries."}</div>`
       });
     }
     function runtimeCapabilitySummary(zh) {
@@ -2040,6 +2116,19 @@
         ...typeof value.timeoutMs === "number" && value.timeoutMs > 0 ? { timeoutMs: value.timeoutMs } : {}
       };
     }
+    async function readDebugServiceConfig() {
+      const stored = await chrome.storage.local.get(DEBUG_SERVICE_KEY);
+      const raw = stored[DEBUG_SERVICE_KEY];
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return void 0;
+      const value = raw;
+      const endpoint = normalizeEndpoint(value.endpoint);
+      if (!endpoint) return void 0;
+      return {
+        enabled: value.enabled !== false,
+        endpoint,
+        ...typeof value.token === "string" && value.token ? { token: value.token } : {}
+      };
+    }
     async function writePageConfig(config = pageConfig) {
       await chrome.storage.local.set({ [CONFIG_KEY]: config });
       pageConfig = config;
@@ -2143,6 +2232,24 @@
         pageView = "remote-actions";
         pageError = "";
         renderPage();
+        return;
+      }
+      if (action === "debug-service") {
+        pageView = "debug-service";
+        pageError = "";
+        renderPage();
+        return;
+      }
+      if (action === "debug-save") {
+        await saveDebugServiceConfig(true);
+        return;
+      }
+      if (action === "debug-test") {
+        await testDebugServiceForm();
+        return;
+      }
+      if (action === "debug-disable") {
+        await saveDebugServiceConfig(false);
         return;
       }
       if (action === "remote-save") {
@@ -2359,6 +2466,49 @@
         await reloadRuntimeForCurrentTab();
       }
     }
+    async function saveDebugServiceConfig(enabled) {
+      const endpoint = normalizeEndpoint(pageValue("#kernel-debug-endpoint"));
+      if (!endpoint) {
+        throw new Error(
+          pageConfig.language.startsWith("zh") ? "\u8C03\u8BD5\u670D\u52A1\u5730\u5740\u5FC5\u987B\u662F HTTP(S) \u5730\u5740\uFF1B\u975E\u672C\u673A\u5730\u5740\u5FC5\u987B\u4F7F\u7528 HTTPS\u3002" : "Debug Service must use HTTP(S); non-local endpoints require HTTPS."
+        );
+      }
+      const tokenInput = pageValue("#kernel-debug-token");
+      const retainedToken = debugServiceConfig?.endpoint === endpoint ? debugServiceConfig.token : void 0;
+      const token = tokenInput || retainedToken;
+      if (enabled && !token) {
+        throw new Error(
+          pageConfig.language.startsWith("zh") ? "\u542F\u7528\u5B9E\u65F6\u4E0A\u62A5\u9700\u8981 Pairing Token\u3002" : "A Pairing Token is required to enable live reporting."
+        );
+      }
+      const config = {
+        enabled,
+        endpoint,
+        ...token ? { token } : {}
+      };
+      await chrome.storage.local.set({ [DEBUG_SERVICE_KEY]: config });
+      debugServiceConfig = config;
+      await reloadRuntimeForCurrentTab();
+      debugServiceTestMessage = enabled ? pageConfig.language.startsWith("zh") ? "\u5DF2\u4FDD\u5B58\u5E76\u542F\u7528" : "Saved and enabled" : pageConfig.language.startsWith("zh") ? "\u5DF2\u505C\u7528" : "Disabled";
+      renderPage();
+    }
+    async function testDebugServiceForm() {
+      const endpoint = normalizeEndpoint(pageValue("#kernel-debug-endpoint"));
+      if (!endpoint) {
+        throw new Error(
+          pageConfig.language.startsWith("zh") ? "\u8C03\u8BD5\u670D\u52A1\u5730\u5740\u65E0\u6548\u3002" : "Debug Service endpoint is invalid."
+        );
+      }
+      const token = pageValue("#kernel-debug-token") || (debugServiceConfig?.endpoint === endpoint ? debugServiceConfig.token : void 0);
+      await testDebugService({ endpoint, ...token ? { token } : {} });
+      debugServiceConfig = {
+        enabled: document.querySelector("#kernel-debug-enabled")?.checked ?? true,
+        endpoint,
+        ...token ? { token } : {}
+      };
+      debugServiceTestMessage = pageConfig.language.startsWith("zh") ? "\u8FDE\u63A5\u6210\u529F" : "Connection OK";
+      renderPage();
+    }
     function pageValue(selector) {
       return document.querySelector(
         selector
@@ -2555,7 +2705,7 @@
   }
   function renderUserRow(text) {
     return `<div class="wb-stream-row kernel-message-row kernel-message-row--user">
-    <div class="wb-msg wb-msg-user"><div class="wb-user-bubble">${escapeHtml(text)}</div></div>
+    <div class="wb-msg wb-msg-user"><div class="wb-user-bubble">${escapeHtml(excerptText(text))}</div></div>
   </div>`;
   }
   function renderWorkHistory(segment, content, language) {
@@ -2612,7 +2762,7 @@
       ${running ? `<span class="kernel-reasoning-running">${zh ? "\u601D\u8003\u4E2D" : "Thinking"}</span>` : ""}
       <span class="kernel-work-chevron" aria-hidden="true">${icons.chevronRight}</span>
     </summary>
-    <div class="kernel-reasoning-body">${escapeHtml(row.text)}</div>
+    <div class="kernel-reasoning-body">${escapeHtml(excerptText(row.text))}</div>
   </details>`;
   }
   function renderToolRow(row, language) {
@@ -2648,7 +2798,7 @@
   function renderAssistantRow(row, language, withFeedback) {
     if (!row.text && !withFeedback) return "";
     const zh = language.startsWith("zh");
-    const body = row.text ? `${md(row.text)}${row.status === "streaming" ? '<span class="wb-cursor"></span>' : ""}` : "";
+    const body = row.text ? `${md(excerptText(row.text))}${row.status === "streaming" ? '<span class="wb-cursor"></span>' : ""}` : "";
     const feedback = withFeedback && row.status === "completed" ? `<div class="wb-feedback">
         <button type="button" class="wb-mini-action" data-copy-message="${escapeHtml(row.id)}">${icons.file}${zh ? "\u590D\u5236" : "Copy"}</button>
         <button type="button" class="wb-mini-action" data-export-message="${escapeHtml(row.id)}">${zh ? "\u5BFC\u51FA" : "Export"}</button>
@@ -2661,7 +2811,7 @@
     const zh = language.startsWith("zh");
     return `<details class="kernel-plan-inline" data-ui-key="plan:${escapeHtml(row.id)}">
     <summary>${zh ? "\u8BA1\u5212" : "Plan"} \xB7 ${escapeHtml(statusLabel(row.status, language))}</summary>
-    <div>${md(row.text)}</div>
+    <div>${md(excerptText(row.text))}</div>
   </details>`;
   }
   function renderActivityRow(row, language) {

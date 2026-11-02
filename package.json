@@ -1,9 +1,9 @@
 {
   "name": "tinyai",
   "private": true,
-  "version": "0.11.2",
+  "version": "0.12.0",
   "scripts": {
-    "build": "npm run typecheck && npm run clean && npm run extension:sync && npm run build:sidepanel && npm run build:background && npm run build:cli && npm run build:tui && npm run build:workspace-agent && npm run build:workspace-transfer && npm run build:runner && npm run build:proxy && npm run build:package",
+    "build": "npm run typecheck && npm run clean && npm run extension:sync && npm run build:sidepanel && npm run build:background && npm run build:cli && npm run build:tui && npm run build:workspace-agent && npm run build:workspace-transfer && npm run build:runner && npm run build:proxy && npm run build:debug-server && npm run build:package",
     "build:sidepanel": "esbuild src/sidepanel.ts --bundle --format=iife --target=chrome120 --outfile=extension/js/sidepanel/main.js",
     "build:background": "esbuild src/background.ts --bundle --format=iife --target=chrome120 --outfile=extension/js/background/main.js",
     "build:cli": "esbuild src/cli/coding-agent.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tinyai-coding-agent.cjs",
@@ -13,6 +13,7 @@
     "build:workspace-transfer": "esbuild src/cli/workspace-transfer.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tinyai-workspace-transfer.cjs",
     "build:runner": "esbuild src/cli/remote-runner.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tinyai-remote-runner.cjs",
     "build:proxy": "mkdir -p dist/allowlist-proxy && cp docker/allowlist-proxy/Dockerfile dist/allowlist-proxy/Dockerfile && esbuild src/node/allowlist-proxy-server.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/allowlist-proxy/allowlist-proxy.cjs",
+    "build:debug-server": "esbuild src/cli/debug-server.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tinyai-debug-server.cjs",
     "build:package": "npm run extension:sync && node scripts/package-extension.mjs",
     "extension:sync": "node scripts/extension-version.mjs sync",
     "extension:check": "node scripts/extension-version.mjs check",
@@ -35,6 +36,7 @@
     "test:live": "vitest run tests/live/deepseek-smoke.test.ts",
     "workspace:export": "npm run build:workspace-transfer && node dist/tinyai-workspace-transfer.cjs export",
     "workspace:import": "npm run build:workspace-transfer && node dist/tinyai-workspace-transfer.cjs import",
+    "debug:serve": "npm run build:debug-server && node dist/tinyai-debug-server.cjs",
     "verify:chrome-transfer": "npm run build:chrome-harness && node scripts/verify-chrome-transfer.mjs",
     "verify:tui": "npm run build:tui && python3 scripts/verify-tui-capabilities.py",
     "test:soak": "TINYAI_SOAK=1 vitest run tests/soak/production.test.ts",

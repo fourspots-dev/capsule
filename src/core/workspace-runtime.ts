@@ -2,7 +2,10 @@ import { AgentError } from './errors';
 import type { RuntimeEvent } from './event-log';
 import type { Clock, IdGenerator, ModelTransport } from './ports';
 import type { PermissionModeRegistry } from './policy';
-import { SessionRuntime } from './session-runtime';
+import {
+  SessionRuntime,
+  type SessionProjectionChange,
+} from './session-runtime';
 import type { CompletionGuard } from './session-runtime';
 import type { SessionStore, SessionSummary } from './session-store';
 import type { ToolExecutor } from './tool-executor';
@@ -29,22 +32,28 @@ export interface WorkspaceRuntimeOptions {
   permissionModes?: PermissionModeRegistry;
   trace?: TraceRecorder;
   completionGuard?: CompletionGuard;
+  onProjectionChange?: (change: SessionProjectionChange) => void;
+  maxResidentSessions?: number;
 }
 
 export class WorkspaceRuntime {
   private readonly sessions = new Map<string, SessionRuntime>();
   private readonly loading = new Map<string, Promise<SessionRuntime | undefined>>();
   private readonly commandTails = new Map<string, Promise<void>>();
+  private readonly lastAccess = new Map<string, number>();
 
   constructor(private readonly options: WorkspaceRuntimeOptions) {}
 
   getSessionView(sessionId: string): SessionView | undefined {
-    return this.sessions.get(sessionId)?.view();
+    const runtime = this.sessions.get(sessionId);
+    if (runtime) this.touchAccess(sessionId);
+    return runtime?.view();
   }
 
   getProjection(sessionId: string): ProductProjection {
     const runtime = this.sessions.get(sessionId);
     if (!runtime) throw new AgentError('SESSION_NOT_FOUND', `Session not found: ${sessionId}`);
+    this.touchAccess(sessionId);
     return runtime.projection();
   }
 
@@ -142,6 +151,17 @@ export class WorkspaceRuntime {
     return runtime.subscribe(listener);
   }
 
+  async subscribeChanges(
+    sessionId: string,
+    listener: (change: SessionProjectionChange) => void
+  ): Promise<{
+    initial: ProductProjection;
+    unsubscribe: () => void;
+  } | undefined> {
+    const runtime = await this.ensureSession(sessionId, false);
+    return runtime?.subscribeChanges(listener);
+  }
+
   async stop(sessionId: string): Promise<void> {
     const runtime = this.sessions.get(sessionId);
     if (!runtime) return;
@@ -237,6 +257,9 @@ export class WorkspaceRuntime {
       sessionId,
       initialSnapshot,
     });
+    if (this.options.onProjectionChange) {
+      runtime.subscribeChanges(this.options.onProjectionChange);
+    }
     this.sessions.set(sessionId, runtime);
     return runtime;
   }
@@ -246,7 +269,10 @@ export class WorkspaceRuntime {
     createWhenMissing: boolean
   ): Promise<SessionRuntime | undefined> {
     const existing = this.sessions.get(sessionId);
-    if (existing) return existing;
+    if (existing) {
+      this.touchAccess(sessionId);
+      return existing;
+    }
     const pending = this.loading.get(sessionId);
     if (pending) return pending;
     const load = (async () => {
@@ -256,14 +282,45 @@ export class WorkspaceRuntime {
       } catch {
         initialSnapshot = undefined;
       }
-      if (initialSnapshot) return this.createRuntime(sessionId, initialSnapshot);
-      return createWhenMissing ? this.createRuntime(sessionId) : undefined;
+      if (initialSnapshot) {
+        const created = this.createRuntime(sessionId, initialSnapshot);
+        this.touchAccess(sessionId);
+        await this.evictInactiveSessions(sessionId);
+        return created;
+      }
+      if (!createWhenMissing) return undefined;
+      const created = this.createRuntime(sessionId);
+      this.touchAccess(sessionId);
+      await this.evictInactiveSessions(sessionId);
+      return created;
     })();
     this.loading.set(sessionId, load);
     try {
       return await load;
     } finally {
       this.loading.delete(sessionId);
+    }
+  }
+
+  private touchAccess(sessionId: string): void {
+    this.lastAccess.set(sessionId, Date.now());
+  }
+
+  private async evictInactiveSessions(keepSessionId: string): Promise<void> {
+    if (!this.options.sessionStore) return;
+    const maximum = Math.max(1, this.options.maxResidentSessions ?? 6);
+    if (this.sessions.size <= maximum) return;
+    const candidates = [...this.sessions.entries()]
+      .filter(([sessionId, runtime]) => sessionId !== keepSessionId && runtime.canEvict())
+      .sort(
+        ([left], [right]) =>
+          (this.lastAccess.get(left) ?? 0) - (this.lastAccess.get(right) ?? 0)
+      );
+    for (const [sessionId, runtime] of candidates) {
+      if (this.sessions.size <= maximum) break;
+      await runtime.flushPersistence();
+      this.sessions.delete(sessionId);
+      this.lastAccess.delete(sessionId);
     }
   }
 }

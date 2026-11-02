@@ -125,6 +125,7 @@ const PAPER_SIZES: Record<string, [number, number]> = {
   a3: [11.69, 16.54],
   tabloid: [11, 17],
 };
+const MAX_NETWORK_ENTRIES = 300;
 
 export class ChromeBrowserProvider implements BrowserProvider {
   private readonly tabs: ChromeTabsApi;
@@ -1025,7 +1026,11 @@ export class ChromeBrowserProvider implements BrowserProvider {
     if (!state?.enabled) return;
     const requestId = String(params.requestId ?? '');
     const request = params.request ?? {};
-    state.order = [...state.order, requestId].slice(-300);
+    state.order = [...state.order, requestId].slice(-MAX_NETWORK_ENTRIES);
+    const retained = new Set(state.order);
+    for (const id of state.entries.keys()) {
+      if (!retained.has(id)) state.entries.delete(id);
+    }
     state.entries.set(requestId, {
       requestId,
       url: String(request.url ?? ''),

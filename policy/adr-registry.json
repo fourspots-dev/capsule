@@ -221,6 +221,30 @@
       "approvedBy": "user",
       "supersedes": [],
       "supersededBy": null
+    },
+    {
+      "id": "ADR-017",
+      "title": "Use an outbound read-only execution debug hub",
+      "status": "accepted",
+      "file": "docs/adr/ADR-017-read-only-execution-debug-hub.md",
+      "requirements": ["REQ-OBS-001"],
+      "originDecision": "DEC-011",
+      "decidedAt": "2026-11-02",
+      "approvedBy": "user",
+      "supersedes": [],
+      "supersededBy": null
+    },
+    {
+      "id": "ADR-018",
+      "title": "Stream deltas and bound resident runtime memory",
+      "status": "accepted",
+      "file": "docs/adr/ADR-018-bounded-streaming-runtime-memory.md",
+      "requirements": ["REQ-PERF-001"],
+      "originDecision": "DEC-012",
+      "decidedAt": "2026-11-02",
+      "approvedBy": "user",
+      "supersedes": [],
+      "supersededBy": null
     }
   ]
 }

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>REQ-OBS-001 Execution Debug Hub 测试设计</title>
+<style>
+:root{--bg:#f4f6f8;--paper:#fff;--text:#171a1f;--muted:#69707a;--line:#e0e4e9;--accent:#117a4b;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1140px;margin:auto;padding:36px 24px 90px}header{padding:36px;border-radius:24px;background:linear-gradient(135deg,#0e1d17,#1e5a40 60%,#2f8b62);color:#fff}header small{opacity:.72;letter-spacing:.1em}h1{font-size:35px;margin:10px 0}header p{max-width:870px;margin:0;color:#edf9f3}section{margin:17px 0;padding:25px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:22px;margin:0 0 14px}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafbfc;color:var(--muted)}code{font-family:var(--mono);padding:1px 5px;border-radius:4px;background:#eff2f4}pre{overflow:auto;padding:15px;border-radius:11px;background:#111b17;color:#effdf6;font:12px/1.6 var(--mono)}.rule{padding:12px 14px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#edf8f2}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafbfc}
+</style>
+</head>
+<body><div class="wrap">
+<header><small>TINYAI / EXECUTION DEBUG / TEST DESIGN</small><h1>Debug Hub 测试设计</h1><p>验证事件正确性、cursor 语义、服务认证、持久化、实时流、Chrome 出站上报以及无副作用边界。</p></header>
+
+<section id="strategy"><h2>1. 测试层级</h2><div class="grid"><div class="card"><h3>Unit</h3><p>事件 projection、redaction、cursor、dedupe、retention、transport queue。</p></div><div class="card"><h3>HTTP Integration</h3><p>真实 ephemeral server：认证、ingest、query、SSE、export、错误码。</p></div><div class="card"><h3>Chrome E2E</h3><p>真实扩展配置 Debug Service，执行任务，外部 Hub 收到事件。</p></div><div class="card"><h3>Security / Fault</h3><p>无 token、错误 token、恶意 key、慢消费者、断线重试。</p></div></div></section>
+
+<section id="trace"><h2>2. Requirement trace matrix</h2><table><thead><tr><th>Case</th><th>Expected</th><th>Level</th></tr></thead><tbody>
+<tr><td>OBS-001</td><td>Projection row 生成 user/assistant/reasoning/tool 事件</td><td>Unit</td></tr>
+<tr><td>OBS-002</td><td>流式文本生成 delta，终态生成 completed/failed</td><td>Unit</td></tr>
+<tr><td>OBS-003</td><td>子 Agent 状态生成 child-agent 事件</td><td>Unit</td></tr>
+<tr><td>OBS-004</td><td>token/API key/Bearer 在 Hub 前脱敏</td><td>Unit</td></tr>
+<tr><td>OBS-005</td><td>eventId 重试幂等</td><td>Unit + HTTP</td></tr>
+<tr><td>OBS-006</td><td>cursor after/limit 正确，历史无缺口</td><td>Unit + HTTP</td></tr>
+<tr><td>OBS-007</td><td>retention 返回 truncated/expired</td><td>Unit</td></tr>
+<tr><td>OBS-008</td><td>无 Bearer 或错误 Bearer 拒绝</td><td>HTTP</td></tr>
+<tr><td>OBS-009</td><td>SSE 从 cursor 后续推送实时事件</td><td>HTTP</td></tr>
+<tr><td>OBS-010</td><td>NDJSON restart recover</td><td>HTTP / File</td></tr>
+<tr><td>OBS-011</td><td>Chrome queue ACK 后清空，失败保留重试</td><td>Unit</td></tr>
+<tr><td>OBS-012</td><td>真实 Chrome 执行事件到达外部 Hub</td><td>E2E</td></tr>
+<tr><td>OBS-013</td><td>Debug API 无 command/stop/approve 路由</td><td>Security/HTTP</td></tr>
+<tr><td>OBS-014</td><td>设置页复用 canonical components，能保存/测试配置</td><td>Unit + E2E</td></tr>
+</tbody></table></section>
+
+<section id="fixtures"><h2>3. Fixtures</h2><ul><li>Projection fixture：user → reasoning → tool → child → assistant 终态。</li><li>HTTP server 使用 port 0 和临时 data dir。</li><li>Chrome transport 使用可注入 fetch/clock。</li><li>Chrome E2E 启动真实 Hub 和 fixture model server。</li><li>大事件、超 retention、过期 cursor、慢 SSE client 作为 fault fixture。</li></ul></section>
+
+<section id="architecture-completeness"><h2>4. Architecture completeness</h2><table><thead><tr><th>Surface</th><th>Proof</th><th>Case / command</th></tr></thead><tbody>
+<tr><td>Runtime observer</td><td>Projection 事件完整且只读</td><td>OBS-001..003</td></tr>
+<tr><td>Event protocol</td><td>schema、phase、ID、visibility</td><td>OBS-001..005</td></tr>
+<tr><td>Security</td><td>redaction、auth、无写 API</td><td>OBS-004, OBS-008, OBS-013</td></tr>
+<tr><td>Hub</td><td>cursor、dedupe、retention、subscriber</td><td>OBS-005..009</td></tr>
+<tr><td>Persistence</td><td>NDJSON restart recovery</td><td>OBS-010</td></tr>
+<tr><td>Chrome</td><td>outbound batching、retry、settings</td><td>OBS-011, OBS-014</td></tr>
+<tr><td>End-to-end</td><td>外部服务实时拉取 Chrome event</td><td>OBS-012</td></tr>
+<tr><td>Non-goals</td><td>不进入 ToolPack/Capsule</td><td>boundary scan + tests</td></tr>
+</tbody></table></section>
+
+<section id="commands"><h2>5. Commands and release gates</h2><pre>npm run typecheck
+npm test
+npm run test:e2e
+npm run check
+node dist/tinyai-debug-server.cjs --help</pre><div class="rule">发布阻断：cursor 缺口、未认证 ingest、secret 未脱敏、Chrome 监听端口、Debug API 可控制 Agent、E2E 事件未到达 Hub，任一失败均阻止 REQ-OBS-001 标记 verified。</div></section>
+
+<section id="release"><h2>6. Acceptance evidence</h2><p><b>Observed 0.12.0 evidence:</b> <code>npm run check</code> 458 passed / 3 skipped；Chrome E2E 10 passed；真实 Chrome 任务经过设置页连接 Debug Hub，外部 Hub 收到 user/reasoning/tool/assistant 事件；HTTP cursor、SSE、认证、dedupe、retention、restart 和 NDJSON export integration 通过。</p><p>Target 0.12.0 · Architecture impact yes · UI impact yes · ADR-017 · Verified</p></section>
+</div></body></html>

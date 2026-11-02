@@ -190,6 +190,44 @@
       "supersedes": [],
       "supersededBy": null,
       "file": "docs/decisions/DEC-010-ui-contract-without-agents.md"
+    },
+    {
+      "id": "DEC-011",
+      "title": "Add a read-only execution debug hub",
+      "statement": "Chrome 插件不监听端口；插件把执行事件发送给 tinyai Debug Hub，外部服务通过 cursor 和 SSE 实时拉取。",
+      "normalizedDecision": "Implement a normalized outbound execution event pipeline, a read-only authenticated Debug Hub with bounded persistence and cursors, incremental HTTP/SSE access, Chrome settings and end-to-end observability tests.",
+      "capturedAt": "2026-11-02",
+      "source": "request",
+      "scope": ["observability", "chrome", "debug-server", "execution-events"],
+      "status": "promoted",
+      "triage": {
+        "disposition": "adr_and_requirement",
+        "adrs": ["ADR-017"],
+        "requirements": ["REQ-OBS-001"],
+        "rationale": "The decision creates a cross-surface debug protocol and changes browser transport, host service, settings and security boundaries."
+      },
+      "supersedes": [],
+      "supersededBy": null,
+      "file": "docs/decisions/DEC-011-execution-debug-hub.md"
+    },
+    {
+      "id": "DEC-012",
+      "title": "Bound streaming and resident Agent memory",
+      "statement": "浏览器任务已消耗约 11 GB 内存，必须彻底修复 token 级全量快照、全量重渲染和无界缓存。",
+      "normalizedDecision": "Replace hot-path full projections with source deltas, bound UI/persistence/log/network/debug/session-residency state, and verify long-task memory stays bounded.",
+      "capturedAt": "2026-11-02",
+      "source": "incident",
+      "scope": ["runtime", "projection", "chrome-ui", "persistence", "debug", "browser"],
+      "status": "promoted",
+      "triage": {
+        "disposition": "adr_and_requirement",
+        "adrs": ["ADR-018"],
+        "requirements": ["REQ-PERF-001"],
+        "rationale": "The incident requires a durable streaming protocol change and bounded-memory rules across Runtime, UI, persistence and host adapters."
+      },
+      "supersedes": [],
+      "supersededBy": null,
+      "file": "docs/decisions/DEC-012-bounded-agent-memory.md"
     }
   ]
 }

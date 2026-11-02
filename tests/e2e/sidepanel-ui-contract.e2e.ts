@@ -129,6 +129,18 @@ describe('REQ-UI-001 Side Panel UI Contract', () => {
       () => document.querySelector('.wb-settings-title')?.textContent === 'Settings'
     );
 
+    await page.click('[data-page-action="debug-service"]');
+    await page.waitForSelector('#kernel-debug-endpoint');
+    expect(
+      await page
+        .locator('#kernel-debug-endpoint')
+        .evaluate((element) => getComputedStyle(element).borderRadius)
+    ).toBe('9px');
+    await page.click('[data-page-action="back-runtime"]');
+    await page.waitForFunction(
+      () => document.querySelector('.wb-settings-title')?.textContent === 'Settings'
+    );
+
     await page.click('[data-page-action="connections"]');
     await page.waitForSelector('[data-page-action="conn-edit"]');
     await page.click('[data-page-action="conn-edit"]');

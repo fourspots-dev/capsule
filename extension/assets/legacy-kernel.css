@@ -682,6 +682,17 @@ textarea.wb-editor {
   word-break: break-word;
 }
 
+.kernel-history-window {
+  margin: 10px 0;
+  padding: 8px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  color: var(--muted);
+  background: var(--surface);
+  font-size: 11px;
+  text-align: center;
+}
+
 .kernel-remote-action-form {
   margin: 0;
 }

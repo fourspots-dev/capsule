@@ -657,6 +657,9 @@ describe('kernel extension E2E', () => {
     expect(await page.locator('.wb-assistant').count()).toBeGreaterThan(0);
     const completedWork = page.locator('.kernel-work').first();
     expect(await completedWork.locator('.kernel-work-summary').textContent()).toContain('Worked');
+    await page.waitForFunction(
+      () => !document.querySelector('.kernel-work')?.hasAttribute('open')
+    );
     expect(await completedWork.getAttribute('open')).toBeNull();
     await completedWork.locator('.kernel-work-summary').click();
     const reasoning = completedWork.locator('.kernel-reasoning');

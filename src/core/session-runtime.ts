@@ -7,7 +7,11 @@ import { EventLog, type RuntimeEvent } from './event-log';
 import { InputLedger } from './input-ledger';
 import type { Clock, IdGenerator, ModelTransport } from './ports';
 import { PermissionModeRegistry, type PermissionMode } from './policy';
-import { buildProjection } from './projection';
+import {
+  buildProjection,
+  buildProjectionState,
+  type ProjectionDelta,
+} from './projection';
 import { SessionLifecycleController } from './session-lifecycle';
 import {
   cloneSnapshot,
@@ -45,6 +49,16 @@ interface QueueItem {
   modelText: string;
 }
 
+export interface SessionProjectionChange {
+  type: 'delta';
+  sessionId: string;
+  logEpoch: string;
+  baseRevision: number;
+  revision: number;
+  eventSeq: number;
+  deltas: ProjectionDelta[];
+}
+
 export interface SessionRuntimeOptions {
   sessionId: string;
   model: ModelTransport;
@@ -61,6 +75,7 @@ export interface SessionRuntimeOptions {
   permissionModes?: PermissionModeRegistry;
   trace?: TraceRecorder;
   completionGuard?: CompletionGuard;
+  persistenceDelayMs?: number;
 }
 
 export interface CompletionGuardContext {
@@ -97,6 +112,12 @@ export class SessionRuntime {
   private readonly rows: ConversationRow[] = [];
   private readonly messages: ModelMessage[] = [];
   private readonly listeners = new Set<(projection: ProductProjection) => void>();
+  private readonly changeListeners = new Set<
+    (change: SessionProjectionChange) => void
+  >();
+  private readonly dirtyRows = new Map<string, ConversationRow | undefined>();
+  private readonly removedRows = new Set<string>();
+  private lastProjectionState?: Omit<ProductProjection, 'rows'>;
   private readonly idleWaiters = new Set<() => void>();
   private readonly children = new Map<string, ChildTaskProjection>();
   private status: TaskStatus = 'completed';
@@ -122,7 +143,11 @@ export class SessionRuntime {
     this.ids = options.ids;
     this.logEpoch =
       options.initialSnapshot?.logEpoch ?? options.logEpoch ?? this.ids.next('epoch');
-    this.events = new EventLog(this.logEpoch, () => this.clock.now());
+    this.events = new EventLog(
+      this.logEpoch,
+      () => this.clock.now(),
+      20_000
+    );
     this.sessionStore = options.sessionStore;
     this.permissionModes =
       options.permissionModes ?? new PermissionModeRegistry('guarded', () => this.clock.now());
@@ -206,6 +231,16 @@ export class SessionRuntime {
     return buildModelContext(this.sessionTree, this.systemPrompt);
   }
 
+  canEvict(): boolean {
+    return (
+      !this.running &&
+      this.queue.length === 0 &&
+      !this.rows.some(
+        (row) => row.status === 'pending' || row.status === 'streaming'
+      )
+    );
+  }
+
   updateChildTask(parentTaskId: string, child: ChildTaskProjection): boolean {
     if (
       !this.taskGraph.get(parentTaskId) &&
@@ -228,6 +263,17 @@ export class SessionRuntime {
   }
 
   view(): SessionView {
+    return {
+      ...this.baseView(),
+      rows: this.rows.map((row) => ({ ...row })),
+    };
+  }
+
+  projection(): ProductProjection {
+    return buildProjection(this.view());
+  }
+
+  private baseView(): Omit<SessionView, 'rows'> {
     const mode = this.permissionModes.get(this.sessionId).getState();
     return {
       sessionId: this.sessionId,
@@ -252,14 +298,9 @@ export class SessionRuntime {
       ...(this.children.size
         ? { children: [...this.children.values()].map((child) => ({ ...child })) }
         : {}),
-      rows: this.rows.map((row) => ({ ...row })),
       pendingApproval: false,
       ledger: this.ledger.list(),
     };
-  }
-
-  projection(): ProductProjection {
-    return buildProjection(this.view());
   }
 
   summary(): SessionSummary {
@@ -295,6 +336,22 @@ export class SessionRuntime {
   subscribe(listener: (projection: ProductProjection) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  subscribeChanges(
+    listener: (change: SessionProjectionChange) => void
+  ): {
+    initial: ProductProjection;
+    unsubscribe: () => void;
+  } {
+    const initial = this.projection();
+    this.lastProjectionState = this.projectionState();
+    this.dirtyRows.clear();
+    this.changeListeners.add(listener);
+    return {
+      initial,
+      unsubscribe: () => this.changeListeners.delete(listener),
+    };
   }
 
   async waitForIdle(): Promise<void> {
@@ -348,7 +405,7 @@ export class SessionRuntime {
       delivery: payload.delivery ?? (this.activeTaskId ? 'queue' : 'startNow'),
       admittedAt: this.clock.now(),
     });
-    this.rows.push({
+    this.appendRow({
       id: this.ids.next('row'),
       entityId: inputId,
       productTurnId: taskId,
@@ -369,7 +426,10 @@ export class SessionRuntime {
       this.status = 'failed';
       this.lastError = toStructuredError(error, 'PERSISTENCE_FAILED');
       const row = this.rows.find((candidate) => candidate.entityId === inputId);
-      if (row) row.status = 'failed';
+      if (row) {
+        this.markRowChanged(row.id);
+        row.status = 'failed';
+      }
       this.touch('persistence.failed');
       return this.ack(
         command,
@@ -396,7 +456,7 @@ export class SessionRuntime {
       delivery: 'guide',
       admittedAt: this.clock.now(),
     });
-    this.rows.push({
+    this.appendRow({
       id: this.ids.next('row'),
       entityId: inputId,
       productTurnId: this.activeTaskId!,
@@ -526,7 +586,7 @@ export class SessionRuntime {
         ...buildModelContext(this.sessionTree, this.systemPrompt)
       );
       const activityId = this.ids.next('activity');
-      this.rows.push({
+      this.appendRow({
         id: activityId,
         entityId: activityId,
         productTurnId: 'session_compaction',
@@ -726,15 +786,18 @@ export class SessionRuntime {
     } finally {
       this.running = false;
       this.abort = undefined;
-      this.notifyIdle();
       this.emit();
+      await this.flushPersistence().catch((error) => {
+        this.persistenceError = toStructuredError(error, 'PERSISTENCE_FAILED');
+      });
+      this.notifyIdle();
     }
   }
 
   private async onLoopEvent(taskId: string, event: AgentLoopEvent): Promise<void> {
     if (event.type === 'turn_start') {
       const startedAt = this.clock.now();
-      this.rows.push({
+      this.appendRow({
         id: `activity_${taskId}_${event.turn}`,
         entityId: `activity_${taskId}_${event.turn}`,
         productTurnId: taskId,
@@ -746,7 +809,7 @@ export class SessionRuntime {
       this.taskGraph.recordUsage(taskId, { turns: 1 });
       this.touch(event.type);
     } else if (event.type === 'message_start') {
-      this.rows.push({
+      this.appendRow({
         id: event.messageId,
         entityId: event.messageId,
         productTurnId: taskId,
@@ -773,18 +836,23 @@ export class SessionRuntime {
         const assistantIndex = this.rows.findIndex(
           (candidate) => candidate.id === event.messageId
         );
-        if (assistantIndex >= 0) this.rows.splice(assistantIndex, 0, reasoningRow);
-        else this.rows.push(reasoningRow);
+        if (assistantIndex >= 0) this.insertRow(assistantIndex, reasoningRow);
+        else this.appendRow(reasoningRow);
       }
+      this.markRowChanged(reasoningRow.id);
       reasoningRow.text += event.delta;
       this.touch('reasoning.delta');
     } else if (event.type === 'message_update') {
       const row = this.rows.find((candidate) => candidate.id === event.messageId);
-      if (row) row.text += event.delta;
+      if (row) {
+        this.markRowChanged(row.id);
+        row.text += event.delta;
+      }
       this.touch('message.delta');
     } else if (event.type === 'message_end') {
       const row = this.rows.find((candidate) => candidate.id === event.messageId);
       if (row) {
+        this.markRowChanged(row.id);
         row.text = event.message.role === 'assistant' ? event.message.content : row.text;
         row.status = 'completed';
         row.completedAt = this.clock.now();
@@ -794,6 +862,7 @@ export class SessionRuntime {
           (candidate) => candidate.id === `reasoning_${event.messageId}`
         );
         if (reasoningRow) {
+          this.markRowChanged(reasoningRow.id);
           reasoningRow.text = event.message.reasoning ?? reasoningRow.text;
           reasoningRow.status = 'completed';
           reasoningRow.completedAt = this.clock.now();
@@ -821,6 +890,7 @@ export class SessionRuntime {
         (row) => row.id === `activity_${taskId}_${event.turn}`
       );
       if (activity) {
+        this.markRowChanged(activity.id);
         activity.text = 'Thinking complete';
         activity.status = 'completed';
         activity.completedAt = this.clock.now();
@@ -834,7 +904,7 @@ export class SessionRuntime {
         toolName: event.result.name,
       });
       if (span) this.toolSpans.set(event.result.callId, span.spanId);
-      this.rows.push({
+      this.appendRow({
         id: `row_${event.result.callId}`,
         entityId: event.result.callId,
         productTurnId: taskId,
@@ -849,6 +919,7 @@ export class SessionRuntime {
     } else if (event.type === 'tool_execution_end') {
       const row = this.rows.find((candidate) => candidate.callId === event.result.callId);
       if (row) {
+        this.markRowChanged(row.id);
         row.status =
           event.result.status === 'succeeded'
             ? 'completed'
@@ -901,6 +972,7 @@ export class SessionRuntime {
         row.productTurnId === taskId &&
         (row.status === 'pending' || row.status === 'streaming')
       ) {
+        this.markRowChanged(row.id);
         row.status = status;
         row.completedAt ??= this.clock.now();
       }
@@ -912,7 +984,10 @@ export class SessionRuntime {
       this.taskGraph.cancelTree(item.taskId, reason);
       this.ledger.cancel(item.inputId, reason);
       const row = this.rows.find((candidate) => candidate.entityId === item.inputId);
-      if (row) row.status = 'cancelled';
+      if (row) {
+        this.markRowChanged(row.id);
+        row.status = 'cancelled';
+      }
     }
   }
 
@@ -958,7 +1033,7 @@ export class SessionRuntime {
     this.persistTimer = this.options.clock.setTimeout(() => {
       this.persistTimer = undefined;
       this.enqueuePersistence();
-    }, 100);
+    }, Math.max(250, this.options.persistenceDelayMs ?? 500));
   }
 
   private enqueuePersistence(): void {
@@ -1066,6 +1141,7 @@ export class SessionRuntime {
     }
     for (const row of this.rows) {
       if (row.status === 'pending' || row.status === 'streaming') {
+        this.markRowChanged(row.id);
         row.status = 'cancelled';
         reconciled = true;
       }
@@ -1074,8 +1150,87 @@ export class SessionRuntime {
   }
 
   private emit(): void {
-    const projection = this.projection();
-    for (const listener of this.listeners) listener(projection);
+    if (this.changeListeners.size > 0) {
+      const nextState = this.projectionState();
+      const deltas: ProjectionDelta[] = [];
+      const statePatch = projectionStatePatch(
+        this.lastProjectionState,
+        nextState
+      );
+      if (statePatch) deltas.push({ type: 'state.updated', patch: statePatch });
+      for (const [index, row] of this.rows.entries()) {
+        if (!this.dirtyRows.has(row.id)) continue;
+        const previous = this.dirtyRows.get(row.id);
+        if (!previous) {
+          deltas.push({
+            type: 'row.appended',
+            row: cloneConversationRow(row),
+            index,
+          });
+        } else if (rowDiffersOnlyByAppendedText(previous, row)) {
+          deltas.push({
+            type: 'row.delta',
+            rowId: row.id,
+            path: 'text',
+            append: row.text.slice(previous.text.length),
+          });
+        } else if (JSON.stringify(previous) !== JSON.stringify(row)) {
+          deltas.push({ type: 'row.upserted', row: cloneConversationRow(row) });
+        }
+      }
+      for (const rowId of this.removedRows) {
+        deltas.push({ type: 'row.removed', fromRowId: rowId });
+      }
+      const baseRevision =
+        this.lastProjectionState?.revision ?? Math.max(0, this.revision - 1);
+      this.lastProjectionState = nextState;
+      if (deltas.length > 0) {
+        const change: SessionProjectionChange = {
+          type: 'delta',
+          sessionId: this.sessionId,
+          logEpoch: this.logEpoch,
+          baseRevision,
+          revision: this.revision,
+          eventSeq: this.eventSeq,
+          deltas,
+        };
+        for (const listener of this.changeListeners) listener(change);
+      }
+    }
+    this.dirtyRows.clear();
+    this.removedRows.clear();
+    if (this.listeners.size > 0) {
+      const projection = this.projection();
+      for (const listener of this.listeners) listener(projection);
+    }
+  }
+
+  private projectionState(): Omit<ProductProjection, 'rows'> {
+    return buildProjectionState({
+      ...this.baseView(),
+      rows: this.rows,
+    });
+  }
+
+  private markRowChanged(rowId: string): void {
+    if (this.listeners.size === 0 && this.changeListeners.size === 0) return;
+    if (this.dirtyRows.has(rowId)) return;
+    const row = this.rows.find((candidate) => candidate.id === rowId);
+    this.dirtyRows.set(rowId, row ? cloneConversationRow(row) : undefined);
+  }
+
+  private appendRow(row: ConversationRow): void {
+    this.rows.push(row);
+    if (this.listeners.size > 0 || this.changeListeners.size > 0) {
+      this.dirtyRows.set(row.id, undefined);
+    }
+  }
+
+  private insertRow(index: number, row: ConversationRow): void {
+    this.rows.splice(index, 0, row);
+    if (this.listeners.size > 0 || this.changeListeners.size > 0) {
+      this.dirtyRows.set(row.id, undefined);
+    }
   }
 
   private transitionTask(taskId: string, status: TaskStatus): void {
@@ -1158,4 +1313,54 @@ function composeUserInput(
     blocks.push(`<attachments>\n${lines.join('\n')}\n</attachments>`);
   }
   return blocks.filter(Boolean).join('\n\n');
+}
+
+function cloneConversationRow(row: ConversationRow): ConversationRow {
+  return {
+    ...row,
+    ...(row.toolMetadata
+      ? { toolMetadata: structuredClone(row.toolMetadata) }
+      : {}),
+  };
+}
+
+function rowDiffersOnlyByAppendedText(
+  previous: ConversationRow,
+  next: ConversationRow
+): boolean {
+  return (
+    next.text.startsWith(previous.text) &&
+    next.text !== previous.text &&
+    JSON.stringify({ ...previous, text: '' }) ===
+      JSON.stringify({ ...next, text: '' })
+  );
+}
+
+function projectionStatePatch(
+  previous: Omit<ProductProjection, 'rows'> | undefined,
+  next: Omit<ProductProjection, 'rows'>
+): Partial<Omit<ProductProjection, 'rows'>> | undefined {
+  if (!previous) return next;
+  const patch: Partial<Omit<ProductProjection, 'rows'>> = {};
+  for (const key of [
+    'revision',
+    'eventSeq',
+    'logEpoch',
+    'phase',
+    'lifecycle',
+    'taskStatus',
+    'inputRouting',
+    'queueLength',
+    'activeTaskId',
+    'lastError',
+    'permissionMode',
+    'plan',
+    'children',
+    'availability',
+  ] as const) {
+    if (JSON.stringify(previous[key]) !== JSON.stringify(next[key])) {
+      (patch as Record<string, unknown>)[key] = next[key];
+    }
+  }
+  return Object.keys(patch).length ? patch : undefined;
 }

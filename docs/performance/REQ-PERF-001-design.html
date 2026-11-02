@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>REQ-PERF-001 Agent 内存有界化详细设计</title>
+<style>
+:root{--bg:#f4f6f8;--paper:#fff;--text:#17191d;--muted:#69707a;--line:#e0e4e9;--accent:#b42318;--ok:#137a4b;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1160px;margin:auto;padding:36px 24px 90px}header{padding:38px;border-radius:25px;background:linear-gradient(135deg,#241212,#6b211c 58%,#a1382c);color:#fff}header small{opacity:.72;letter-spacing:.1em}h1{font-size:36px;margin:10px 0}header p{max-width:900px;margin:0;color:#fff0ec}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}section{margin:17px 0;padding:25px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:23px;margin:0 0 14px}h3{font-size:16px;margin:19px 0 8px}code{font-family:var(--mono);background:#f0f2f4;padding:1px 5px;border-radius:4px}pre{overflow:auto;padding:16px;border-radius:11px;background:#15191e;color:#f6f8fa;font:12px/1.6 var(--mono)}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafbfc;color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafbfc}.card h3{margin:0 0 8px}.rule{padding:12px 14px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#fff0ee}.foot{color:var(--muted);font-size:12px}@media(max-width:800px){.grid{grid-template-columns:1fr}.wrap{padding:18px 12px}header h1{font-size:28px}}
+</style>
+</head>
+<body><div class="wrap">
+<header><small>TINYAI / MEMORY SAFETY / DETAILED DESIGN</small><h1>Agent 内存有界化</h1><p>修复长任务中 token 触发的全量 Projection、全量 DOM、全量持久化和无界缓存叠加，建立可验证的内存不变量。</p><div class="chips"><span class="chip">REQ-PERF-001</span><span class="chip">P0 verified</span><span class="chip">Target 0.12.0</span><span class="chip">ADR-018</span></div></header>
+
+<section id="incident"><h2>1. 事故与证据</h2><p>实测一个 Chrome extension renderer 达到约 2.58GB RSS，用户报告任务累计至约 11GB。代码审查确认多条放大路径同时存在：每个 reasoning/message delta 触发完整 Projection，Side Panel 重建完整 DOM，持久化周期性复制完整 Snapshot，Event Log/network/debug 缓存缺少完整边界。</p><div class="rule"><b>判定：</b>不是单一页面快照问题，而是流式 token × 全历史复制 × 全 DOM × 全量持久化的组合放大。</div></section>
+
+<section id="architecture-impact"><h2>2. Architecture impact map</h2><table><thead><tr><th>Surface</th><th>Action</th><th>Proof</th></tr></thead><tbody>
+<tr><td>SessionRuntime</td><td>modify</td><td>dirty rows + delta listeners；全量 listener 仅在显式订阅时构造。</td></tr>
+<tr><td>RuntimeGateway / Protocol</td><td>modify</td><td>初始 snapshot，之后直接转发 source delta；不重算全量 frame。</td></tr>
+<tr><td>Side Panel</td><td>modify</td><td>50ms coalesce；最多 500 rows、100k chars。</td></tr>
+<tr><td>ProjectionStore</td><td>modify</td><td>delta 原地更新，不复制全 rows。</td></tr>
+<tr><td>Persistence</td><td>modify</td><td>≥500ms throttle，20k event retention。</td></tr>
+<tr><td>Workspace residency</td><td>modify</td><td>默认最多 6 个 idle persisted sessions。</td></tr>
+<tr><td>Debug</td><td>modify</td><td>source delta, no full row text；2MB queue。</td></tr>
+<tr><td>Browser network</td><td>modify</td><td>每 tab 最多 300 entries，淘汰同步删 map。</td></tr>
+</tbody></table></section>
+
+<section id="design"><h2>3. 核心设计</h2><pre>Session mutation
+  → mark dirty row (only changed row snapshot)
+  → touch
+  → emitChanges
+      state.updated (small)
+      row.appended | row.delta | row.upserted | row.removed
+  → RuntimeGateway port frame directly
+  → ProjectionStore mutates current row
+  → Side Panel coalesced render</pre><h3>SessionProjectionChange</h3><pre>interface SessionProjectionChange {
+  sessionId, logEpoch;
+  baseRevision, revision, eventSeq;
+  deltas: ProjectionDelta[];
+}</pre><p>初始订阅仍返回一次完整 Projection。此后流式 token 只携带本 revision 的增量。若没有 change/full listener，不构造 Projection。</p><h3>Dirty row 语义</h3><ul><li>新增 Row 只 clone 新 Row。</li><li>文本追加且其他字段不变时发送 row.delta。</li><li>状态、tool metadata 或非前缀文本变化时发送一次 row.upserted。</li><li>每条 change 后清空 dirty set。</li></ul></section>
+
+<section id="bounds"><h2>4. 内存边界</h2><table><thead><tr><th>Buffer</th><th>上限</th><th>淘汰策略</th></tr></thead><tbody><tr><td>Side Panel DOM rows</td><td>500 recent rows</td><td>只影响显示；Session 完整保留</td></tr><tr><td>单条渲染文本</td><td>100k chars</td><td>显示截断提示，Capsule/Log 保留全文</td></tr><tr><td>Runtime EventLog</td><td>20k events</td><td>删除最旧，sequence 不重置</td></tr><tr><td>Debug transport</td><td>2MB / 2k events</td><td>删除最旧事件</td></tr><tr><td>Browser network</td><td>300 / tab</td><td>删除 order 与 entry</td></tr><tr><td>Resident Sessions</td><td>默认 6</td><td>只淘汰 idle 且已持久化 Session</td></tr><tr><td>UI render frequency</td><td>≤20fps</td><td>50ms coalescing</td></tr><tr><td>Persistence</td><td>≥500ms during stream</td><td>最终/命令边界强制 flush</td></tr></tbody></table></section>
+
+<section id="interaction"><h2>5. 生命周期与交互</h2><ol><li>Session 创建时建立一个 projection state baseline。</li><li>每次 mutation 只标脏相关 Row。</li><li>touch 后生成 change，更新 runtime revision/eventSeq。</li><li>Gateway 转发 delta；客户端原地更新当前 Projection。</li><li>Side Panel 合并 50ms 内的变化，只渲染最近窗口。</li><li>完成、停止、切换 Session 时仍立即同步关键 UI 和最终持久化。</li></ol></section>
+
+<section id="failure"><h2>6. 失败与兼容</h2><ul><li>Delta gap：客户端重新获取完整 Projection。</li><li>旧客户端仍可通过 full subscribe 使用完整 Projection。</li><li>Session 被淘汰后从 SessionStore 冷恢复。</li><li>Event retention 不影响 row/message 内容或 SessionTree。</li><li>Debug 日志文本不完整时以 cursor gap/truncation 明示。</li><li>未知或无法应用的 delta 触发 resync，不静默污染 UI。</li></ul></section>
+
+<section id="acceptance"><h2>7. 验收</h2><ul><li>流式更新不再构造每秒多次完整历史 Projection。</li><li>所有长任务缓存有明确上限。</li><li>功能 E2E 与 Capsule 恢复保持兼容。</li><li>压力测试中内存增长在固定窗口后趋于稳定。</li><li>Debug、UI、持久化和历史行为无回归。</li></ul><p><b>Observed evidence:</b> 2,000 组真实 Chrome 流式 reasoning/answer delta 完成后，GC 后 renderer heap 增量为 0 MB；458 deterministic tests、10 Chrome E2E、TUI verification 通过。</p><p class="foot">REQ-PERF-001 · 0.12.0 verified · ADR-018 · P0 incident remediation</p></section>
+</div></body></html>

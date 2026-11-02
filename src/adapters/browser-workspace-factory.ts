@@ -17,6 +17,7 @@ import type { ToolDefinition } from '../core/types';
 import type { TraceRecorder } from '../core/trace-recorder';
 import { WorkspaceRuntime, type WorkspaceRuntimeOptions } from '../core/workspace-runtime';
 import type { CompletionGuard } from '../core/session-runtime';
+import type { SessionProjectionChange } from '../core/session-runtime';
 import { createBrowserToolPack } from './browser-tool-pack';
 import type { WorkspaceTabControl } from './browser-tools';
 
@@ -46,6 +47,7 @@ export interface BrowserWorkspaceFactoryOptions {
   tabScoped?: boolean;
   workspaceTabs?: WorkspaceTabControl;
   completionGuard?: CompletionGuard;
+  onProjectionChange?: (change: SessionProjectionChange) => void;
 }
 
 export interface BrowserWorkspaceBundle {
@@ -95,6 +97,7 @@ export function createBrowserWorkspace(
     ids: options.ids,
     sessionStore: options.sessionStore,
     completionGuard: options.completionGuard,
+    onProjectionChange: options.onProjectionChange,
     permissionModes,
     trace: options.trace,
     maxSteps: options.maxSteps,
