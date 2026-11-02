@@ -266,6 +266,39 @@
       "supersedes": [],
       "supersededBy": null,
       "file": "docs/decisions/DEC-014-layered-prompt-composition.md"
+    },
+    {
+      "id": "DEC-015",
+      "title": "Layered workspace resource paths and host interactions",
+      "statement": "虚拟文件路径、Workspace 作用域、宿主打开/导出能力和验证证据必须分层，不能写成 Chrome 专用路径或工具。",
+      "normalizedDecision": "Separate stable Workspace scope/resource identity and relative paths from host-specific open/export adapters and verification evidence; derive agent-facing capability availability from the active host.",
+      "capturedAt": "2026-11-02",
+      "source": "discussion",
+      "scope": [
+        "workspace",
+        "paths",
+        "host-ports",
+        "chrome",
+        "tui",
+        "ios",
+        "verification",
+        "prompt"
+      ],
+      "status": "promoted",
+      "triage": {
+        "disposition": "adr_and_requirement",
+        "adrs": ["ADR-021"],
+        "requirements": [
+          "REQ-WORKSPACE-003",
+          "REQ-HOST-004",
+          "REQ-CHROME-002",
+          "REQ-VERIFY-002"
+        ],
+        "rationale": "The decision changes cross-host workspace identity, path grammar, tool exposure, host adapters, verification evidence and Chrome lifecycle."
+      },
+      "supersedes": [],
+      "supersededBy": null,
+      "file": "docs/decisions/DEC-015-layered-workspace-interaction.md"
     }
   ]
 }

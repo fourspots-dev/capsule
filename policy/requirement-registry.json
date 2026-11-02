@@ -578,6 +578,90 @@
         "reviewedAt": "2026-11-02"
       },
       "architectureImpact": true
+    },
+    {
+      "id": "REQ-WORKSPACE-003",
+      "title": "Scoped workspace identity and canonical resource paths",
+      "type": "feature",
+      "priority": "P0",
+      "status": "accepted",
+      "designStatus": "review",
+      "implementationAuthorized": false,
+      "targetVersion": "0.14.0",
+      "design": "docs/workspace/virtual-workspace-capabilities-design.html#req-workspace-003",
+      "testDesign": "docs/workspace/virtual-workspace-capabilities-testing.html#req-workspace-003-testing",
+      "acceptance": "Workspace identity is stable and scoped independently from host IDs; every file operation is bound to workspaceId, generation and a canonical POSIX-like relative path; unrelated Chrome group/tab scopes cannot access each other's resources; legacy global VFS has an explicit recoverable migration.",
+      "legacyAliases": [],
+      "adrReview": {
+        "status": "proposed",
+        "adrs": ["ADR-021"],
+        "rationale": "ADR-021 defines the cross-host scope, path and resource-identity boundary.",
+        "reviewedAt": "2026-11-02"
+      },
+      "architectureImpact": true
+    },
+    {
+      "id": "REQ-HOST-004",
+      "title": "Host-neutral workspace open and export ports",
+      "type": "feature",
+      "priority": "P1",
+      "status": "accepted",
+      "designStatus": "review",
+      "implementationAuthorized": false,
+      "targetVersion": "0.14.0",
+      "design": "docs/workspace/virtual-workspace-capabilities-design.html#req-host-004",
+      "testDesign": "docs/workspace/virtual-workspace-capabilities-testing.html#req-host-004-testing",
+      "acceptance": "Workspace Open and Export are represented by host-neutral capability ports; Chrome, TUI, Headless, iOS and Sandbox can implement, reject or omit them independently; ToolPacks and prompts expose only discovered operations and no host-specific fields leak into Core or Platform contracts.",
+      "legacyAliases": [],
+      "adrReview": {
+        "status": "proposed",
+        "adrs": ["ADR-021"],
+        "rationale": "ADR-021 requires open/export behavior to be capability-driven host adapters rather than workspace-specific tools.",
+        "reviewedAt": "2026-11-02"
+      },
+      "architectureImpact": true
+    },
+    {
+      "id": "REQ-CHROME-002",
+      "title": "Chrome scoped workspace preview and export",
+      "type": "feature",
+      "priority": "P0",
+      "status": "accepted",
+      "designStatus": "review",
+      "implementationAuthorized": false,
+      "targetVersion": "0.14.0",
+      "design": "docs/workspace/virtual-workspace-capabilities-design.html#req-chrome-002",
+      "testDesign": "docs/workspace/virtual-workspace-capabilities-testing.html#req-chrome-002-testing",
+      "acceptance": "Chrome group members share one scoped virtual workspace while standalone tabs remain isolated; agents can open workspace resources in an isolated preview target and export them through a controlled download; file URLs and source injection into unrelated pages are not valid substitutes; preview targets cannot silently change task execution binding.",
+      "legacyAliases": [],
+      "adrReview": {
+        "status": "proposed",
+        "adrs": ["ADR-021"],
+        "rationale": "ADR-021 separates Chrome tab/group/download implementation from the portable workspace resource contract.",
+        "reviewedAt": "2026-11-02"
+      },
+      "architectureImpact": true
+    },
+    {
+      "id": "REQ-VERIFY-002",
+      "title": "Host-aware workspace application verification",
+      "type": "feature",
+      "priority": "P0",
+      "status": "accepted",
+      "designStatus": "review",
+      "implementationAuthorized": false,
+      "targetVersion": "0.14.0",
+      "design": "docs/workspace/virtual-workspace-capabilities-design.html#req-verify-002",
+      "testDesign": "docs/workspace/virtual-workspace-capabilities-testing.html#req-verify-002-testing",
+      "acceptance": "Opening a workspace resource is distinct from verifying it; host-aware evidence binds loaded resources, workspace generation, console observations, assertions and optional artifacts to the current task; stale evidence and temporary source injection cannot satisfy completion; existing TUI/Headless TestEvidence behavior remains valid.",
+      "legacyAliases": [],
+      "adrReview": {
+        "status": "proposed",
+        "adrs": ["ADR-021"],
+        "rationale": "ADR-021 keeps resource interaction separate from verification evidence so all hosts can use generation-bound application observations.",
+        "reviewedAt": "2026-11-02"
+      },
+      "architectureImpact": true
     }
   ]
 }

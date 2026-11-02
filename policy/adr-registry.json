@@ -269,6 +269,23 @@
       "approvedBy": "user",
       "supersedes": [],
       "supersededBy": null
+    },
+    {
+      "id": "ADR-021",
+      "title": "Layer workspace identity, paths and host interactions",
+      "status": "proposed",
+      "file": "docs/adr/ADR-021-layered-workspace-resource-interaction.md",
+      "requirements": [
+        "REQ-WORKSPACE-003",
+        "REQ-HOST-004",
+        "REQ-CHROME-002",
+        "REQ-VERIFY-002"
+      ],
+      "originDecision": "DEC-015",
+      "decidedAt": "2026-11-02",
+      "approvedBy": "none",
+      "supersedes": [],
+      "supersededBy": null
     }
   ]
 }

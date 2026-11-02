@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Workspace 资源路径与宿主交互详细设计</title>
+<style>
+:root{--bg:#f4f6f8;--paper:#fff;--text:#171a1f;--muted:#68707a;--line:#dfe4e9;--accent:#235a9b;--accent-soft:#eaf3ff;--ok:#137a4b;--warn:#986100;--danger:#b42318;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.72 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1220px;margin:auto;padding:36px 24px 96px}.hero{padding:38px;border-radius:25px;background:radial-gradient(circle at 88% 8%,#9ed3ff 0,transparent 27%),linear-gradient(135deg,#101923,#183b60 58%,#25649f);color:#fff}.hero small{letter-spacing:.11em;opacity:.72}.hero h1{font-size:36px;line-height:1.2;margin:12px 0}.hero p{max-width:930px;margin:0;color:#eef7ff}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.chip{padding:4px 10px;border:1px solid #ffffff38;border-radius:999px;background:#ffffff12;font-size:12px}nav{position:sticky;top:0;z-index:3;display:flex;gap:14px;overflow:auto;margin:18px 0;padding:10px 14px;border:1px solid var(--line);border-radius:13px;background:#f4f6f8ed;backdrop-filter:blur(12px)}nav a{color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap}section{margin:18px 0;padding:25px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:23px;margin:0 0 14px}h3{font-size:16px;margin:21px 0 8px}p{color:#424851}code{font-family:var(--mono);background:#eef1f4;padding:1px 5px;border-radius:4px}pre{overflow:auto;padding:16px;border-radius:11px;background:#111820;color:#eef6ff;font:12px/1.6 var(--mono)}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafbfc;color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.card{padding:15px;border:1px solid var(--line);border-radius:12px;background:#fafbfc}.card h3{margin:0 0 8px}.rule{padding:12px 14px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:var(--accent-soft)}.warn{border-color:var(--warn);background:#fff8e8}.danger{border-color:var(--danger);background:#fff1f0}.foot{color:var(--muted);font-size:12px}@media(max-width:800px){.grid{grid-template-columns:1fr}.wrap{padding:18px 12px 70px}.hero h1{font-size:28px}table{display:block;overflow-x:auto}}
+</style>
+</head>
+<body><div class="wrap">
+<header class="hero"><small>TINYAI / WORKSPACE RESOURCE ARCHITECTURE / REVIEW</small><h1>Workspace 资源路径与宿主交互</h1><p>把 Workspace 作用域、相对路径、资源身份、宿主打开/导出能力和应用验证拆成独立契约。Chrome 只实现自己的 Adapter，其他宿主共享同一套语义。</p><div class="chips"><span class="chip">Target 0.14.0</span><span class="chip">ADR-021 Proposed</span><span class="chip">Design Review</span><span class="chip">Implementation unauthorized</span></div></header>
+<nav><a href="#overview">总览</a><a href="#layers">分层</a><a href="#paths">路径</a><a href="#req-workspace-003">Workspace</a><a href="#req-host-004">Host Ports</a><a href="#req-chrome-002">Chrome</a><a href="#req-verify-002">Verification</a><a href="#architecture-impact">影响面</a><a href="#failure">失败</a><a href="#acceptance">验收</a></nav>
+
+<section id="overview"><h2>1. 问题、范围与需求</h2><p>当前 Chrome 所有标签共用一个扩展级 VFS，但 UI 和 Session 暴露标签组/独立标签作用域。Agent 又只能看到相对路径和“virtual workspace”工具描述，无法预先知道该路径不是宿主路径。因此会出现跨任务文件泄漏、<code>file://</code> 尝试、把源码注入无关页面验证以及写入成功但任务 Failed。</p>
+<table><thead><tr><th>需求</th><th>目标</th><th>优先级</th></tr></thead><tbody>
+<tr><td><code>REQ-WORKSPACE-003</code></td><td>稳定 Workspace Scope、Generation、相对路径和 ResourceRef。</td><td>P0</td></tr>
+<tr><td><code>REQ-HOST-004</code></td><td>宿主无关的 Open/Export Port、能力发现和生命周期。</td><td>P1</td></tr>
+<tr><td><code>REQ-CHROME-002</code></td><td>Chrome 标签组/独立标签 Workspace、预览和下载实现。</td><td>P0</td></tr>
+<tr><td><code>REQ-VERIFY-002</code></td><td>打开资源与验证应用分离，按宿主生成可审计 Evidence。</td><td>P0</td></tr>
+</tbody></table>
+<div class="rule"><b>非目标：</b>不把 Chrome tab/group/download 抽象塞进 Core；不实现任意宿主机写权限；不保证所有宿主支持交互式预览；不把成功打开页面等同于应用验证通过。</div></section>
+
+<section id="layers"><h2>2. 分层与所有权</h2><pre>Layer 4  Agent Surface
+ToolPack / Prompt / UI events
+        ↓ capability-driven
+Layer 3  Portable Workspace Interaction
+WorkspaceScope / WorkspacePath / WorkspaceResourceRef
+WorkspaceOpenPort / WorkspaceExportPort
+        ↓ host-neutral contracts
+Layer 2  Host Interaction Adapters
+Chrome / Node / Headless / iOS / Sandbox
+        ↓
+Layer 1  Host Backend
+tabs+downloads / filesystem+editor / FilePicker / artifact bridge</pre>
+<table><thead><tr><th>层</th><th>拥有</th><th>禁止知道</th></tr></thead><tbody>
+<tr><td>Portable Workspace</td><td>Scope、generation、路径规范化、ResourceRef、错误码</td><td>tabId、groupId、Downloads、Windows drive、iOS URL</td></tr>
+<tr><td>Interaction Ports</td><td>能力描述、OpenIntent、ExportIntent、幂等和取消</td><td>具体预览 DOM、Chrome Service Worker、UI 布局</td></tr>
+<tr><td>Host Adapter</td><td>宿主身份映射和真实打开/导出</td><td>Session 对话状态机、模型指令</td></tr>
+<tr><td>ToolPack / Prompt</td><td>把能力投影为工具和事实说明</td><td>手工拼接宿主 URL 或猜测不可用能力</td></tr>
+<tr><td>Evidence</td><td>verification kind、generation、observations</td><td>把 open/export 成功直接判为应用正确</td></tr>
+</tbody></table>
+<p>Application Actions 不承担本能力。测试命令、构建和部署仍属于 Action；Workspace open/export 属于基础 Host Interaction。</p></section>
+
+<section id="paths"><h2>3. 路径与资源身份</h2><pre>type WorkspacePath = string &amp; { readonly __workspacePath: unique symbol };
+
+interface WorkspaceScope {
+  workspaceId: string;
+  kind: 'group' | 'tab' | 'session' | 'global';
+  displayName: string;
+  generation: number;
+}
+
+interface WorkspaceResourceRef {
+  workspaceId: string;
+  path: WorkspacePath;
+  generation: number;
+}
+
+interface WorkspaceResourceDescriptor extends WorkspaceResourceRef {
+  resourceUri: `workspace://${string}/${string}`; // opaque, never navigable
+  mimeType: string;
+  size: number;
+  version: number;
+  openable: boolean;
+  exportable: boolean;
+}</pre>
+<h3>Agent 可见规则</h3><ul><li><code>path</code> 始终相对当前 Workspace，使用 POSIX <code>/</code>。</li><li>根目录仅在列举工具中表示为空字符串或 <code>.</code>。</li><li>拒绝绝对路径、scheme、各类 drive prefix、<code>..</code>、NUL/控制字符和 URI 编码逃逸。</li><li>大小写保留且敏感；Unicode 统一 NFC；保留空格和合法 Unicode 文件名。</li><li><code>workspace://</code> 仅作内部资源标识，禁止传给 Browser navigate。</li><li><code>write_file</code> 返回 Descriptor，而非裸路径。</li></ul>
+<div class="warn rule"><b>兼容：</b>首轮保留工具参数 <code>path: string</code>，解析后转换为 branded path；不要求模型发送 workspaceId。workspaceId 和 generation 由当前 Session 自动绑定。</div></section>
+
+<section id="req-workspace-003"><h2>4. REQ-WORKSPACE-003：Scope 与 Path</h2><p><span class="chip">P0</span> <span class="chip">Design review</span></p>
+<h3>Scope 模型</h3><p>Chrome 标签组成员共享一个 Workspace；组外独立标签拥有自己的 Workspace。Workspace 身份用持久 UUID，Chrome <code>windowId/groupId/tabId</code> 只存在于 Binding Adapter。</p><pre>interface ChromeWorkspaceBinding {
+  workspaceId: string;
+  scope: 'group' | 'tab';
+  windowId: number;
+  groupId?: number;
+  rootTabId: string;
+  memberTabIds: string[];
+  revision: number;
+}</pre>
+<h3>生命周期</h3><table><thead><tr><th>事件</th><th>行为</th></tr></thead><tbody><tr><td>首次激活组/独立标签</td><td>惰性创建 Workspace 与 binding</td></tr><tr><td>组内切标签</td><td>Workspace 和 Session 不变，只更新 active target</td></tr><tr><td>标签加入/移出组</td><td>重新解析 Scope；禁止静默复制或合并文件</td></tr><tr><td>groupId 失效/重启</td><td>依据 root/member 快照恢复或创建新 scope，不猜测已删除 scope</td></tr><tr><td>关闭最后成员</td><td>binding 失效，Workspace 进入可恢复历史，不立即删除</td></tr></tbody></table>
+<h3>模块影响</h3><ul><li>修改 <code>src/virtual/path.ts</code> 与 VFS 路径入口，集中路径验证。</li><li>新增 <code>src/platform/workspace-scope.ts</code> 和 <code>workspace-resource.ts</code>。</li><li>拆分 <code>chrome-runtime.ts</code> 的单例 VFS 创建，改由 binding 惰性获取。</li><li>Session Snapshot 只保存 workspaceId，不保存 Chrome 身份。</li></ul>
+<h3>验收</h3><ul><li>两个无关 Workspace 相互不可 list/read/write。</li><li>组内标签看到同一资源；独立标签看不到组资源。</li><li>所有工具结果包含 workspaceId、path 和 generation。</li><li>旧全局 Workspace 有迁移计划，不静默丢弃文件。</li></ul></section>
+
+<section id="req-host-004"><h2>5. REQ-HOST-004：Workspace Interaction Ports</h2><p><span class="chip">P1</span> <span class="chip">Design review</span></p><pre>interface WorkspaceInteractionCapabilities {
+  open: {
+    available: boolean;
+    modes: Array<'embedded-preview'|'external-window'|'native-app'|'handoff'>;
+    mimeTypes?: string[];
+  };
+  export: {
+    available: boolean;
+    destinations: Array<'download'|'host-path'|'share'>;
+  };
+}
+
+interface WorkspaceOpenPort {
+  capabilities(): Promise&lt;WorkspaceInteractionCapabilities['open']&gt;;
+  open(input: {
+    resource: WorkspaceResourceRef;
+    intent: 'preview'|'edit'|'debug';
+    ephemeral: boolean;
+  }, signal?: AbortSignal): Promise&lt;{
+    mode: string;
+    targetId?: string;
+    resource: WorkspaceResourceRef;
+  }&gt;;
+  close?(targetId: string): Promise&lt;void&gt;;
+}
+
+interface WorkspaceExportPort {
+  capabilities(): Promise&lt;WorkspaceInteractionCapabilities['export']&gt;;
+  export(resource: WorkspaceResourceRef, signal?: AbortSignal): Promise&lt;{
+    artifactId: string;
+    displayName: string;
+    bytes: number;
+  }&gt;;
+}</pre>
+<table><thead><tr><th>Host</th><th>Open</th><th>Export</th><th>必需约束</th></tr></thead><tbody>
+<tr><td>Chrome</td><td>隔离扩展预览标签</td><td>Downloads</td><td>不暴露扩展存储或宿主路径</td></tr>
+<tr><td>TUI</td><td>内置 viewer / OS editor</td><td>Host FS bridge</td><td>Host FS 必须显式授权</td></tr>
+<tr><td>Headless</td><td>不可用</td><td>Artifact/output sink</td><td>不注册交互工具</td></tr>
+<tr><td>iOS</td><td>WKWebView/Quick Look</td><td>File Picker/Share Sheet</td><td>无 Process、无绝对路径</td></tr>
+<tr><td>Sandbox</td><td>Host UI bridge</td><td>Transfer Artifact</td><td>不突破沙箱边界</td></tr>
+</tbody></table>
+<p>能力由 Provider Registry 探测，ToolPack 和 Prompt 只消费结果。Open/Export 不授予权限；风险与审批仍由现有 Policy 处理。</p>
+<h3>错误码</h3><pre>WORKSPACE_RESOURCE_NOT_FOUND
+WORKSPACE_SCOPE_MISMATCH
+WORKSPACE_OPEN_UNSUPPORTED
+WORKSPACE_EXPORT_UNSUPPORTED
+WORKSPACE_OPEN_CANCELLED
+WORKSPACE_EXPORT_COLLISION
+WORKSPACE_RESOURCE_STALE</pre>
+<h3>验收</h3><ul><li>相同接口可由至少 Chrome 与一个非 Chrome fake/host 实现。</li><li>未注册能力的 Host 不暴露对应工具或 Prompt 文案。</li><li>取消后不留下预览 target 或部分下载。</li><li>低层结果不包含 Chrome 专属字段。</li></ul></section>
+
+<section id="req-chrome-002"><h2>6. REQ-CHROME-002：Chrome Scope、Preview 和 Download</h2><p><span class="chip">P0</span> <span class="chip">Design review</span></p>
+<h3>引导与预览</h3><pre>Agent path: minesweeper.html
+  → current Workspace resolver
+  → ResourceRef
+  → ChromeWorkspaceOpenPort
+  → chrome-extension://&lt;id&gt;/workspace-preview.html?token=...
+  → isolated preview tab
+
+Agent: open_workspace_file({path:"minesweeper.html", intent:"preview"})
+  → {mode:"embedded-preview", targetId:"123", resource:{...}}</pre>
+<p>预览页必须通过 runtime token/resource id 读取 VFS，不把用户源码注入无关标签，不接受模型构造的绝对扩展 URL。HTML/JS/CSS 按 MIME 和隔离策略加载。</p>
+<h3>导出</h3><p><code>export_workspace_file</code> 读取 ResourceRef、校验 generation、生成 Blob，并通过 <code>chrome.downloads</code> 下载。只有导出完成后 Agent 才能说“可在本机打开”。</p>
+<h3>Workspace 生命周期</h3><ul><li>绑定 <code>TabSessionRegistry</code> 的 group/tab scope，不再使用单例全局 VFS。</li><li>组内成员共享 Workspace；独立标签完全隔离。</li><li>迁移旧 <code>tinyai:virtual-workspace:v1</code> 时创建 Legacy Workspace，并让首个绑定显式接管；不自动复制到多个组。</li><li>预览 target 是 ephemeral workspace target，不改变 executionTabId，除非用户/Action 显式切换。</li></ul>
+<h3>UI</h3><p>复用现有 Side Panel workspace 行和 Tool row，不增加卡片。显示 `workspace name · group/standalone`；资源打开和导出以普通 Tool row 展示，文件名可点击但链接由 Runtime 生成。</p>
+<h3>验收</h3><ul><li><code>file://</code> 尝试被明确拒绝并提示使用 preview tool。</li><li>真实预览加载的字节与 read_file 一致。</li><li>两个标签组无法看到对方文件。</li><li>导出文件可由 OS 打开；虚拟文件不再被描述为宿主文件。</li></ul></section>
+
+<section id="req-verify-002"><h2>7. REQ-VERIFY-002：宿主感知应用验证</h2><p><span class="chip">P0</span> <span class="chip">Design review</span></p>
+<p>Open 只证明资源被宿主加载，不证明应用正确。新增通用 Observation 和 Verifier，而 CompletionGuard 根据 capability 选择验证策略。</p><pre>interface WorkspaceAppObservation {
+  kind: 'browser-app'|'process-test'|'native-smoke'|'manual';
+  resource?: WorkspaceResourceRef;
+  workspaceGeneration: number;
+  loaded: boolean;
+  consoleErrors: string[];
+  assertions: Array&lt;{name:string; passed:boolean; detail?:string}&gt;;
+  screenshotArtifactId?: string;
+  createdAt: number;
+}
+
+interface WorkspaceVerificationGuard {
+  verify(context: CompletionGuardContext): Promise&lt;{
+    ok: boolean;
+    reason?: string;
+    evidenceId?: string;
+  }&gt;;
+}</pre>
+<table><thead><tr><th>Host/工作类型</th><th>所需证据</th></tr></thead><tbody><tr><td>Chrome HTML/JS 应用</td><td>预览 loaded、无未解释 console error、关键 DOM/交互断言、截图</td></tr><tr><td>Chrome 普通文档编辑</td><td>读取回写 hash 或资源预览，不要求 TestReport</td></tr><tr><td>TUI/Headless 代码</td><td>Application Action TestEvidence</td></tr><tr><td>iOS</td><td>Native smoke/handoff observation</td></tr><tr><td>无验证能力</td><td>任务可结束为 completed-with-limitations，不得伪造 passed</td></tr></tbody></table>
+<div class="danger rule"><b>禁止：</b>用 evaluate 把源码注入任意用户页面作为验证；用 open 成功替代全部断言；使用写入前 generation；Open 后再修改文件仍判 current。</div>
+<h3>验收</h3><ul><li>独立应用只在真实 ResourceRef 预览与断言通过后完成。</li><li>stale generation、console error、失败 assertion 阻断 completed。</li><li>TUI Portable Action 验证行为不回归。</li><li>任务回答明确引用实际 evidence，不声称“双击可用”而未经 export。</li></ul></section>
+
+<section id="architecture-impact"><h2>8. Architecture impact map</h2><table><thead><tr><th>Surface</th><th>Action</th><th>Evidence</th></tr></thead><tbody>
+<tr><td>Portable Workspace</td><td>modify</td><td>Scope/path/resource unit + migration tests</td></tr>
+<tr><td>Platform Ports</td><td>add</td><td>Port contract and capability matrix</td></tr>
+<tr><td>Chrome Adapter</td><td>modify</td><td>scope isolation, preview/download E2E</td></tr>
+<tr><td>TUI/Headless</td><td>modify</td><td>Adapter implementation or unavailable behavior</td></tr>
+<tr><td>iOS/Sandbox</td><td>add contracts</td><td>host-neutral fake/golden; future real adapters</td></tr>
+<tr><td>ToolRegistry</td><td>modify</td><td>capability-derived open/export tools</td></tr>
+<tr><td>Prompt</td><td>modify</td><td>dynamic virtual path and host facts; no foreign capabilities</td></tr>
+<tr><td>CompletionGuard</td><td>modify</td><td>host-aware evidence and stale generation</td></tr>
+<tr><td>UI</td><td>modify</td><td>workspace scope, open/export rows, canonical style E2E</td></tr>
+<tr><td>Session/Capsule</td><td>modify carefully</td><td>workspaceId refs round-trip; no host IDs</td></tr>
+<tr><td>Legacy cleanup</td><td>modify</td><td>global VFS migration and file:// fallback removal</td></tr>
+</tbody></table>
+<div class="danger rule"><b>禁止部分交付：</b>只实现 Chrome 预览；只写 Prompt 不修 Scope；只增加下载不修路径；保留全局 VFS 并仅在 UI 隐藏；继续接受 evaluate 注入作为应用 Evidence。</div></section>
+
+<section id="failure"><h2>9. 失败、取消、恢复与兼容</h2><ul><li>Scope 在操作中变化：返回 <code>WORKSPACE_SCOPE_MISMATCH</code>，不猜测新 scope。</li><li>文件 generation 变化：Open/Export/Evidence 返回 stale。</li><li>预览 target 关闭：资源仍在 VFS，可重新 open；不视为文件删除。</li><li>下载取消：删除临时 Blob/Artifact，Task 显示 cancelled。</li><li>Service Worker 重启：从 binding store 恢复 scope；ephemeral preview 允许失效。</li><li>旧全局 Workspace：迁移前备份；由用户选择接管 scope，无法自动归属时进入 Legacy Workspace。</li><li>Capsule 导入：workspaceId 映射为新的稳定 ID，Host binding 不入 Capsule。</li></ul></section>
+
+<section id="acceptance"><h2>10. 分阶段交付与验收</h2><table><thead><tr><th>阶段</th><th>内容</th><th>门禁</th></tr></thead><tbody>
+<tr><td>A</td><td>Workspace path/scope/resource contract 与迁移</td><td>路径 fuzz、scope isolation、旧数据恢复</td></tr>
+<tr><td>B</td><td>Open/Export Port 和能力矩阵</td><td>Chrome fake + 非 Chrome fake contract</td></tr>
+<tr><td>C</td><td>Chrome scoped VFS、preview、download</td><td>真实 Chrome E2E，无跨组泄漏</td></tr>
+<tr><td>D</td><td>Host-aware verification 与 Prompt/Tool 投影</td><td>应用任务可真实完成，无假 Evidence</td></tr>
+</tbody></table>
+<p>整体验收：任一宿主都能只暴露自己的能力；Agent 始终看到 workspace-relative path；Workspace 资源能按宿主 preview/export；验证失败或过期时不会显示 completed；Chrome 的真实应用任务通过独立文件预览完成 E2E。</p>
+<p class="foot">REQ-WORKSPACE-003 · REQ-HOST-004 · REQ-CHROME-002 · REQ-VERIFY-002 · Target 0.14.0 · Design review · ADR-021 Proposed · Implementation unauthorized</p></section>
+</div></body></html>
