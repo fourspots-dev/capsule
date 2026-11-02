@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.11.2
+
+### Fixes
+
+- `REQ-CHROME-001`: treat Chrome native new-tab pages such as
+  `chrome://newtab/` and `chrome-search://local-ntp/` as a blank workspace target
+  instead of reporting that the active tab cannot be found.
+- Add a real Chrome regression that activates a native new tab while the Side
+  Panel is running and verifies the UI remains usable without a tab error.
+
+### Verification
+
+- `npm run check`: 441 tests passed, 3 skipped.
+- `npm run test:e2e`: 8 Chrome E2E tests passed.
+
 ## 0.11.1
 
 ### Fixes

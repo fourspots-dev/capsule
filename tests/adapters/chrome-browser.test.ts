@@ -387,6 +387,24 @@ describe('ChromeBrowserProvider', () => {
     });
   });
 
+  it('treats Chrome native new-tab pages as a blank workspace target', async () => {
+    const browser = new ChromeBrowserProvider({
+      tabs: fakeTabs([
+        tab(3, 'chrome://newtab/'),
+        tab(4, 'chrome-search://local-ntp/local-ntp.html', false),
+      ]),
+      debugger: fakeDebugger(),
+    });
+    expect(await browser.listTabs()).toEqual([
+      expect.objectContaining({ id: '3', url: 'about:blank' }),
+      expect.objectContaining({ id: '4', url: 'about:blank' }),
+    ]);
+    expect(await browser.getTab('3')).toMatchObject({
+      id: '3',
+      url: 'about:blank',
+    });
+  });
+
   it('keeps the previous working target when tab grouping fails', async () => {
     const tabs = fakeTabs([tab(1)]);
     tabs.group = vi.fn(async () => {

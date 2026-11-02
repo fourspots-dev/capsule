@@ -1042,6 +1042,22 @@ describe('kernel extension E2E', () => {
       expect(body).not.toContain('Browser session not found');
       expect(await page.locator('.wb-tool-status--error').count()).toBe(0);
       expect(modelCalls).toBe(callsBefore + 3);
+
+      const nativeNewTab = await page.evaluate(async () => {
+        const current = await chrome.windows.getCurrent();
+        const tab = await chrome.tabs.create({
+          windowId: current.id,
+          url: 'chrome://newtab/',
+          active: true,
+        });
+        return String(tab.id);
+      });
+      await page.waitForFunction(
+        (tabId) => document.documentElement.dataset.tinyaiTabId === tabId,
+        nativeNewTab
+      );
+      expect(await page.textContent('body')).not.toContain('BROWSER_TAB_NOT_FOUND');
+      expect(await page.textContent('body')).not.toContain('Tab not found');
       expect(pageErrors).toEqual([]);
     } finally {
       await recoveryContext.close();

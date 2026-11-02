@@ -859,7 +859,13 @@
     return /^(https?|file):/.test(String(url ?? "")) || url === "about:blank";
   }
   function inspectableUrl(tab) {
-    return String(tab.url || tab.pendingUrl || "");
+    const url = String(tab.url || tab.pendingUrl || "");
+    return isNativeNewTab(url) ? "about:blank" : url;
+  }
+  function isNativeNewTab(url) {
+    return /^(?:chrome|chrome-search):\/\/(?:newtab(?:\/|$)|new-tab-page(?:\/|$)|local-ntp(?:\/|$))/i.test(
+      url
+    );
   }
   function safeUrl(url) {
     const value = url.trim();
@@ -16742,7 +16748,7 @@ ${lines.join("\n")}
       artifacts: artifactStore,
       environmentId: "chrome-extension-v1",
       hostProfile: "browser-agent",
-      agentVersion: "0.11.1",
+      agentVersion: "0.11.2",
       newId: () => `capsule_${crypto.randomUUID()}`,
       beforeExport: async () => {
         if (!activeRuntime) return;

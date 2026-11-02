@@ -1,7 +1,7 @@
 {
   "name": "tinyai",
   "private": true,
-  "version": "0.11.1",
+  "version": "0.11.2",
   "scripts": {
     "build": "npm run typecheck && npm run clean && npm run extension:sync && npm run build:sidepanel && npm run build:background && npm run build:cli && npm run build:tui && npm run build:workspace-agent && npm run build:workspace-transfer && npm run build:runner && npm run build:proxy && npm run build:package",
     "build:sidepanel": "esbuild src/sidepanel.ts --bundle --format=iife --target=chrome120 --outfile=extension/js/sidepanel/main.js",

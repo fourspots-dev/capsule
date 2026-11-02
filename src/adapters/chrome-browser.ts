@@ -1154,7 +1154,14 @@ function isInspectable(url: unknown): boolean {
 }
 
 function inspectableUrl(tab: chrome.tabs.Tab): string {
-  return String(tab.url || tab.pendingUrl || '');
+  const url = String(tab.url || tab.pendingUrl || '');
+  return isNativeNewTab(url) ? 'about:blank' : url;
+}
+
+function isNativeNewTab(url: string): boolean {
+  return /^(?:chrome|chrome-search):\/\/(?:newtab(?:\/|$)|new-tab-page(?:\/|$)|local-ntp(?:\/|$))/i.test(
+    url
+  );
 }
 
 function safeUrl(url: string): string {
