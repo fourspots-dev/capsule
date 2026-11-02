@@ -416,7 +416,7 @@ async function main(): Promise<void> {
     environmentId: `tui-${options.workspaceMode}-${options.toolProfile}`,
     hostProfile:
       options.workspaceMode === 'host' ? 'local-coding' : 'portable',
-    agentVersion: '0.13.0',
+    agentVersion: '0.14.0',
     environment: {
       manifestVersion: 1,
       requiredActions: options.actionScripts.map((script) => ({

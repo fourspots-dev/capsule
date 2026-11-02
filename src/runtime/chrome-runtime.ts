@@ -16,10 +16,6 @@ import {
 import { RemoteActionProvider } from '../adapters/remote-action-provider';
 import { LspActionCodeIntelligence } from '../adapters/lsp-action-code-intelligence';
 import { createWorkspaceCapabilityComposition } from './workspace-capability-composition';
-import {
-  TestEvidenceService,
-  createTestEvidenceCompletionGuard,
-} from '../evidence';
 import { VirtualWorkspace } from '../virtual';
 import { createSkillTools } from '../adapters/skill-tools';
 import { registerDeclarativeHooks } from '../adapters/declarative-hooks';
@@ -33,6 +29,7 @@ import { SequentialIdGenerator, systemClock } from '../core/ports';
 import { PermissionModeRegistry } from '../core/policy';
 import { ModelGateway } from '../core/model-gateway';
 import type { WorkspaceRuntime } from '../core/workspace-runtime';
+import type { CompletionGuard } from '../core/session-runtime';
 import type { PermissionMode } from '../core/policy';
 import { createBrowserTools } from '../adapters/browser-tools';
 import {
@@ -59,6 +56,10 @@ import {
 } from '../observability/debug-service-config';
 import { ChromeHttpEventTransport } from '../observability/chrome-http-event-transport';
 import { ProjectionExecutionTracker } from '../observability/projection-execution-tracker';
+import { ChromeWorkspaceScopeRegistry } from './chrome-workspace-scope';
+import { ChromeScopedWorkspaceManager } from './chrome-scoped-workspace-manager';
+import { ChromeWorkspaceInteractionProvider } from '../adapters/chrome-workspace-interaction';
+import { ChromeWorkspaceObservationStore } from '../adapters/chrome-workspace-observation-store';
 
 export const KERNEL_PORT_NAME = 'tinyai-runtime-v1';
 export const REMOTE_ACTIONS_KEY = 'tinyai-remote-actions';
@@ -166,6 +167,7 @@ export async function createChromeRuntimeBundle(
     initialCapsule?: Uint8Array;
   } = {}
 ): Promise<RuntimeBundle> {
+  const chromeApi = options.chromeApi ?? chrome;
   const chromeHost = new ChromeHostBridge({
     storage: options.storage as unknown as ChromeStorageArea,
     id: 'tinyai-chrome-virtual-workspace',
@@ -174,6 +176,12 @@ export async function createChromeRuntimeBundle(
     host: chromeHost,
     storageKey: 'tinyai:virtual-workspace:v1',
   });
+  const workspaceScopes = new ChromeWorkspaceScopeRegistry({
+    host: chromeHost,
+    legacyWorkspace: virtualWorkspace,
+  });
+  let tabSessions: TabSessionRegistry | undefined;
+  let mainWorkspace: ReturnType<typeof createBrowserWorkspace>;
   const storage = options.storage ?? chromeLocalStorage();
   const sessionStore = new ChromeSessionStore({
     storage: chromeStorageForSessions(storage),
@@ -208,6 +216,11 @@ export async function createChromeRuntimeBundle(
     options.browser ??
     options.createBrowser?.() ??
     new ChromeBrowserProvider();
+  const workspaceInteraction = new ChromeWorkspaceInteractionProvider({
+    chromeApi,
+    workspaces: workspaceScopes,
+    browser,
+  });
   const model = new ModelGateway({
     targets: [
       {
@@ -227,6 +240,9 @@ export async function createChromeRuntimeBundle(
     }
   );
   const evidenceStore = new HostEvidenceStore(chromeHost.storage);
+  const workspaceObservations = new ChromeWorkspaceObservationStore(
+    chromeHost.storage
+  );
   const importJournal = new HostWorkspaceImportJournal(chromeHost.storage);
   const actionRegistry = new HostActionRegistry();
   const remoteActionConfig = parseRemoteActionConfig(
@@ -250,22 +266,7 @@ export async function createChromeRuntimeBundle(
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([tier, state]) => `${tier}:${state}`),
   ].join('|');
-  const testEvidence = new TestEvidenceService({
-    store: evidenceStore,
-    artifacts: artifactStore,
-    vfs: virtualWorkspace.fs,
-    environmentFingerprint,
-    workspaceGeneration: () => virtualWorkspace.generation(),
-  });
-  const completionGuard = createTestEvidenceCompletionGuard({
-    service: testEvidence,
-    store: evidenceStore,
-    actionVersions: async (actionId) =>
-      (await actionRegistry.list()).find(
-        (action) => action.descriptor.id === actionId
-      )?.descriptor.version,
-  });
-  const sharedComposition = await createWorkspaceCapabilityComposition({
+  const templateComposition = await createWorkspaceCapabilityComposition({
     workspace: virtualWorkspace,
     profile: 'portable',
     actionRegistry,
@@ -274,7 +275,7 @@ export async function createChromeRuntimeBundle(
     environmentFingerprint,
     hostBaseline,
     workspaceGeneration: () => virtualWorkspace.generation(),
-    testEvidence,
+    workspaceInteractionProvider: workspaceInteraction,
     ...(actionReport.available.some(
       (action) => action.descriptor.id === 'code.lsp.query'
     )
@@ -289,6 +290,27 @@ export async function createChromeRuntimeBundle(
       evidenceVfs: virtualWorkspace.fs,
     }),
   });
+  const scopedWorkspaces = new ChromeScopedWorkspaceManager({
+    workspaces: workspaceScopes,
+    workspaceIdForSession: async (sessionId) =>
+      tabSessions?.workspaceForSession(sessionId),
+    actions: actionRegistry,
+    baseline: hostBaseline,
+    environmentFingerprint,
+    artifacts: artifactStore,
+    evidenceStore,
+    observations: workspaceObservations,
+    interaction: workspaceInteraction,
+    codeIntelligence: (workspace) =>
+      actionReport.available.some(
+        (action) => action.descriptor.id === 'code.lsp.query'
+      )
+        ? new LspActionCodeIntelligence(actionRegistry)
+        : undefined,
+  });
+  const completionGuard: CompletionGuard = (context) =>
+    scopedWorkspaces.completionGuard(context);
+  const workspaceTools = scopedWorkspaces.wrapTools(templateComposition.tools);
   let activeRuntime: WorkspaceRuntime | undefined;
   const continuity = new WorkspaceContinuityService({
     workspaceId: 'tinyai-browser-workspace',
@@ -298,7 +320,7 @@ export async function createChromeRuntimeBundle(
     artifacts: artifactStore,
     environmentId: 'chrome-extension-v1',
     hostProfile: 'browser-agent',
-    agentVersion: '0.13.0',
+    agentVersion: '0.14.0',
     newId: () => `capsule_${crypto.randomUUID()}`,
     beforeExport: async () => {
       if (!activeRuntime) return;
@@ -385,7 +407,7 @@ export async function createChromeRuntimeBundle(
     mime: string,
     base64: string
   ) => {
-    await chrome.downloads.download({
+    await chromeApi.downloads.download({
       url: `data:${mime};base64,${base64}`,
       filename: name,
       saveAs: false,
@@ -404,7 +426,7 @@ export async function createChromeRuntimeBundle(
       tools: input.tools,
       actions: actionReport.available,
       codeIntelligence:
-        sharedComposition.codeIntelligenceCapabilities,
+        templateComposition.codeIntelligenceCapabilities,
       skills: initialSkills,
       ...(projectInstructions ? { projectInstructions } : {}),
       ...(input.profile ? { agentProfile: input.profile } : {}),
@@ -416,12 +438,10 @@ export async function createChromeRuntimeBundle(
   });
   const childPromptTools = [
     ...childBrowserTools,
-    ...sharedComposition.tools,
+    ...workspaceTools,
     ...skillTools,
     ...mcpTools,
   ];
-  let mainWorkspace: ReturnType<typeof createBrowserWorkspace>;
-  let tabSessions: TabSessionRegistry | undefined;
   const workspaceTabs = {
     createTab: (sessionId: string, url?: string) =>
       requireTabSessions().createTab(sessionId, url),
@@ -443,8 +463,14 @@ export async function createChromeRuntimeBundle(
   const subagentDriver = new WorkspaceSubagentDriver({
     ids,
     now: () => systemClock.now(),
-    createRuntime: ({ sessionId, spec, profile }) =>
-      createBrowserWorkspace({
+    createRuntime: async ({ sessionId, spec, profile }) => {
+      const parentWorkspaceId = spec.parentSessionId
+        ? await tabSessions?.workspaceForSession(spec.parentSessionId)
+        : undefined;
+      if (parentWorkspaceId) {
+        scopedWorkspaces.bindSession(sessionId, parentWorkspaceId);
+      }
+      return createBrowserWorkspace({
         model,
         browser,
         sessionStore,
@@ -462,7 +488,7 @@ export async function createChromeRuntimeBundle(
             tools: childPromptTools,
             profile,
             runtime: {
-              workspaceId: virtualWorkspace.workspaceId,
+              workspaceScope: 'session-bound',
               environmentFingerprint,
               agentKind: 'subagent',
             },
@@ -474,7 +500,7 @@ export async function createChromeRuntimeBundle(
           capabilities: profile.effectivePermissions.capabilities,
         },
         additionalTools: [
-          ...sharedComposition.tools.map((definition) => ({
+          ...workspaceTools.map((definition) => ({
             definition,
             source: 'builtin' as const,
             sourceId: 'workspace-shared',
@@ -493,7 +519,8 @@ export async function createChromeRuntimeBundle(
         completionGuard,
         tabScoped: true,
         onProjectionChange,
-      }).runtime,
+      }).runtime;
+    },
   });
   const coordinator = new SubagentCoordinator({
     registry,
@@ -532,20 +559,20 @@ export async function createChromeRuntimeBundle(
         mode,
         tools: [
           ...mainBrowserTools,
-          ...sharedComposition.tools,
+          ...workspaceTools,
           ...subagentTools,
           ...skillTools,
           ...mcpTools,
         ],
         runtime: {
-          workspaceId: virtualWorkspace.workspaceId,
+          workspaceScope: 'session-bound',
           environmentFingerprint,
           agentKind: 'root',
         },
       }),
     download: downloadArtifact,
     additionalTools: [
-      ...sharedComposition.tools.map((definition) => ({
+      ...workspaceTools.map((definition) => ({
         definition,
         source: 'builtin' as const,
         sourceId: 'workspace-shared',
@@ -593,7 +620,9 @@ export async function createChromeRuntimeBundle(
     mainWorkspace.runtime,
     tabSessions,
     browser,
-    options.chromeApi ?? chrome
+    chromeApi,
+    workspaceScopes,
+    workspaceObservations
   );
   return {
     runtime: mainWorkspace.runtime,
@@ -630,6 +659,7 @@ export async function createChromeRuntimeBundle(
       unsubscribeChildren();
       approval.dispose();
       await coordinator.dispose();
+      await scopedWorkspaces.dispose();
       await virtualWorkspace.jobs.dispose();
       await mainWorkspace.dispose();
       await Promise.all(mcpClients.map((client) => client.close()));
@@ -685,7 +715,7 @@ export function installKernelRuntimeGateway(
   const gateway = new RuntimeGateway(async () =>
     createChromeRuntimeBundle({
       storage: chromeApi.storage.local,
-      tabSessionStorage: chromeApi.storage.session as unknown as ChromeKeyValueStorage,
+      tabSessionStorage: chromeApi.storage.local,
       chromeApi,
     })
   );

@@ -1,11 +1,12 @@
 {
   "name": "tinyai",
   "private": true,
-  "version": "0.13.0",
+  "version": "0.14.0",
   "scripts": {
-    "build": "npm run typecheck && npm run clean && npm run extension:sync && npm run build:sidepanel && npm run build:background && npm run build:cli && npm run build:tui && npm run build:workspace-agent && npm run build:workspace-transfer && npm run build:runner && npm run build:proxy && npm run build:debug-server && npm run build:package",
+    "build": "npm run typecheck && npm run clean && npm run extension:sync && npm run build:sidepanel && npm run build:background && npm run build:workspace-preview && npm run build:cli && npm run build:tui && npm run build:workspace-agent && npm run build:workspace-transfer && npm run build:runner && npm run build:proxy && npm run build:debug-server && npm run build:package",
     "build:sidepanel": "esbuild src/sidepanel.ts --bundle --format=iife --target=chrome120 --outfile=extension/js/sidepanel/main.js",
     "build:background": "esbuild src/background.ts --bundle --format=iife --target=chrome120 --outfile=extension/js/background/main.js",
+    "build:workspace-preview": "esbuild src/workspace-preview.ts --bundle --format=iife --target=chrome120 --outfile=extension/js/workspace-preview/main.js",
     "build:cli": "esbuild src/cli/coding-agent.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tinyai-coding-agent.cjs",
     "build:tui": "esbuild src/cli/tui-agent.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tinyai-tui.cjs",
     "build:workspace-agent": "esbuild src/cli/workspace-agent.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tinyai-workspace-agent.cjs",

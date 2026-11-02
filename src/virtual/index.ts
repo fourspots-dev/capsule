@@ -13,3 +13,4 @@ export * from './context-patch';
 export * from './patch-port';
 export * from './sync';
 export * from './workspace';
+export * from './scoped-fs';

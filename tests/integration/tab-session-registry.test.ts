@@ -48,6 +48,7 @@ describe('TabSessionRegistry', () => {
       runtime: workspace.runtime,
       browser: tabs,
       createSessionId: () => `session_${++sequence}`,
+      createWorkspaceId: () => 'ws_group',
     });
 
     const first = await registry.resolve({ windowId: 1, tabId: '10' });
@@ -55,6 +56,8 @@ describe('TabSessionRegistry', () => {
     const other = await registry.resolve({ windowId: 1, tabId: '11' });
 
     expect(first.sessionId).toBe('session_1');
+    expect(first.workspaceId).toBe('ws_group');
+    expect(await registry.workspaceForSession('session_1')).toBe('ws_group');
     expect(same.sessionId).toBe('session_1');
     expect(other.sessionId).toBe('session_2');
     expect(tabs.setWorkingTab).toHaveBeenCalledWith('session_1', '10', {
@@ -79,6 +82,7 @@ describe('TabSessionRegistry', () => {
       runtime: workspace.runtime,
       browser: tabs,
       createSessionId: () => `session_${++sequence}`,
+      createWorkspaceId: () => 'ws_promoted',
     });
 
     const first = await registry.resolve({
@@ -121,6 +125,42 @@ describe('TabSessionRegistry', () => {
     });
   });
 
+  it('isolates standalone tab workspaces while sharing a group workspace', async () => {
+    const workspace = createTestWorkspace({
+      model: async () => events(...text('unused')),
+      tools: [],
+    });
+    const tabs = browser([
+      { id: '30', active: true, windowId: 3 },
+      { id: '31', active: false, windowId: 3 },
+      { id: '32', active: false, windowId: 3, groupId: 9 },
+      { id: '33', active: false, windowId: 3, groupId: 9 },
+    ]);
+    let session = 0;
+    let workspaceSequence = 0;
+    const registry = new TabSessionRegistry({
+      runtime: workspace.runtime,
+      browser: tabs,
+      createSessionId: () => `session_${++session}`,
+      createWorkspaceId: () => `ws_${++workspaceSequence}`,
+    });
+    const standaloneA = await registry.resolve({ windowId: 3, tabId: '30' });
+    const standaloneB = await registry.resolve({ windowId: 3, tabId: '31' });
+    const groupA = await registry.resolve({
+      windowId: 3,
+      tabId: '32',
+      groupId: 9,
+    });
+    const groupB = await registry.resolve({
+      windowId: 3,
+      tabId: '33',
+      groupId: 9,
+    });
+    expect(standaloneA.workspaceId).not.toBe(standaloneB.workspaceId);
+    expect(groupA.workspaceId).toBe(groupB.workspaceId);
+    expect(groupA.workspaceId).not.toBe(standaloneA.workspaceId);
+  });
+
   it('promotes the active standalone conversation when its tab is grouped', async () => {
     const workspace = createTestWorkspace({
       model: async () => events(...text('unused')),
@@ -148,6 +188,7 @@ describe('TabSessionRegistry', () => {
       sessionId: standalone.sessionId,
       scope: 'group',
       groupId: 6,
+      workspaceId: standalone.workspaceId,
     });
     expect(sequence).toBe(1);
     expect(await registry.list()).toHaveLength(1);
@@ -261,6 +302,7 @@ describe('TabSessionRegistry', () => {
       runtime: workspace.runtime,
       browser: browserProvider,
       createSessionId: () => 'session_group',
+      createWorkspaceId: () => 'ws_created',
     });
     await registry.resolve({ windowId: 4, tabId: '40' });
 
@@ -277,6 +319,7 @@ describe('TabSessionRegistry', () => {
         groupId: 8,
         memberTabIds: ['40', '41'],
         sessionId: 'session_group',
+        workspaceId: 'ws_created',
       }),
     ]);
     await registry.switchTab('session_group', '40');

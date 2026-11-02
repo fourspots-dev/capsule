@@ -7,6 +7,13 @@ import type {
   RuntimeExtensionRequest,
   RuntimeExtensionResult,
 } from '../platform/runtime-extension';
+import { bytesToBase64 } from '../git/binary';
+import {
+  workspaceMimeType,
+  workspacePath,
+} from '../platform/workspace-resource';
+import type { ChromeWorkspaceScopeRegistry } from '../runtime/chrome-workspace-scope';
+import type { ChromeWorkspaceObservationStore } from './chrome-workspace-observation-store';
 
 export class ChromeRuntimeExtension implements RuntimeExtension {
   private readonly onTabRemoved = (
@@ -42,7 +49,9 @@ export class ChromeRuntimeExtension implements RuntimeExtension {
     private readonly runtime: WorkspaceRuntime,
     private readonly tabs: TabSessionRegistry,
     private readonly browser: ChromeBrowserProvider,
-    private readonly chromeApi: typeof chrome
+    private readonly chromeApi: typeof chrome,
+    private readonly workspaces?: ChromeWorkspaceScopeRegistry,
+    private readonly observations?: ChromeWorkspaceObservationStore
   ) {
     this.chromeApi.tabs.onRemoved.addListener(this.onTabRemoved);
     this.chromeApi.tabs.onUpdated.addListener(this.onTabUpdated);
@@ -84,15 +93,37 @@ export class ChromeRuntimeExtension implements RuntimeExtension {
       await this.tabs.forget(activationContext(request));
       return { handled: true, data: true };
     }
+    if (request.type === 'read_workspace_resource') {
+      if (!this.workspaces) {
+        throw new AgentError(
+          'WORKSPACE_PREVIEW_UNAVAILABLE',
+          'Workspace preview is not configured'
+        );
+      }
+      const workspaceId = requiredString(request, 'workspaceId');
+      const path = workspacePath(requiredString(request, 'path'));
+      const data = await this.workspaces.read(workspaceId, path);
+      return {
+        handled: true,
+        data: {
+          workspaceId,
+          path,
+          mimeType: workspaceMimeType(path),
+          dataBase64: bytesToBase64(data),
+        },
+      };
+    }
     return { handled: false };
   }
 
   async beforeDeleteSession(sessionId: string): Promise<void> {
     await this.tabs.releaseSession(sessionId);
+    await this.observations?.clearSession(sessionId);
   }
 
   async beforeClearHistory(): Promise<void> {
     await this.tabs.clear();
+    await this.observations?.clear();
   }
 
   dispose(): void {

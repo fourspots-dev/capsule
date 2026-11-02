@@ -1164,6 +1164,7 @@
       document.documentElement.dataset.tinyaiTabId = activeTabId;
       document.documentElement.dataset.tinyaiExecutionTabId = executionTabId;
       document.documentElement.dataset.tinyaiSessionId = sessionId;
+      document.documentElement.dataset.tinyaiWorkspaceId = activation.workspaceId;
       projection = activation.projection;
       approvals = [...approvalsBySession.get(sessionId) ?? []];
       handoffs = [...handoffsBySession.get(sessionId) ?? []];

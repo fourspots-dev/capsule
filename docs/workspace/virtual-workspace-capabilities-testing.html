@@ -9,7 +9,7 @@
 </style>
 </head>
 <body><div class="wrap">
-<header class="hero"><small>TINYAI / WORKSPACE RESOURCE VERIFICATION / REVIEW</small><h1>Workspace 资源与宿主交互测试设计</h1><p>验证作用域隔离、规范路径、能力发现、Chrome 资源预览/下载以及宿主感知完成门禁。所有跨宿主能力必须同时做 contract、consumer 和真实 Host 证据。</p><div class="chips"><span class="chip">Target 0.14.0</span><span class="chip">ADR-021 Proposed</span><span class="chip">Test design review</span><span class="chip">Implementation unauthorized</span></div></header>
+<header class="hero"><small>TINYAI / WORKSPACE RESOURCE VERIFICATION / IMPLEMENTATION</small><h1>Workspace 资源与宿主交互测试设计</h1><p>验证作用域隔离、规范路径、能力发现、Chrome 资源预览/下载以及宿主感知完成门禁。所有跨宿主能力必须同时做 contract、consumer 和真实 Host 证据。</p><div class="chips"><span class="chip">Target 0.14.0</span><span class="chip">ADR-021 Accepted</span><span class="chip">Approved unreviewed</span><span class="chip">Implementation authorized</span></div></header>
 <nav><a href="#strategy">策略</a><a href="#req-workspace-003-testing">Workspace</a><a href="#req-host-004-testing">Ports</a><a href="#req-chrome-002-testing">Chrome</a><a href="#req-verify-002-testing">Verify</a><a href="#security">安全</a><a href="#architecture-completeness">完整性</a><a href="#gates">门禁</a></nav>
 
 <section id="strategy"><h2>1. 测试策略</h2><div class="grid"><div class="card"><h3>Contract</h3><p>Scope、Path、ResourceRef、Open/Export Port、错误码和 capability schema golden。</p></div><div class="card"><h3>Property / Fuzz</h3><p>路径穿越、Unicode、平台保留名、scope/generation 竞态。</p></div><div class="card"><h3>Host Adapter</h3><p>Chrome 真机；TUI/Headless 使用确定性 host fixture；iOS/Sandbox 先做 contract golden。</p></div><div class="card"><h3>Behavior E2E</h3><p>生成单文件游戏，真实预览、断言、截图、导出，并由 completion guard 验证。</p></div></div>
@@ -92,5 +92,18 @@ npm run test:state
 npm run test:e2e
 npm run verify:tui
 npm run check</pre><div class="rule"><b>完成门禁：</b>四条 REQ 的设计和 ADR 获批；路径 fuzz、scope isolation、Host capability matrix、真实 Chrome preview/download、stale evidence 与旧 VFS migration 全部通过；不允许只实现 Chrome UI 或只修改 Prompt。</div><div class="danger rule"><b>阻断：</b>任何跨 Workspace 文件访问、宿主路径泄漏、file:// 回退、evaluate 注入成功冒充验证、旧 generation Evidence accepted、Prompt 与 ToolRegistry 不一致。</div>
-<p class="foot">REQ-WORKSPACE-003 · REQ-HOST-004 · REQ-CHROME-002 · REQ-VERIFY-002 · Test design review · No implementation evidence yet</p></section>
+<p class="foot">REQ-WORKSPACE-003 · REQ-HOST-004 · REQ-CHROME-002 · REQ-VERIFY-002 · Approved unreviewed · Implementation authorized</p></section>
+<section id="implementation-evidence"><h2>9. 实现证据</h2>
+<table><thead><tr><th>证据</th><th>结果</th></tr></thead><tbody>
+<tr><td><code>tests/workspace/workspace-resource-contract.test.ts</code></td><td>路径规范化、scheme/absolute/traversal/reserved name 拒绝、ResourceRef。</td></tr>
+<tr><td><code>tests/virtual/scoped-fs.test.ts</code></td><td>两个 Scope 同路径隔离、copy/rename/remove/list 路径翻译。</td></tr>
+<tr><td><code>tests/workspace/chrome-workspace-scope.test.ts</code></td><td>旧全局 Workspace 一次性接管，后续 Scope 隔离。</td></tr>
+<tr><td><code>tests/runtime/workspace-resource-toolpack.test.ts</code></td><td>Capability 决定工具暴露；Open/Export 通用结果。</td></tr>
+<tr><td><code>tests/evidence/workspace-application-verification.test.ts</code></td><td>stale、failed、empty assertion 和 console error 拒绝。</td></tr>
+<tr><td><code>tests/e2e/workspace-resource.e2e.ts</code></td><td>真实 Chrome：write → open → verify → export；独立标签 workspace 隔离。</td></tr>
+<tr><td><code>npm run check</code></td><td>126 test files passed, 3 skipped；495 tests passed, 3 skipped。</td></tr>
+<tr><td><code>npm run test:e2e</code></td><td>6 files / 12 Chrome for Testing tests passed。</td></tr>
+<tr><td><code>npm run verify:tui</code></td><td>Portable 文件写入、Action 验证、Capsule 导出通过。</td></tr>
+</tbody></table>
+<p class="foot">Verified on 2026-11-02 · 0.14.0</p></section>
 </div></body></html>

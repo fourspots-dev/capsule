@@ -461,16 +461,37 @@ export class ChromeBrowserProvider implements BrowserProvider {
     expression: string,
     options: { frameId?: string; signal?: AbortSignal } = {}
   ): Promise<T> {
-    const contextId = options.frameId
+    let contextId = options.frameId
       ? await this.frameContext(tabId, options.frameId)
       : undefined;
-    const result = await this.cdp<any>(tabId, 'Runtime.evaluate', {
-      expression,
-      returnByValue: true,
-      awaitPromise: true,
-      userGesture: true,
-      ...(contextId === undefined ? {} : { contextId }),
-    }, options.signal);
+    const evaluate = () =>
+      this.cdp<any>(
+        tabId,
+        'Runtime.evaluate',
+        {
+          expression,
+          returnByValue: true,
+          awaitPromise: true,
+          userGesture: true,
+          ...(contextId === undefined ? {} : { contextId }),
+        },
+        options.signal
+      );
+    let result: any;
+    try {
+      result = await evaluate();
+    } catch (error) {
+      if (
+        !options.frameId ||
+        !(error instanceof Error) ||
+        !error.message.includes('Cannot find context')
+      ) {
+        throw error;
+      }
+      this.frameContexts.delete(this.frameKey(tabId, options.frameId));
+      contextId = await this.frameContext(tabId, options.frameId);
+      result = await evaluate();
+    }
     if (result?.exceptionDetails) {
       throw new AgentError(
         'BROWSER_EVALUATION_FAILED',
@@ -481,6 +502,7 @@ export class ChromeBrowserProvider implements BrowserProvider {
     }
     return result?.result?.value as T;
   }
+
 
   async click(tabId: BrowserTabId, target: BrowserActionTarget): Promise<void> {
     const objectId = await this.objectId(tabId, target);
@@ -1172,7 +1194,13 @@ function isNativeNewTab(url: string): boolean {
 function safeUrl(url: string): string {
   const value = url.trim();
   if (!value) return 'about:blank';
-  return /^(https?:|file:|about:blank)/.test(value) ? value : `https://${value}`;
+  if (/^file:/i.test(value)) {
+    throw new AgentError(
+      'BROWSER_FILE_URL_FORBIDDEN',
+      'file:// cannot resolve a workspace resource in Chrome. Use open_workspace_file for workspace-relative paths.'
+    );
+  }
+  return /^(https?:|about:blank)/.test(value) ? value : `https://${value}`;
 }
 
 function axValue(node: AxNode | undefined, key: 'role' | 'name' | 'value'): string {

@@ -41,6 +41,7 @@ export interface VirtualWorkspaceOptions {
   bundle?: WorkspaceBundle | Uint8Array;
   importFromHost?: boolean;
   storageKey?: string;
+  workspaceId?: string;
   now?: () => number;
   providers?: VirtualCommandProvider[];
   shell?: Omit<VirtualShellOptions, 'providers'>;
@@ -104,7 +105,7 @@ export class VirtualWorkspace {
     this.providers = [...(options.providers ?? [])];
     this.storageKey = options.storageKey ?? 'tinyai:workspace:v1';
     this.id = options.storageKey ?? `workspace_${Math.random().toString(36).slice(2)}`;
-    this.workspaceId = this.id;
+    this.workspaceId = options.workspaceId ?? this.id;
     this.parent = options.parent;
     this.forkBaseHashes = options.forkBaseHashes
       ? { ...options.forkBaseHashes }

@@ -19,6 +19,8 @@ function renderWorkspacePolicy(context: PromptBuildContext): string {
   const lines = [
     'Workspace rules:',
     '- Use workspace-relative paths. Never depend on or expose a host absolute path.',
+    '- Workspace files are virtual resources unless a host export operation explicitly creates a host copy.',
+    '- Never rewrite workspace paths as file://, data:, drive paths, Desktop paths, or Downloads paths.',
     '- Inspect relevant files and current state before editing.',
     '- Prefer the smallest coherent change and preserve unrelated user work.',
     '- Search and code-intelligence capabilities describe navigation; source files remain the authority.',

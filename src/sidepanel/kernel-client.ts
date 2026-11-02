@@ -39,6 +39,7 @@ export interface KernelHandoffEvent {
 }
 
 export interface TabSessionActivation {
+  workspaceId: string;
   scope: 'group' | 'tab';
   windowId: number;
   groupId?: number;

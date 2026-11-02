@@ -1,8 +1,8 @@
 # ADR-021: Layer workspace identity, paths and host interactions
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-02
-- Approved by: none
+- Approved by: user
 - Requirements: REQ-WORKSPACE-003, REQ-HOST-004, REQ-CHROME-002, REQ-VERIFY-002
 - Origin decision: DEC-015
 - Supersedes: none

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.14.0
+
+### Features
+
+- `REQ-WORKSPACE-003`: bind virtual workspaces to stable session and Chrome
+  tab/group scopes, enforce canonical workspace-relative paths and return
+  resource identity from file operations.
+- `REQ-HOST-004`: add host-neutral workspace open, export and verification
+  capability ports with capability-driven ToolPack exposure.
+- `REQ-CHROME-002`: add scoped Chrome workspaces, an isolated workspace preview,
+  controlled file downloads, and workspace-aware tab isolation.
+- `REQ-VERIFY-002`: add generation-bound browser application observations so
+  real preview assertions can satisfy completion without treating page
+  injection or file opening as sufficient evidence.
+
+### Verification
+
+- `npm run check`.
+- `npm run test:e2e`.
+- `npm run verify:tui`.
+
 ## 0.13.0
 
 ### Features

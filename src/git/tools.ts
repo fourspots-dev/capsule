@@ -1,6 +1,7 @@
 import { AgentError } from '../core/errors';
 import type { JsonValue, ToolDefinition } from '../core/types';
 import type { GitBackend } from './types';
+import { workspacePath } from '../platform/workspace-resource';
 
 export function createGitTools(git: GitBackend): ToolDefinition[] {
   return [
@@ -38,8 +39,9 @@ export function createGitTools(git: GitBackend): ToolDefinition[] {
         if (!paths?.length) {
           throw new AgentError('GIT_PATH_INVALID', 'paths must be a non-empty array');
         }
-        await git.add(paths, signal);
-        return { staged: paths };
+        const canonical = paths.map((path) => workspacePath(path));
+        await git.add(canonical, signal);
+        return { staged: canonical };
       },
       ['paths']
     ),

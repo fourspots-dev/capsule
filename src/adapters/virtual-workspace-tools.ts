@@ -6,6 +6,7 @@ import { createGitTools } from '../git/tools';
 import type { VirtualWorkspace } from '../virtual';
 import { globVirtualFiles, searchVirtualFiles } from '../virtual/search';
 import { createPatchTools } from './patch-tools';
+import { workspacePath } from '../platform/workspace-resource';
 
 type ObjectInput = Record<string, JsonValue>;
 
@@ -37,7 +38,7 @@ export function createVirtualWorkspaceTools(
       'read',
       'read',
       async (input, invocation) => {
-        const path = requiredString(input, 'path');
+        const path = workspaceInputPath(input, 'path');
         let data = await workspace.fs.read(path, {
           signal: invocation.signal,
           ...(optionalNumber(input, 'offset') === undefined
@@ -93,7 +94,7 @@ export function createVirtualWorkspaceTools(
       'write',
       'write',
       async (input, invocation) => {
-        const path = requiredString(input, 'path');
+        const path = workspaceInputPath(input, 'path');
         const text = optionalString(input, 'text');
         const base64 = optionalString(input, 'dataBase64');
         if (text === undefined && base64 === undefined) {
@@ -134,7 +135,7 @@ export function createVirtualWorkspaceTools(
       'write',
       'write',
       async (input, invocation) => {
-        const path = requiredString(input, 'path');
+        const path = workspaceInputPath(input, 'path');
         const oldText = requiredString(input, 'old_text');
         const newText = typeof input.new_text === 'string' ? input.new_text : '';
         const info = await workspace.fs.stat(path, invocation.signal);
@@ -183,7 +184,7 @@ export function createVirtualWorkspaceTools(
       'write',
       'write',
       async (input, invocation) => {
-        const path = requiredString(input, 'path');
+        const path = workspaceInputPath(input, 'path');
         const info = await workspace.fs.stat(path, invocation.signal);
         const existing = info
           ? new TextDecoder().decode(
@@ -217,7 +218,7 @@ export function createVirtualWorkspaceTools(
       'read',
       'read',
       async (input, invocation) =>
-        workspace.fs.list(optionalString(input, 'path') ?? '', {
+        workspace.fs.list(workspaceInputPath(input, 'path', true), {
           recursive: input.recursive === true,
           signal: invocation.signal,
         })
@@ -232,7 +233,7 @@ export function createVirtualWorkspaceTools(
       'write',
       'write',
       async (input, invocation) => ({
-        deleted: await workspace.fs.remove(requiredString(input, 'path'), {
+        deleted: await workspace.fs.remove(workspaceInputPath(input, 'path'), {
           recursive: input.recursive === true,
         }),
       })
@@ -264,7 +265,7 @@ export function createVirtualWorkspaceTools(
           regex: input.regex === true,
           wholeWord: input.whole_word === true,
           ...(optionalString(input, 'path')
-            ? { path: optionalString(input, 'path')! }
+            ? { path: workspaceInputPath(input, 'path') }
             : {}),
           ...(stringArray(input.include)
             ? { include: stringArray(input.include)! }
@@ -301,7 +302,7 @@ export function createVirtualWorkspaceTools(
         return globVirtualFiles(workspace.fs, patterns, {
           signal: invocation.signal,
           ...(optionalString(input, 'path')
-            ? { path: optionalString(input, 'path')! }
+            ? { path: workspaceInputPath(input, 'path') }
             : {}),
           ...(stringArray(input.exclude)
             ? { exclude: stringArray(input.exclude)! }
@@ -442,6 +443,15 @@ function requiredString(input: ObjectInput, key: string): string {
     throw new AgentError('TOOL_ARGUMENTS_INVALID', `${key} must be a non-empty string`);
   }
   return value;
+}
+
+function workspaceInputPath(
+  input: ObjectInput,
+  key: string,
+  allowRoot = false
+): string {
+  if (allowRoot && input[key] === undefined) return '';
+  return workspacePath(requiredString(input, key), { allowRoot });
 }
 
 function optionalString(input: ObjectInput, key: string): string | undefined {

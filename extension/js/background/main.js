@@ -330,14 +330,30 @@
       );
     }
     async evaluate(tabId, expression, options = {}) {
-      const contextId = options.frameId ? await this.frameContext(tabId, options.frameId) : void 0;
-      const result = await this.cdp(tabId, "Runtime.evaluate", {
-        expression,
-        returnByValue: true,
-        awaitPromise: true,
-        userGesture: true,
-        ...contextId === void 0 ? {} : { contextId }
-      }, options.signal);
+      let contextId = options.frameId ? await this.frameContext(tabId, options.frameId) : void 0;
+      const evaluate = () => this.cdp(
+        tabId,
+        "Runtime.evaluate",
+        {
+          expression,
+          returnByValue: true,
+          awaitPromise: true,
+          userGesture: true,
+          ...contextId === void 0 ? {} : { contextId }
+        },
+        options.signal
+      );
+      let result;
+      try {
+        result = await evaluate();
+      } catch (error2) {
+        if (!options.frameId || !(error2 instanceof Error) || !error2.message.includes("Cannot find context")) {
+          throw error2;
+        }
+        this.frameContexts.delete(this.frameKey(tabId, options.frameId));
+        contextId = await this.frameContext(tabId, options.frameId);
+        result = await evaluate();
+      }
       if (result?.exceptionDetails) {
         throw new AgentError(
           "BROWSER_EVALUATION_FAILED",
@@ -875,7 +891,13 @@
   function safeUrl(url) {
     const value = url.trim();
     if (!value) return "about:blank";
-    return /^(https?:|file:|about:blank)/.test(value) ? value : `https://${value}`;
+    if (/^file:/i.test(value)) {
+      throw new AgentError(
+        "BROWSER_FILE_URL_FORBIDDEN",
+        "file:// cannot resolve a workspace resource in Chrome. Use open_workspace_file for workspace-relative paths."
+      );
+    }
+    return /^(https?:|about:blank)/.test(value) ? value : `https://${value}`;
   }
   function axValue(node, key) {
     return String(node?.[key]?.value ?? "");
@@ -5357,6 +5379,116 @@ ${descriptor.description}`,
     return path === gitDir || path.startsWith(`${gitDir}/`) || path === ".tinyai" || path.startsWith(".tinyai/");
   }
 
+  // src/platform/workspace-resource.ts
+  function workspacePath(value, options = {}) {
+    if (typeof value !== "string") {
+      throw pathError("WORKSPACE_PATH_INVALID", "Workspace path must be a string");
+    }
+    const root = value === "" || value === ".";
+    if (root) {
+      if (options.allowRoot) return "";
+      throw pathError("WORKSPACE_PATH_INVALID", "Workspace root is not a file path");
+    }
+    if (value.length > 4096) {
+      throw pathError("WORKSPACE_PATH_TOO_LONG", "Workspace path exceeds 4096 characters");
+    }
+    if (value.startsWith("/") || value.startsWith("\\") || value.includes("\\") || value.includes("\0") || /[\u0001-\u001f\u007f]/.test(value)) {
+      throw pathError(
+        "WORKSPACE_PATH_INVALID",
+        "Workspace paths must be relative POSIX paths without control characters"
+      );
+    }
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value) || /^[a-zA-Z]:/.test(value) || value.startsWith("~")) {
+      throw pathError(
+        "WORKSPACE_PATH_NOT_HOST_PATH",
+        "Workspace paths must not contain a URI scheme, host drive or home shortcut"
+      );
+    }
+    if (value.includes("//")) {
+      throw pathError("WORKSPACE_PATH_INVALID", "Workspace path contains an empty segment");
+    }
+    const decoded = safeDecode(value);
+    if (/(?:^|\/)\.\.(?:\/|$)/.test(decoded) || /%2e%2e|%2f|%5c/i.test(value)) {
+      throw pathError(
+        "WORKSPACE_PATH_ESCAPE",
+        "Workspace path must not escape its workspace root"
+      );
+    }
+    const normalized = value.normalize("NFC").replace(/\/+$/, "");
+    const segments = normalized.split("/");
+    for (const segment of segments) {
+      if (!segment || segment === "." || segment === "..") {
+        throw pathError("WORKSPACE_PATH_INVALID", "Workspace path contains an invalid segment");
+      }
+      if (segment.length > 255) {
+        throw pathError("WORKSPACE_PATH_TOO_LONG", "Workspace path segment exceeds 255 characters");
+      }
+      if (/[<>:"|?*]/.test(segment) || /[. ]$/.test(segment)) {
+        throw pathError(
+          "WORKSPACE_PATH_INVALID",
+          "Workspace path contains a non-portable filename segment"
+        );
+      }
+      if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(segment)) {
+        throw pathError(
+          "WORKSPACE_PATH_INVALID",
+          "Workspace path contains a reserved host filename"
+        );
+      }
+    }
+    return normalized;
+  }
+  function workspaceResourceRef(input) {
+    if (!/^[a-zA-Z0-9._:-]{1,200}$/.test(input.workspaceId)) {
+      throw pathError("WORKSPACE_SCOPE_INVALID", "Workspace id is invalid");
+    }
+    if (!Number.isSafeInteger(input.generation) || input.generation < 0) {
+      throw pathError("WORKSPACE_RESOURCE_STALE", "Workspace generation is invalid");
+    }
+    return {
+      workspaceId: input.workspaceId,
+      path: workspacePath(input.path, {
+        allowRoot: input.allowRoot === true
+      }),
+      generation: input.generation
+    };
+  }
+  function workspaceResourceUri(workspaceId, path) {
+    const encodedPath = path.split("/").map((segment) => encodeURIComponent(segment)).join("/");
+    return `workspace://${encodeURIComponent(workspaceId)}/${encodedPath}`;
+  }
+  function workspaceMimeType(path) {
+    const extension = path.toLowerCase().split(".").pop() ?? "";
+    const values = {
+      html: "text/html; charset=utf-8",
+      htm: "text/html; charset=utf-8",
+      css: "text/css; charset=utf-8",
+      js: "text/javascript; charset=utf-8",
+      mjs: "text/javascript; charset=utf-8",
+      json: "application/json",
+      svg: "image/svg+xml",
+      png: "image/png",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      webp: "image/webp",
+      gif: "image/gif",
+      pdf: "application/pdf",
+      txt: "text/plain; charset=utf-8",
+      md: "text/markdown; charset=utf-8"
+    };
+    return values[extension] ?? "application/octet-stream";
+  }
+  function safeDecode(value) {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      throw pathError("WORKSPACE_PATH_INVALID", "Workspace path has invalid percent encoding");
+    }
+  }
+  function pathError(code, message) {
+    return new AgentError(code, message);
+  }
+
   // src/git/tools.ts
   function createGitTools(git) {
     return [
@@ -5396,8 +5528,9 @@ ${descriptor.description}`,
           if (!paths?.length) {
             throw new AgentError("GIT_PATH_INVALID", "paths must be a non-empty array");
           }
-          await git.add(paths, signal);
-          return { staged: paths };
+          const canonical = paths.map((path) => workspacePath(path));
+          await git.add(canonical, signal);
+          return { staged: canonical };
         },
         ["paths"]
       ),
@@ -5593,6 +5726,9 @@ ${descriptor.description}`,
     const normalizedPath = normalizeVirtualPath(path);
     const normalizedParent = normalizeVirtualPath(parent);
     return normalizedPath === normalizedParent || normalizedPath.startsWith(`${normalizedParent}/`);
+  }
+  function joinVirtualPath(...parts) {
+    return normalizeVirtualPath(parts.filter(Boolean).join("/"));
   }
 
   // src/virtual/search.ts
@@ -8430,7 +8566,7 @@ ${descriptor.description}`,
       this.providers = [...options.providers ?? []];
       this.storageKey = options.storageKey ?? "tinyai:workspace:v1";
       this.id = options.storageKey ?? `workspace_${Math.random().toString(36).slice(2)}`;
-      this.workspaceId = this.id;
+      this.workspaceId = options.workspaceId ?? this.id;
       this.parent = options.parent;
       this.forkBaseHashes = options.forkBaseHashes ? { ...options.forkBaseHashes } : void 0;
       if (options.vfs) {
@@ -8704,6 +8840,84 @@ ${descriptor.description}`,
     return result;
   }
 
+  // src/virtual/scoped-fs.ts
+  var ScopedFileSystem = class {
+    constructor(parent, prefix) {
+      this.parent = parent;
+      this.prefix = normalizeVirtualPath(prefix);
+      if (!this.prefix) {
+        throw new AgentError(
+          "WORKSPACE_SCOPE_INVALID",
+          "Scoped file system requires a non-empty root prefix"
+        );
+      }
+    }
+    parent;
+    prefix;
+    async read(path, options) {
+      return this.parent.read(this.internal(path), options);
+    }
+    async write(path, data, options) {
+      return this.externalInfo(
+        await this.parent.write(this.internal(path), data, options)
+      );
+    }
+    async list(path = "", options) {
+      return (await this.parent.list(this.internal(path, true), options)).map(
+        (info2) => this.externalInfo(info2)
+      );
+    }
+    async stat(path, signal) {
+      const info2 = await this.parent.stat(this.internal(path, true), signal);
+      return info2 ? this.externalInfo(info2) : void 0;
+    }
+    async mkdir(path, options) {
+      await this.parent.mkdir(this.internal(path), options);
+    }
+    async remove(path, options) {
+      return this.parent.remove(this.internal(path), options);
+    }
+    async rename(from, to) {
+      await this.parent.rename(this.internal(from), this.internal(to));
+    }
+    async copy(from, to) {
+      await this.parent.copy(this.internal(from), this.internal(to));
+    }
+    watch(listener) {
+      if (!this.parent.watch) return () => void 0;
+      return this.parent.watch((event) => {
+        const path = this.externalPath(event.path);
+        if (path !== void 0) listener({ ...event, path });
+      });
+    }
+    internal(path, allowRoot = false) {
+      const normalized = workspacePath(path, { allowRoot });
+      if (!normalized && !allowRoot) {
+        throw new AgentError(
+          "WORKSPACE_PATH_INVALID",
+          "Workspace root cannot be used as a file"
+        );
+      }
+      return normalized ? joinVirtualPath(this.prefix, normalized) : this.prefix;
+    }
+    externalInfo(info2) {
+      const path = this.externalPath(info2.path);
+      if (path === void 0) {
+        throw new AgentError(
+          "WORKSPACE_SCOPE_MISMATCH",
+          `File system path is outside the scoped workspace: ${info2.path}`
+        );
+      }
+      return { ...info2, path };
+    }
+    externalPath(path) {
+      const normalized = normalizeVirtualPath(path);
+      if (normalized === this.prefix) return "";
+      const start = `${this.prefix}/`;
+      return normalized.startsWith(start) ? normalized.slice(start.length) : void 0;
+    }
+  };
+
   // src/adapters/patch-tools.ts
   function createPatchTools(workspace) {
     return [
@@ -8813,7 +9027,7 @@ ${descriptor.description}`,
         "read",
         "read",
         async (input, invocation) => {
-          const path = requiredString4(input, "path");
+          const path = workspaceInputPath(input, "path");
           let data = await workspace.fs.read(path, {
             signal: invocation.signal,
             ...optionalNumber(input, "offset") === void 0 ? {} : { offset: optionalNumber(input, "offset") },
@@ -8860,7 +9074,7 @@ ${descriptor.description}`,
         "write",
         "write",
         async (input, invocation) => {
-          const path = requiredString4(input, "path");
+          const path = workspaceInputPath(input, "path");
           const text = optionalString3(input, "text");
           const base64 = optionalString3(input, "dataBase64");
           if (text === void 0 && base64 === void 0) {
@@ -8897,7 +9111,7 @@ ${descriptor.description}`,
         "write",
         "write",
         async (input, invocation) => {
-          const path = requiredString4(input, "path");
+          const path = workspaceInputPath(input, "path");
           const oldText = requiredString4(input, "old_text");
           const newText = typeof input.new_text === "string" ? input.new_text : "";
           const info2 = await workspace.fs.stat(path, invocation.signal);
@@ -8943,7 +9157,7 @@ ${descriptor.description}`,
         "write",
         "write",
         async (input, invocation) => {
-          const path = requiredString4(input, "path");
+          const path = workspaceInputPath(input, "path");
           const info2 = await workspace.fs.stat(path, invocation.signal);
           const existing = info2 ? new TextDecoder().decode(
             await workspace.fs.read(path, { signal: invocation.signal })
@@ -8970,7 +9184,7 @@ ${descriptor.description}`,
         }),
         "read",
         "read",
-        async (input, invocation) => workspace.fs.list(optionalString3(input, "path") ?? "", {
+        async (input, invocation) => workspace.fs.list(workspaceInputPath(input, "path", true), {
           recursive: input.recursive === true,
           signal: invocation.signal
         })
@@ -8985,7 +9199,7 @@ ${descriptor.description}`,
         "write",
         "write",
         async (input, invocation) => ({
-          deleted: await workspace.fs.remove(requiredString4(input, "path"), {
+          deleted: await workspace.fs.remove(workspaceInputPath(input, "path"), {
             recursive: input.recursive === true
           })
         })
@@ -9015,7 +9229,7 @@ ${descriptor.description}`,
           caseSensitive: input.case_sensitive === true,
           regex: input.regex === true,
           wholeWord: input.whole_word === true,
-          ...optionalString3(input, "path") ? { path: optionalString3(input, "path") } : {},
+          ...optionalString3(input, "path") ? { path: workspaceInputPath(input, "path") } : {},
           ...stringArray2(input.include) ? { include: stringArray2(input.include) } : {},
           ...stringArray2(input.exclude) ? { exclude: stringArray2(input.exclude) } : {},
           ...optionalNumber(input, "context_lines") === void 0 ? {} : { contextLines: optionalNumber(input, "context_lines") },
@@ -9042,7 +9256,7 @@ ${descriptor.description}`,
           }
           return globVirtualFiles(workspace.fs, patterns, {
             signal: invocation.signal,
-            ...optionalString3(input, "path") ? { path: optionalString3(input, "path") } : {},
+            ...optionalString3(input, "path") ? { path: workspaceInputPath(input, "path") } : {},
             ...stringArray2(input.exclude) ? { exclude: stringArray2(input.exclude) } : {}
           });
         }
@@ -9151,6 +9365,10 @@ ${descriptor.description}`,
       throw new AgentError("TOOL_ARGUMENTS_INVALID", `${key} must be a non-empty string`);
     }
     return value;
+  }
+  function workspaceInputPath(input, key, allowRoot = false) {
+    if (allowRoot && input[key] === void 0) return "";
+    return workspacePath(requiredString4(input, key), { allowRoot });
   }
   function optionalString3(input, key) {
     const value = input[key];
@@ -9444,7 +9662,9 @@ ${descriptor.description}`,
         "Return diagnostics for workspace-relative source paths.",
         schema3({ paths: { type: "array", items: { type: "string" } } }, ["paths"]),
         async (input, invocation) => await intelligence.diagnostics(
-          stringArray3(objectInput(input), "paths").map(normalizeVirtualPath),
+          stringArray3(objectInput(input), "paths").map(
+            (path) => workspacePath(path)
+          ),
           invocation.signal
         )
       ),
@@ -9495,7 +9715,7 @@ ${descriptor.description}`,
             );
           }
           return await intelligence.codeActions(
-            normalizeVirtualPath(requiredString5(object, "path")),
+            workspacePath(requiredString5(object, "path")),
             range,
             invocation.signal
           );
@@ -9553,6 +9773,188 @@ ${descriptor.description}`,
     return value.map(String);
   }
 
+  // src/runtime/workspace-resource-toolpack.ts
+  async function createWorkspaceResourceTools(options) {
+    const capabilities = await options.provider.capabilities();
+    const tools = [
+      {
+        name: "get_workspace_info",
+        description: "Describe the current workspace scope and its virtual path semantics.",
+        parameters: { type: "object", properties: {} },
+        risk: "read",
+        effect: "read",
+        capabilities: ["filesystem"],
+        async execute() {
+          const generation = await options.workspace.generation();
+          return {
+            workspaceId: options.workspace.workspaceId,
+            generation,
+            pathSemantics: "workspace-relative-posix",
+            fileSystem: "virtual",
+            hostFilesystem: false,
+            open: capabilities.open.available,
+            export: capabilities.export.available,
+            verify: capabilities.verify?.available === true
+          };
+        }
+      }
+    ];
+    if (capabilities.open.available && options.provider.open) {
+      tools.push({
+        name: "open_workspace_file",
+        description: "Open a workspace resource in the active host surface. The path is workspace-relative, never a file:// or host path.",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+            intent: {
+              type: "string",
+              enum: ["preview", "edit", "debug"]
+            },
+            ephemeral: { type: "boolean" }
+          },
+          required: ["path"]
+        },
+        risk: "read",
+        effect: "read",
+        capabilities: ["filesystem"],
+        async execute(input, invocation) {
+          const args = asObject4(input);
+          const path = workspacePath(requiredString6(args, "path"));
+          const generation = await options.workspace.generation();
+          const resource = workspaceResourceRef({
+            workspaceId: options.workspace.workspaceId,
+            path,
+            generation
+          });
+          const result = await options.provider.open.open(
+            resource,
+            {
+              intent: args.intent === "edit" || args.intent === "debug" ? args.intent : "preview",
+              ephemeral: args.ephemeral !== false
+            },
+            invocation.signal
+          );
+          return {
+            ...result,
+            path,
+            resourceUri: workspaceResourceUri(
+              options.workspace.workspaceId,
+              path
+            )
+          };
+        }
+      });
+    }
+    if (capabilities.export.available && options.provider.export) {
+      tools.push({
+        name: "export_workspace_file",
+        description: "Export a workspace resource to a host-owned destination. Use this before claiming the file can be opened outside tinyai.",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string" }
+          },
+          required: ["path"]
+        },
+        risk: "write",
+        effect: "write",
+        capabilities: ["filesystem"],
+        async execute(input, invocation) {
+          const path = workspacePath(requiredString6(asObject4(input), "path"));
+          const generation = await options.workspace.generation();
+          const info2 = await options.workspace.fs.stat(path);
+          if (!info2 || info2.kind !== "file") {
+            throw new AgentError(
+              "WORKSPACE_RESOURCE_NOT_FOUND",
+              `Workspace resource not found: ${path}`
+            );
+          }
+          return {
+            ...await options.provider.export.export(
+              workspaceResourceRef({
+                workspaceId: options.workspace.workspaceId,
+                path,
+                generation
+              }),
+              invocation.signal
+            ),
+            path,
+            mimeType: workspaceMimeType(path)
+          };
+        }
+      });
+    }
+    if (capabilities.verify?.available && options.provider.verify) {
+      tools.push({
+        name: "verify_workspace_file",
+        description: "Load a workspace resource in an isolated host preview and evaluate optional browser assertions. Opening alone is not application verification.",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+            assertions: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string" },
+                  expression: { type: "string" }
+                },
+                required: ["name", "expression"]
+              }
+            }
+          },
+          required: ["path"]
+        },
+        risk: "dangerous",
+        effect: "execute",
+        capabilities: ["filesystem", "browser:script"],
+        async execute(input, invocation) {
+          const args = asObject4(input);
+          const path = workspacePath(requiredString6(args, "path"));
+          const generation = await options.workspace.generation();
+          const resource = workspaceResourceRef({
+            workspaceId: options.workspace.workspaceId,
+            path,
+            generation
+          });
+          const assertions = Array.isArray(args.assertions) ? args.assertions.flatMap((value) => {
+            const item = asObject4(value);
+            return typeof item.name === "string" && typeof item.expression === "string" ? [{ name: item.name, expression: item.expression }] : [];
+          }) : [];
+          const observation = {
+            id: `workspace_observation_${crypto.randomUUID()}`,
+            sessionId: invocation.sessionId,
+            taskId: invocation.taskId,
+            createdAt: Date.now(),
+            ...await options.provider.verify.verify(
+              resource,
+              { assertions },
+              invocation.signal
+            )
+          };
+          await options.recordObservation?.(observation);
+          return observation;
+        }
+      });
+    }
+    return { tools, provider: options.provider };
+  }
+  function requiredString6(input, key) {
+    const value = input[key];
+    if (typeof value !== "string" || !value) {
+      throw new AgentError(
+        "TOOL_ARGUMENTS_INVALID",
+        `Missing required string: ${key}`
+      );
+    }
+    return value;
+  }
+  function asObject4(value) {
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  }
+
   // src/runtime/workspace-capability-composition.ts
   async function createWorkspaceCapabilityComposition(options) {
     const includeVirtualShell = options.profile === "legacy";
@@ -9562,6 +9964,13 @@ ${descriptor.description}`,
     const codeIntelligence = options.codeIntelligence ?? new TextCodeIntelligence(options.workspace.fs);
     const codeIntelligenceCapabilities = await codeIntelligence.capabilities();
     const codeIntelligenceTools = createCodeIntelligenceTools(codeIntelligence);
+    const resourceTools = options.workspaceInteractionProvider ? (await createWorkspaceResourceTools({
+      workspace: options.workspace,
+      provider: options.workspaceInteractionProvider,
+      ...options.workspaceObservationRecorder ? {
+        recordObservation: options.workspaceObservationRecorder
+      } : {}
+    })).tools : [];
     const actionTools = options.actionRegistry && (await options.actionRegistry.list()).length > 0 ? await createHostActionTools(options.actionRegistry, {
       ...options.workspace.workspaceId ? { workspaceId: options.workspace.workspaceId } : {},
       ...options.workspacePath ? { workspacePath: options.workspacePath } : {},
@@ -9623,6 +10032,13 @@ ${descriptor.description}`,
       optionalCapabilities: ["code-intelligence"],
       tools: codeIntelligenceTools
     });
+    if (resourceTools.length > 0) {
+      composer.register({
+        id: "workspace-resources",
+        requiredCapabilities: ["filesystem"],
+        tools: resourceTools
+      });
+    }
     if (applicationActions.length > 0) {
       composer.register({
         id: "application-actions",
@@ -9640,6 +10056,7 @@ ${descriptor.description}`,
       ),
       applicationActions,
       codeIntelligenceTools,
+      resourceTools,
       capabilityGraph: graph,
       composition,
       codeIntelligenceCapabilities
@@ -10592,7 +11009,7 @@ ${descriptor.description}`,
         "write",
         ["browser:read"],
         async (input, invocation) => {
-          const tabId = requiredString6(input, "tabId");
+          const tabId = requiredString7(input, "tabId");
           if (dependencies.workspaceTabs) {
             await dependencies.workspaceTabs.switchTab(invocation.sessionId, tabId);
             return { tabId };
@@ -10642,7 +11059,7 @@ ${descriptor.description}`,
           const tabId = await workingTab(browser, invocation.sessionId);
           return await browser.navigate(
             tabId,
-            requiredString6(input, "url"),
+            requiredString7(input, "url"),
             invocation.signal
           );
         }
@@ -10680,7 +11097,7 @@ ${descriptor.description}`,
             signal: invocation.signal,
             frameId: optionalString4(input, "frameId")
           });
-          const query = requiredString6(input, "query").toLowerCase();
+          const query = requiredString7(input, "query").toLowerCase();
           return snapshot.nodes.filter((node) => node.name.toLowerCase().includes(query)).slice(0, 20);
         }
       ),
@@ -10713,7 +11130,7 @@ ${descriptor.description}`,
         ["browser:script"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const output = await browser.evaluate(tabId, requiredString6(input, "code"), {
+          const output = await browser.evaluate(tabId, requiredString7(input, "code"), {
             frameId: optionalString4(input, "frameId"),
             signal: invocation.signal
           });
@@ -10771,7 +11188,7 @@ ${descriptor.description}`,
         ["browser:interact"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          await browser.fill(tabId, targetFrom(input), requiredString6(input, "value"));
+          await browser.fill(tabId, targetFrom(input), requiredString7(input, "value"));
           return { filled: true };
         }
       ),
@@ -10786,7 +11203,7 @@ ${descriptor.description}`,
           await browser.cdp(
             tabId,
             "Input.insertText",
-            { text: requiredString6(input, "text") },
+            { text: requiredString7(input, "text") },
             invocation.signal
           );
           return { typed: true };
@@ -10824,11 +11241,11 @@ ${descriptor.description}`,
           await browser.drag(
             tabId,
             {
-              selector: requiredString6(input, "from"),
+              selector: requiredString7(input, "from"),
               ...frameId ? { frameId } : {}
             },
             {
-              selector: requiredString6(input, "to"),
+              selector: requiredString7(input, "to"),
               ...frameId ? { frameId } : {}
             }
           );
@@ -10869,7 +11286,7 @@ ${descriptor.description}`,
         ["browser:interact"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const keys = requiredString6(input, "keys").split(/\s+/).filter(Boolean);
+          const keys = requiredString7(input, "keys").split(/\s+/).filter(Boolean);
           for (const key of keys) await sendKey(browser, tabId, key, invocation.signal);
           return { sent: keys };
         }
@@ -10930,9 +11347,9 @@ ${descriptor.description}`,
           const files = requiredArray(input, "files").map((entry) => {
             const file = isObject(entry);
             return {
-              name: requiredString6(file, "name"),
+              name: requiredString7(file, "name"),
               type: optionalString4(file, "type") ?? "application/octet-stream",
-              base64: requiredString6(file, "base64")
+              base64: requiredString7(file, "base64")
             };
           });
           const target = optionalString4(input, "ref") || optionalString4(input, "selector") ? targetFrom(input) : void 0;
@@ -10982,7 +11399,7 @@ ${descriptor.description}`,
         ["browser:interact"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const action = requiredString6(input, "action");
+          const action = requiredString7(input, "action");
           if (action !== "status" && action !== "accept" && action !== "dismiss") {
             throw new AgentError("TOOL_ARGUMENTS_INVALID", "dialog.action is invalid");
           }
@@ -11001,11 +11418,11 @@ ${descriptor.description}`,
         ["browser:network"],
         async (input, invocation) => {
           const tabId = await workingTab(browser, invocation.sessionId);
-          const cmd = requiredString6(input, "cmd");
+          const cmd = requiredString7(input, "cmd");
           if (cmd === "detail") {
             return await browser.network(tabId, {
               cmd: "detail",
-              requestId: requiredString6(input, "requestId")
+              requestId: requiredString7(input, "requestId")
             });
           }
           if (cmd !== "start" && cmd !== "stop" && cmd !== "list") {
@@ -11036,7 +11453,7 @@ ${descriptor.description}`,
         "write",
         ["browser:read"],
         async (input, invocation) => {
-          const needle = requiredString6(input, "url").toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+          const needle = requiredString7(input, "url").toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
           const candidates = dependencies.workspaceTabs ? await dependencies.workspaceTabs.listTabs(invocation.sessionId) : await browser.listTabs();
           const tab = candidates.find((candidate) => {
             const value = String(candidate.url ?? "").toLowerCase();
@@ -11077,7 +11494,7 @@ ${descriptor.description}`,
             );
           }
           const result = await dependencies.handoff.requestHandoff(
-            requiredString6(input, "reason"),
+            requiredString7(input, "reason"),
             {
               sessionId: invocation.sessionId,
               taskId: invocation.taskId,
@@ -11117,7 +11534,7 @@ ${descriptor.description}`,
     }
     return value;
   }
-  function requiredString6(input, key) {
+  function requiredString7(input, key) {
     const value = input[key];
     if (typeof value !== "string" || !value.trim()) {
       throw new AgentError("TOOL_ARGUMENTS_INVALID", `${key} must be a non-empty string`);
@@ -11330,7 +11747,10 @@ ${descriptor.description}`,
         "- Viewing another tab in the group does not by itself change executionTabId or the Session.",
         "- When the user explicitly asks to work on the currently viewed tab, change executionTabId through the registered tab-switch capability before acting.",
         "- Ground page work in observed page structure and text. Use screenshots only when visual appearance matters.",
-        "- After changing a page, reload or inspect the result and report browser errors honestly."
+        "- After changing a page, reload or inspect the result and report browser errors honestly.",
+        "- Workspace files are storage-backed virtual files. Use open_workspace_file for preview and verify_workspace_file for generation-bound checks.",
+        "- Use export_workspace_file before claiming that a file can be opened outside tinyai.",
+        "- Do not inject a workspace source file into an unrelated page as a preview substitute."
       ].join("\n")
     };
   }
@@ -11579,6 +11999,8 @@ ${descriptor.description}`,
     const lines = [
       "Workspace rules:",
       "- Use workspace-relative paths. Never depend on or expose a host absolute path.",
+      "- Workspace files are virtual resources unless a host export operation explicitly creates a host copy.",
+      "- Never rewrite workspace paths as file://, data:, drive paths, Desktop paths, or Downloads paths.",
       "- Inspect relevant files and current state before editing.",
       "- Prefer the smallest coherent change and preserve unrelated user work.",
       "- Search and code-intelligence capabilities describe navigation; source files remain the authority."
@@ -15810,12 +16232,14 @@ ${lines.join("\n")}
       this.storageKey = options.storageKey ?? DEFAULT_STORAGE_KEY;
       this.now = options.now ?? Date.now;
       this.createSessionId = options.createSessionId ?? (() => `session_${crypto.randomUUID()}`);
+      this.createWorkspaceId = options.createWorkspaceId ?? ((sessionId) => `ws_${sessionId}`);
     }
     options;
     bindings = /* @__PURE__ */ new Map();
     storageKey;
     now;
     createSessionId;
+    createWorkspaceId;
     loaded;
     tail = Promise.resolve();
     resolve(context) {
@@ -15873,7 +16297,11 @@ ${lines.join("\n")}
             this.bindings.delete(
               tabKey({ windowId: context.windowId, tabId: context.tabId })
             );
-            return this.bindLocked(context, promoted.sessionId);
+            return this.bindLocked(
+              context,
+              promoted.sessionId,
+              promoted.workspaceId
+            );
           }
         }
         return this.createLocked(context);
@@ -15971,6 +16399,12 @@ ${lines.join("\n")}
       await this.ensureLoaded();
       return [...this.bindings.values()].map((binding) => ({ ...binding }));
     }
+    async workspaceForSession(sessionId) {
+      await this.ensureLoaded();
+      return [...this.bindings.values()].find(
+        (binding) => binding.sessionId === sessionId
+      )?.workspaceId;
+    }
     async createTab(sessionId, url = "about:blank") {
       return this.serialized(async () => {
         await this.ensureLoaded();
@@ -15998,6 +16432,7 @@ ${lines.join("\n")}
         const tabs = await this.options.browser.listSessionTabs?.(sessionId) ?? [tab];
         this.removeBindings(sessionId);
         const binding = {
+          workspaceId: existing.workspaceId,
           scope: "group",
           windowId: group.groupId !== void 0 ? tab.windowId ?? existing.windowId : existing.windowId,
           ...group.groupId !== void 0 ? { groupId: group.groupId } : {},
@@ -16042,9 +16477,14 @@ ${lines.join("\n")}
       return await this.options.browser.listSessionTabs?.(sessionId) ?? [];
     }
     async createLocked(context) {
-      return this.bindLocked(context, this.createSessionId());
+      const sessionId = this.createSessionId();
+      return this.bindLocked(
+        context,
+        sessionId,
+        this.createWorkspaceId(sessionId)
+      );
     }
-    async bindLocked(context, sessionId) {
+    async bindLocked(context, sessionId, workspaceId = this.workspaceIdForSession(sessionId) ?? this.createWorkspaceId(sessionId)) {
       const key = tabKey(context);
       for (const [existingKey, binding2] of this.bindings) {
         if (existingKey !== key && binding2.sessionId === sessionId) {
@@ -16057,6 +16497,7 @@ ${lines.join("\n")}
       });
       const groupTabs = context.groupId !== void 0 && context.groupId >= 0 ? await this.options.browser.listTabs() : [];
       const binding = {
+        workspaceId,
         scope: context.groupId !== void 0 && context.groupId >= 0 ? "group" : "tab",
         windowId: context.windowId,
         ...context.groupId !== void 0 && context.groupId >= 0 ? { groupId: context.groupId } : {},
@@ -16107,6 +16548,7 @@ ${lines.join("\n")}
         const scopedGroupId = Number.isFinite(groupId) && groupId >= 0 ? groupId : void 0;
         const context = { windowId, tabId, ...scopedGroupId !== void 0 ? { groupId: scopedGroupId } : {} };
         this.bindings.set(tabKey(context), {
+          workspaceId: typeof item.workspaceId === "string" && item.workspaceId ? item.workspaceId : this.createWorkspaceId(sessionId),
           scope: scopedGroupId !== void 0 ? "group" : "tab",
           windowId,
           ...scopedGroupId !== void 0 ? { groupId: scopedGroupId } : {},
@@ -16130,6 +16572,11 @@ ${lines.join("\n")}
       for (const [key, binding] of this.bindings) {
         if (binding.sessionId === sessionId) this.bindings.delete(key);
       }
+    }
+    workspaceIdForSession(sessionId) {
+      return [...this.bindings.values()].find(
+        (binding) => binding.sessionId === sessionId
+      )?.workspaceId ?? this.createWorkspaceId(sessionId);
     }
     async forgetLocked(context) {
       let changed = this.bindings.delete(
@@ -16200,11 +16647,13 @@ ${lines.join("\n")}
 
   // src/adapters/chrome-runtime-extension.ts
   var ChromeRuntimeExtension = class {
-    constructor(runtime, tabs, browser, chromeApi) {
+    constructor(runtime, tabs, browser, chromeApi, workspaces, observations) {
       this.runtime = runtime;
       this.tabs = tabs;
       this.browser = browser;
       this.chromeApi = chromeApi;
+      this.workspaces = workspaces;
+      this.observations = observations;
       this.chromeApi.tabs.onRemoved.addListener(this.onTabRemoved);
       this.chromeApi.tabs.onUpdated.addListener(this.onTabUpdated);
     }
@@ -16212,6 +16661,8 @@ ${lines.join("\n")}
     tabs;
     browser;
     chromeApi;
+    workspaces;
+    observations;
     onTabRemoved = (tabId, info2) => {
       void this.tabs.forget({
         windowId: info2.windowId,
@@ -16234,8 +16685,8 @@ ${lines.join("\n")}
       }
       if (request.type === "select_tab") {
         await this.tabs.selectExecutionTab(
-          requiredString7(request, "sessionId"),
-          requiredString7(request, "tabId")
+          requiredString8(request, "sessionId"),
+          requiredString8(request, "tabId")
         );
         return { handled: true, data: true };
       }
@@ -16248,7 +16699,7 @@ ${lines.join("\n")}
       if (request.type === "bind_tab_session") {
         const binding = await this.tabs.bind(
           activationContext(request),
-          requiredString7(request, "sessionId")
+          requiredString8(request, "sessionId")
         );
         return {
           handled: true,
@@ -16262,13 +16713,35 @@ ${lines.join("\n")}
         await this.tabs.forget(activationContext(request));
         return { handled: true, data: true };
       }
+      if (request.type === "read_workspace_resource") {
+        if (!this.workspaces) {
+          throw new AgentError(
+            "WORKSPACE_PREVIEW_UNAVAILABLE",
+            "Workspace preview is not configured"
+          );
+        }
+        const workspaceId = requiredString8(request, "workspaceId");
+        const path = workspacePath(requiredString8(request, "path"));
+        const data = await this.workspaces.read(workspaceId, path);
+        return {
+          handled: true,
+          data: {
+            workspaceId,
+            path,
+            mimeType: workspaceMimeType(path),
+            dataBase64: bytesToBase643(data)
+          }
+        };
+      }
       return { handled: false };
     }
     async beforeDeleteSession(sessionId) {
       await this.tabs.releaseSession(sessionId);
+      await this.observations?.clearSession(sessionId);
     }
     async beforeClearHistory() {
       await this.tabs.clear();
+      await this.observations?.clear();
     }
     dispose() {
       this.chromeApi.tabs.onRemoved.removeListener(this.onTabRemoved);
@@ -16288,7 +16761,7 @@ ${lines.join("\n")}
   };
   function activationContext(request) {
     const windowId = Number(request.windowId);
-    const tabId = requiredString7(request, "tabId");
+    const tabId = requiredString8(request, "tabId");
     if (!Number.isFinite(windowId)) {
       throw new AgentError("TAB_CONTEXT_INVALID", "A valid windowId is required");
     }
@@ -16299,7 +16772,7 @@ ${lines.join("\n")}
       ...Number.isFinite(groupId) && groupId >= 0 ? { groupId } : {}
     };
   }
-  function requiredString7(request, key) {
+  function requiredString8(request, key) {
     const value = request[key];
     if (typeof value !== "string" || !value) {
       throw new AgentError(
@@ -17759,6 +18232,567 @@ ${lines.join("\n")}
     };
   }
 
+  // src/runtime/chrome-workspace-scope.ts
+  var LEGACY_MIGRATION_KEY = "tinyai:virtual-workspace:v2:first-scope";
+  var ChromeWorkspaceScopeRegistry = class {
+    constructor(options) {
+      this.options = options;
+    }
+    options;
+    scopes = /* @__PURE__ */ new Map();
+    migration;
+    async get(workspaceId) {
+      assertWorkspaceId(workspaceId);
+      const existing = this.scopes.get(workspaceId);
+      if (existing) return existing;
+      const prefix = `.tinyai/workspaces/${encodeURIComponent(workspaceId)}`;
+      const workspace = new VirtualWorkspace({
+        host: this.options.host,
+        vfs: new ScopedFileSystem(this.options.legacyWorkspace.fs, prefix),
+        storageKey: `tinyai:workspace:${workspaceId}`,
+        workspaceId,
+        now: this.options.now
+      });
+      this.scopes.set(workspaceId, workspace);
+      await this.adoptLegacyOnce(workspaceId, workspace);
+      return workspace;
+    }
+    async describe(workspaceId, path) {
+      const workspace = await this.get(workspaceId);
+      const info2 = await workspace.fs.stat(path);
+      if (!info2 || info2.kind !== "file") {
+        throw new AgentError(
+          "WORKSPACE_RESOURCE_NOT_FOUND",
+          `Workspace resource not found: ${path}`
+        );
+      }
+      return {
+        workspaceId,
+        path,
+        generation: await workspace.generation(),
+        resourceUri: workspaceResourceUri(workspaceId, path),
+        mimeType: workspaceMimeType(path),
+        size: info2.size,
+        version: info2.version,
+        openable: true,
+        exportable: true
+      };
+    }
+    async read(workspaceId, path) {
+      return (await this.get(workspaceId)).fs.read(path);
+    }
+    clear() {
+      this.scopes.clear();
+      this.migration = void 0;
+    }
+    adoptLegacyOnce(workspaceId, workspace) {
+      this.migration ??= this.migrate(workspaceId, workspace);
+      return this.migration;
+    }
+    async migrate(workspaceId, workspace) {
+      const storage = this.options.host.storage;
+      if (!storage) return;
+      const existing = await storage.get(LEGACY_MIGRATION_KEY);
+      if (existing) return;
+      const entries = await this.options.legacyWorkspace.fs.list("", {
+        recursive: true
+      });
+      for (const entry of entries) {
+        if (entry.kind !== "file" || entry.path.startsWith(".tinyai/")) continue;
+        const data = await this.options.legacyWorkspace.fs.read(entry.path);
+        await workspace.fs.write(entry.path, data);
+      }
+      await storage.set(LEGACY_MIGRATION_KEY, {
+        workspaceId,
+        migratedAt: this.options.now?.() ?? Date.now()
+      });
+    }
+  };
+  function assertWorkspaceId(workspaceId) {
+    if (!/^[a-zA-Z0-9._:-]{1,200}$/.test(workspaceId)) {
+      throw new AgentError(
+        "WORKSPACE_SCOPE_INVALID",
+        `Invalid workspace id: ${workspaceId}`
+      );
+    }
+  }
+
+  // src/runtime/chrome-scoped-workspace-manager.ts
+  var ChromeScopedWorkspaceManager = class {
+    constructor(options) {
+      this.options = options;
+    }
+    options;
+    compositions = /* @__PURE__ */ new Map();
+    evidence = /* @__PURE__ */ new Map();
+    sessionWorkspace = /* @__PURE__ */ new Map();
+    bindSession(sessionId, workspaceId) {
+      this.sessionWorkspace.set(sessionId, workspaceId);
+    }
+    async workspaceForSession(sessionId) {
+      const workspaceId = await this.resolveWorkspaceId(sessionId);
+      return this.options.workspaces.get(workspaceId);
+    }
+    async compositionForSession(sessionId) {
+      return this.composition(await this.resolveWorkspaceId(sessionId));
+    }
+    wrapTools(tools) {
+      return tools.map((definition) => ({
+        ...definition,
+        execute: async (input, invocation) => {
+          const result = await (await this.toolForInvocation(invocation, definition.name)).execute(
+            input,
+            invocation
+          );
+          return this.decorateToolOutput(
+            definition.name,
+            result,
+            invocation
+          );
+        },
+        ...definition.executeDetailed ? {
+          executeDetailed: async (input, invocation) => (await this.toolForInvocation(
+            invocation,
+            definition.name
+          )).executeDetailed(input, invocation)
+        } : {}
+      }));
+    }
+    async completionGuard(context) {
+      const workspaceId = await this.resolveWorkspaceId(context.sessionId);
+      const lastWrite = latestWrite2(context.view.rows);
+      if (lastWrite !== void 0) {
+        const observations = await this.options.observations.list({
+          sessionId: context.sessionId,
+          taskId: context.taskId
+        });
+        const workspace = await this.options.workspaces.get(workspaceId);
+        const generation = await workspace.generation();
+        const valid = currentWorkspaceObservation(
+          observations,
+          generation,
+          lastWrite.completedAt
+        );
+        if (valid) return { ok: true };
+      }
+      const service = await this.evidenceFor(workspaceId);
+      return createTestEvidenceCompletionGuard({
+        service,
+        store: this.options.evidenceStore,
+        actionVersions: async (actionId) => (await this.options.actions.list()).find(
+          (action) => action.descriptor.id === actionId
+        )?.descriptor.version
+      })(context);
+    }
+    async dispose() {
+      this.compositions.clear();
+      this.evidence.clear();
+      this.sessionWorkspace.clear();
+    }
+    async composition(workspaceId) {
+      let composition = this.compositions.get(workspaceId);
+      if (!composition) {
+        composition = this.createComposition(workspaceId);
+        this.compositions.set(workspaceId, composition);
+      }
+      return composition;
+    }
+    async createComposition(workspaceId) {
+      const workspace = await this.options.workspaces.get(workspaceId);
+      const evidence = await this.evidenceFor(workspaceId);
+      return createWorkspaceCapabilityComposition({
+        workspace,
+        profile: "portable",
+        actionRegistry: this.options.actions,
+        workspacePath: "",
+        hostProfile: "browser-agent",
+        environmentFingerprint: this.options.environmentFingerprint,
+        hostBaseline: this.options.baseline,
+        workspaceGeneration: () => workspace.generation(),
+        testEvidence: evidence,
+        workspaceInteractionProvider: this.options.interaction,
+        workspaceObservationRecorder: (observation) => this.options.observations.save(observation),
+        ...this.options.codeIntelligence ? {
+          codeIntelligence: this.options.codeIntelligence(workspace) ?? void 0
+        } : {},
+        actionBindingForInvocation: async () => ({
+          workspaceId: workspace.workspaceId,
+          workspaceGeneration: await workspace.generation(),
+          environmentFingerprint: this.options.environmentFingerprint,
+          evidenceVfs: workspace.fs
+        })
+      });
+    }
+    async evidenceFor(workspaceId) {
+      const existing = this.evidence.get(workspaceId);
+      if (existing) return existing;
+      const workspace = await this.options.workspaces.get(workspaceId);
+      const service = new TestEvidenceService({
+        store: this.options.evidenceStore,
+        artifacts: this.options.artifacts,
+        vfs: workspace.fs,
+        environmentFingerprint: this.options.environmentFingerprint,
+        workspaceGeneration: () => workspace.generation()
+      });
+      this.evidence.set(workspaceId, service);
+      return service;
+    }
+    async toolForInvocation(invocation, name) {
+      const composition = await this.compositionForSession(invocation.sessionId);
+      const tool6 = composition.tools.find((candidate) => candidate.name === name);
+      if (!tool6) {
+        throw new Error(`Scoped workspace tool is unavailable: ${name}`);
+      }
+      return tool6;
+    }
+    async decorateToolOutput(name, value, invocation) {
+      if (!resourceFileTools.has(name) || !value || typeof value !== "object" || Array.isArray(value) || typeof value.path !== "string") {
+        return value;
+      }
+      const workspace = await this.workspaceForSession(invocation.sessionId);
+      const path = workspacePath(value.path);
+      return {
+        ...value,
+        workspaceId: workspace.workspaceId,
+        generation: await workspace.generation(),
+        resourceUri: workspaceResourceUri(workspace.workspaceId, path),
+        openable: true,
+        exportable: true
+      };
+    }
+    async resolveWorkspaceId(sessionId) {
+      const workspaceId = this.sessionWorkspace.get(sessionId) ?? await this.options.workspaceIdForSession(sessionId);
+      if (!workspaceId) {
+        throw new Error(
+          `No workspace scope is bound to session ${sessionId}`
+        );
+      }
+      return workspaceId;
+    }
+  };
+  function latestWrite2(rows) {
+    return [...rows].reverse().find(
+      (row) => row.kind === "tool" && row.status === "completed" && completionWriteTools.has(row.toolName ?? "")
+    );
+  }
+  var completionWriteTools = /* @__PURE__ */ new Set([
+    "write_file",
+    "replace_in_file",
+    "append_file",
+    "apply_patch",
+    "apply_unified_diff",
+    "delete_file",
+    "git_add",
+    "git_commit",
+    "git_checkout",
+    "git_branch"
+  ]);
+  var resourceFileTools = /* @__PURE__ */ new Set([
+    "read_file",
+    "write_file",
+    "replace_in_file",
+    "append_file",
+    "apply_patch",
+    "apply_unified_diff"
+  ]);
+  function currentWorkspaceObservation(observations, generation, lastWriteAt) {
+    return observations.filter(
+      (observation) => observation.workspaceGeneration === generation && observation.createdAt >= (lastWriteAt ?? 0)
+    ).reverse().find(
+      (observation) => observation.loaded && observation.consoleErrors.length === 0 && observation.assertions.length > 0 && observation.assertions.every((assertion) => assertion.passed)
+    );
+  }
+
+  // src/adapters/chrome-workspace-interaction.ts
+  var ChromeWorkspaceInteractionProvider = class {
+    constructor(options) {
+      this.options = options;
+      this.open = {
+        capabilities: () => this.openCapabilities(),
+        open: (resource, options2, signal) => this.openResource(resource, options2, signal)
+      };
+      this.export = {
+        capabilities: () => this.exportCapabilities(),
+        export: (resource, signal) => this.exportResource(resource, signal)
+      };
+      this.verify = {
+        capabilities: () => this.verifyCapabilities(),
+        verify: (resource, options2, signal) => this.verifyResource(resource, options2, signal)
+      };
+    }
+    options;
+    hostId = "chrome";
+    open;
+    export;
+    verify;
+    async capabilities() {
+      return {
+        open: await this.openCapabilities(),
+        export: await this.exportCapabilities(),
+        verify: await this.verifyCapabilities()
+      };
+    }
+    async openCapabilities() {
+      return {
+        available: true,
+        modes: ["embedded-preview"]
+      };
+    }
+    async exportCapabilities() {
+      return {
+        available: true,
+        destinations: ["download"]
+      };
+    }
+    async verifyCapabilities() {
+      return {
+        available: Boolean(this.options.browser),
+        assertions: Boolean(this.options.browser),
+        console: false,
+        screenshot: false
+      };
+    }
+    async openResource(resource, options, signal) {
+      if (signal?.aborted) {
+        throw new AgentError(
+          "WORKSPACE_OPEN_CANCELLED",
+          "Workspace preview was cancelled"
+        );
+      }
+      await this.assertCurrent(resource);
+      const url = new URL(
+        this.options.chromeApi.runtime.getURL("workspace-preview.html")
+      );
+      url.searchParams.set("workspaceId", resource.workspaceId);
+      url.searchParams.set("path", resource.path);
+      url.searchParams.set("intent", options.intent);
+      const tab = await this.options.chromeApi.tabs.create({
+        url: url.toString(),
+        active: false
+      });
+      if (tab.id === void 0) {
+        throw new AgentError(
+          "WORKSPACE_OPEN_FAILED",
+          "Chrome did not return a preview tab id"
+        );
+      }
+      return {
+        mode: "embedded-preview",
+        resource,
+        targetId: String(tab.id)
+      };
+    }
+    async exportResource(resource, signal) {
+      await this.assertCurrent(resource);
+      if (signal?.aborted) {
+        throw new AgentError(
+          "WORKSPACE_OPEN_CANCELLED",
+          "Workspace export was cancelled"
+        );
+      }
+      const bytes = await this.options.workspaces.read(
+        resource.workspaceId,
+        resource.path
+      );
+      const mimeType = workspaceMimeType(resource.path);
+      const downloadId = await this.options.chromeApi.downloads.download({
+        url: `data:${mimeType};base64,${bytesToBase643(bytes)}`,
+        filename: resource.path.split("/").at(-1) ?? "workspace-file",
+        saveAs: false,
+        conflictAction: "uniquify"
+      });
+      if (downloadId === void 0) {
+        throw new AgentError(
+          "WORKSPACE_EXPORT_FAILED",
+          "Chrome did not create a workspace download"
+        );
+      }
+      await waitForDownload(this.options.chromeApi, downloadId, signal);
+      return {
+        artifactId: `chrome-download-${downloadId}`,
+        displayName: resource.path.split("/").at(-1) ?? resource.path,
+        bytes: bytes.byteLength,
+        destination: "download"
+      };
+    }
+    async verifyResource(resource, options, signal) {
+      const browser = this.options.browser;
+      if (!browser) {
+        throw new AgentError(
+          "WORKSPACE_VERIFICATION_UNAVAILABLE",
+          "Workspace application verification requires a browser provider"
+        );
+      }
+      const opened = await this.openResource(
+        resource,
+        { intent: "debug", ephemeral: true },
+        signal
+      );
+      const tabId = opened.targetId;
+      if (!tabId) {
+        throw new AgentError(
+          "WORKSPACE_OPEN_FAILED",
+          "Workspace preview did not return a target"
+        );
+      }
+      const frameId = await waitForPreviewFrame(browser, tabId, signal);
+      const base = await evaluateAppStable(
+        browser,
+        tabId,
+        `(() => ({
+        ready: document.readyState,
+        bodyLength: (document.body?.innerText ?? '').trim().length
+      }))()`,
+        { frameId, ...signal ? { signal } : {} }
+      );
+      const assertions = [
+        {
+          name: "document-loaded",
+          passed: base.ready === "complete" || base.ready === "interactive",
+          detail: base.ready
+        },
+        {
+          name: "document-has-content",
+          passed: base.bodyLength > 0,
+          detail: `${base.bodyLength} visible text characters`
+        }
+      ];
+      for (const assertion of options.assertions ?? []) {
+        if (signal?.aborted) {
+          throw new AgentError(
+            "WORKSPACE_VERIFY_CANCELLED",
+            "Workspace verification was cancelled"
+          );
+        }
+        const passed = await evaluateAppStable(
+          browser,
+          tabId,
+          `Boolean(${assertion.expression})`,
+          { frameId, ...signal ? { signal } : {} }
+        );
+        assertions.push({
+          name: assertion.name,
+          passed: passed === true
+        });
+      }
+      return {
+        workspaceId: resource.workspaceId,
+        path: resource.path,
+        workspaceGeneration: resource.generation,
+        loaded: true,
+        consoleErrors: [],
+        assertions
+      };
+    }
+    async assertCurrent(resource) {
+      const workspace = await this.options.workspaces.get(resource.workspaceId);
+      const generation = await workspace.generation();
+      if (generation !== resource.generation) {
+        throw new AgentError(
+          "WORKSPACE_RESOURCE_STALE",
+          "Workspace changed before the resource operation"
+        );
+      }
+    }
+  };
+  async function evaluateAppStable(browser, tabId, expression, options) {
+    let lastError;
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      try {
+        return await browser.evaluate(tabId, expression, options);
+      } catch (error2) {
+        lastError = error2;
+        const message = error2 instanceof Error ? error2.message : String(error2);
+        if (!message.includes("Cannot find context")) throw error2;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
+    throw lastError;
+  }
+  async function waitForPreviewFrame(browser, tabId, signal) {
+    const deadline = Date.now() + 1e4;
+    while (Date.now() < deadline) {
+      if (signal?.aborted) {
+        throw new AgentError(
+          "WORKSPACE_VERIFY_CANCELLED",
+          "Workspace verification was cancelled"
+        );
+      }
+      const frames = await browser.listFrames?.(tabId) ?? [];
+      const preview = frames.filter((frame) => !frame.main).find(
+        (frame) => !frame.url || frame.url.includes("/sandbox/workspace-app.html") || frame.url.startsWith("blob:") || frame.url.startsWith("data:text/html")
+      ) ?? frames.find((frame) => !frame.main);
+      if (preview) return preview.frameId;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new AgentError(
+      "WORKSPACE_PREVIEW_TIMEOUT",
+      "Workspace preview frame did not become ready"
+    );
+  }
+  async function waitForDownload(chromeApi, downloadId, signal) {
+    const deadline = Date.now() + 2e4;
+    while (Date.now() < deadline) {
+      if (signal?.aborted) {
+        throw new AgentError(
+          "WORKSPACE_OPEN_CANCELLED",
+          "Workspace export was cancelled"
+        );
+      }
+      const [item] = await chromeApi.downloads.search({ id: downloadId });
+      if (item?.state === "complete") return;
+      if (item?.state === "interrupted") {
+        throw new AgentError(
+          "WORKSPACE_EXPORT_FAILED",
+          item.error ?? "Chrome download was interrupted"
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new AgentError(
+      "WORKSPACE_EXPORT_TIMEOUT",
+      "Chrome did not complete the workspace download"
+    );
+  }
+
+  // src/adapters/chrome-workspace-observation-store.ts
+  var PREFIX = "tinyai:workspace-observations:v1:";
+  var ChromeWorkspaceObservationStore = class {
+    constructor(storage) {
+      this.storage = storage;
+    }
+    storage;
+    async save(observation) {
+      const key = this.key(observation.sessionId, observation.taskId);
+      const records = await this.list(observation);
+      const next = [
+        ...records.filter((record) => record.id !== observation.id),
+        structuredClone(observation)
+      ].slice(-20);
+      await this.storage.set(key, next);
+    }
+    async list(input) {
+      const value = await this.storage.get(
+        this.key(input.sessionId, input.taskId)
+      );
+      return Array.isArray(value) ? structuredClone(value) : [];
+    }
+    async clear() {
+      for (const key of await this.storage.list?.(PREFIX) ?? []) {
+        await this.storage.remove?.(key);
+      }
+    }
+    async clearSession(sessionId) {
+      const prefix = `${PREFIX}${encodeURIComponent(sessionId)}:`;
+      for (const key of await this.storage.list?.(prefix) ?? []) {
+        await this.storage.remove?.(key);
+      }
+    }
+    key(sessionId, taskId) {
+      return `${PREFIX}${encodeURIComponent(sessionId)}:${encodeURIComponent(taskId)}`;
+    }
+  };
+
   // src/runtime/chrome-runtime.ts
   var KERNEL_PORT_NAME = "tinyai-runtime-v1";
   var REMOTE_ACTIONS_KEY = "tinyai-remote-actions";
@@ -17809,6 +18843,7 @@ ${lines.join("\n")}
     };
   }
   async function createChromeRuntimeBundle(options = {}) {
+    const chromeApi = options.chromeApi ?? chrome;
     const chromeHost = new ChromeHostBridge({
       storage: options.storage,
       id: "tinyai-chrome-virtual-workspace"
@@ -17817,6 +18852,12 @@ ${lines.join("\n")}
       host: chromeHost,
       storageKey: "tinyai:virtual-workspace:v1"
     });
+    const workspaceScopes = new ChromeWorkspaceScopeRegistry({
+      host: chromeHost,
+      legacyWorkspace: virtualWorkspace
+    });
+    let tabSessions;
+    let mainWorkspace;
     const storage = options.storage ?? chromeLocalStorage();
     const sessionStore = new ChromeSessionStore({
       storage: chromeStorageForSessions(storage)
@@ -17841,6 +18882,11 @@ ${lines.join("\n")}
     const hookConfig = await storage.get("tinyai-declarative-hooks");
     const approval = new PortApprovalBroker({ mode: config.approval });
     const browser = options.browser ?? options.createBrowser?.() ?? new ChromeBrowserProvider();
+    const workspaceInteraction = new ChromeWorkspaceInteractionProvider({
+      chromeApi,
+      workspaces: workspaceScopes,
+      browser
+    });
     const model = new ModelGateway({
       targets: [
         {
@@ -17858,6 +18904,9 @@ ${lines.join("\n")}
       storage
     );
     const evidenceStore = new HostEvidenceStore(chromeHost.storage);
+    const workspaceObservations = new ChromeWorkspaceObservationStore(
+      chromeHost.storage
+    );
     const importJournal = new HostWorkspaceImportJournal(chromeHost.storage);
     const actionRegistry = new HostActionRegistry();
     const remoteActionConfig = parseRemoteActionConfig(
@@ -17879,21 +18928,7 @@ ${lines.join("\n")}
       "chrome-extension-v1",
       ...Object.entries(hostBaseline.tierState).sort(([left], [right]) => left.localeCompare(right)).map(([tier, state]) => `${tier}:${state}`)
     ].join("|");
-    const testEvidence = new TestEvidenceService({
-      store: evidenceStore,
-      artifacts: artifactStore,
-      vfs: virtualWorkspace.fs,
-      environmentFingerprint,
-      workspaceGeneration: () => virtualWorkspace.generation()
-    });
-    const completionGuard = createTestEvidenceCompletionGuard({
-      service: testEvidence,
-      store: evidenceStore,
-      actionVersions: async (actionId) => (await actionRegistry.list()).find(
-        (action) => action.descriptor.id === actionId
-      )?.descriptor.version
-    });
-    const sharedComposition = await createWorkspaceCapabilityComposition({
+    const templateComposition = await createWorkspaceCapabilityComposition({
       workspace: virtualWorkspace,
       profile: "portable",
       actionRegistry,
@@ -17902,7 +18937,7 @@ ${lines.join("\n")}
       environmentFingerprint,
       hostBaseline,
       workspaceGeneration: () => virtualWorkspace.generation(),
-      testEvidence,
+      workspaceInteractionProvider: workspaceInteraction,
       ...actionReport.available.some(
         (action) => action.descriptor.id === "code.lsp.query"
       ) ? {
@@ -17915,6 +18950,22 @@ ${lines.join("\n")}
         evidenceVfs: virtualWorkspace.fs
       })
     });
+    const scopedWorkspaces = new ChromeScopedWorkspaceManager({
+      workspaces: workspaceScopes,
+      workspaceIdForSession: async (sessionId) => tabSessions?.workspaceForSession(sessionId),
+      actions: actionRegistry,
+      baseline: hostBaseline,
+      environmentFingerprint,
+      artifacts: artifactStore,
+      evidenceStore,
+      observations: workspaceObservations,
+      interaction: workspaceInteraction,
+      codeIntelligence: (workspace) => actionReport.available.some(
+        (action) => action.descriptor.id === "code.lsp.query"
+      ) ? new LspActionCodeIntelligence(actionRegistry) : void 0
+    });
+    const completionGuard = (context) => scopedWorkspaces.completionGuard(context);
+    const workspaceTools = scopedWorkspaces.wrapTools(templateComposition.tools);
     let activeRuntime;
     const continuity = new WorkspaceContinuityService({
       workspaceId: "tinyai-browser-workspace",
@@ -17924,7 +18975,7 @@ ${lines.join("\n")}
       artifacts: artifactStore,
       environmentId: "chrome-extension-v1",
       hostProfile: "browser-agent",
-      agentVersion: "0.13.0",
+      agentVersion: "0.14.0",
       newId: () => `capsule_${crypto.randomUUID()}`,
       beforeExport: async () => {
         if (!activeRuntime) return;
@@ -18007,7 +19058,7 @@ ${lines.join("\n")}
       effects: ["read", "write", "execute", "network"]
     };
     const downloadArtifact = async (name, mime, base64) => {
-      await chrome.downloads.download({
+      await chromeApi.downloads.download({
         url: `data:${mime};base64,${base64}`,
         filename: name,
         saveAs: false
@@ -18019,7 +19070,7 @@ ${lines.join("\n")}
       mode: input.mode,
       tools: input.tools,
       actions: actionReport.available,
-      codeIntelligence: sharedComposition.codeIntelligenceCapabilities,
+      codeIntelligence: templateComposition.codeIntelligenceCapabilities,
       skills: initialSkills,
       ...projectInstructions ? { projectInstructions } : {},
       ...input.profile ? { agentProfile: input.profile } : {},
@@ -18031,12 +19082,10 @@ ${lines.join("\n")}
     });
     const childPromptTools = [
       ...childBrowserTools,
-      ...sharedComposition.tools,
+      ...workspaceTools,
       ...skillTools,
       ...mcpTools
     ];
-    let mainWorkspace;
-    let tabSessions;
     const workspaceTabs = {
       createTab: (sessionId, url) => requireTabSessions().createTab(sessionId, url),
       switchTab: (sessionId, tabId) => requireTabSessions().switchTab(sessionId, tabId),
@@ -18056,55 +19105,61 @@ ${lines.join("\n")}
     const subagentDriver = new WorkspaceSubagentDriver({
       ids,
       now: () => systemClock.now(),
-      createRuntime: ({ sessionId, spec, profile }) => createBrowserWorkspace({
-        model,
-        browser,
-        sessionStore,
-        approval,
-        handoff: approval,
-        clock: systemClock,
-        ids,
-        permissionModes,
-        artifactStore,
-        trace,
-        hooks,
-        systemPromptForMode: (mode) => promptFor({
-          mode,
-          tools: childPromptTools,
-          profile,
-          runtime: {
-            workspaceId: virtualWorkspace.workspaceId,
-            environmentFingerprint,
-            agentKind: "subagent"
-          }
-        }),
-        maxSteps: spec.budget.maxTurns,
-        toolSelection: {
-          allow: profile.tools.allow,
-          deny: profile.tools.deny,
-          capabilities: profile.effectivePermissions.capabilities
-        },
-        additionalTools: [
-          ...sharedComposition.tools.map((definition) => ({
-            definition,
-            source: "builtin",
-            sourceId: "workspace-shared"
-          })),
-          ...skillTools.map((definition) => ({
-            definition,
-            source: "builtin",
-            sourceId: "skills"
-          })),
-          ...mcpTools.map((definition) => ({
-            definition,
-            source: "plugin",
-            sourceId: "mcp"
-          }))
-        ],
-        completionGuard,
-        tabScoped: true,
-        onProjectionChange
-      }).runtime
+      createRuntime: async ({ sessionId, spec, profile }) => {
+        const parentWorkspaceId = spec.parentSessionId ? await tabSessions?.workspaceForSession(spec.parentSessionId) : void 0;
+        if (parentWorkspaceId) {
+          scopedWorkspaces.bindSession(sessionId, parentWorkspaceId);
+        }
+        return createBrowserWorkspace({
+          model,
+          browser,
+          sessionStore,
+          approval,
+          handoff: approval,
+          clock: systemClock,
+          ids,
+          permissionModes,
+          artifactStore,
+          trace,
+          hooks,
+          systemPromptForMode: (mode) => promptFor({
+            mode,
+            tools: childPromptTools,
+            profile,
+            runtime: {
+              workspaceScope: "session-bound",
+              environmentFingerprint,
+              agentKind: "subagent"
+            }
+          }),
+          maxSteps: spec.budget.maxTurns,
+          toolSelection: {
+            allow: profile.tools.allow,
+            deny: profile.tools.deny,
+            capabilities: profile.effectivePermissions.capabilities
+          },
+          additionalTools: [
+            ...workspaceTools.map((definition) => ({
+              definition,
+              source: "builtin",
+              sourceId: "workspace-shared"
+            })),
+            ...skillTools.map((definition) => ({
+              definition,
+              source: "builtin",
+              sourceId: "skills"
+            })),
+            ...mcpTools.map((definition) => ({
+              definition,
+              source: "plugin",
+              sourceId: "mcp"
+            }))
+          ],
+          completionGuard,
+          tabScoped: true,
+          onProjectionChange
+        }).runtime;
+      }
     });
     const coordinator = new SubagentCoordinator({
       registry,
@@ -18141,20 +19196,20 @@ ${lines.join("\n")}
         mode,
         tools: [
           ...mainBrowserTools,
-          ...sharedComposition.tools,
+          ...workspaceTools,
           ...subagentTools,
           ...skillTools,
           ...mcpTools
         ],
         runtime: {
-          workspaceId: virtualWorkspace.workspaceId,
+          workspaceScope: "session-bound",
           environmentFingerprint,
           agentKind: "root"
         }
       }),
       download: downloadArtifact,
       additionalTools: [
-        ...sharedComposition.tools.map((definition) => ({
+        ...workspaceTools.map((definition) => ({
           definition,
           source: "builtin",
           sourceId: "workspace-shared"
@@ -18202,7 +19257,9 @@ ${lines.join("\n")}
       mainWorkspace.runtime,
       tabSessions,
       browser,
-      options.chromeApi ?? chrome
+      chromeApi,
+      workspaceScopes,
+      workspaceObservations
     );
     return {
       runtime: mainWorkspace.runtime,
@@ -18236,6 +19293,7 @@ ${lines.join("\n")}
         unsubscribeChildren();
         approval.dispose();
         await coordinator.dispose();
+        await scopedWorkspaces.dispose();
         await virtualWorkspace.jobs.dispose();
         await mainWorkspace.dispose();
         await Promise.all(mcpClients.map((client) => client.close()));
@@ -18272,7 +19330,7 @@ ${lines.join("\n")}
     const gateway = new RuntimeGateway(
       async () => createChromeRuntimeBundle({
         storage: chromeApi.storage.local,
-        tabSessionStorage: chromeApi.storage.session,
+        tabSessionStorage: chromeApi.storage.local,
         chromeApi
       })
     );

@@ -439,6 +439,12 @@ describe('ChromeBrowserProvider', () => {
     const info = await browser.navigate('1', 'example.org');
     expect(tabs.update).toHaveBeenCalledWith(1, { url: 'https://example.org' });
     expect(info.url).toBe('https://example.com');
+    await expect(
+      browser.navigate('1', 'file:///tmp/workspace.html')
+    ).rejects.toMatchObject({
+      code: 'BROWSER_FILE_URL_FORBIDDEN',
+      message: expect.stringContaining('open_workspace_file'),
+    });
   });
 
   it('bounds per-tab network capture entries', async () => {

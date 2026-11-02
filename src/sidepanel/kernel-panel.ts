@@ -316,6 +316,7 @@ export async function initKernelUi(): Promise<void> {
   async function activateSession(
     load: () => Promise<{
       sessionId: string;
+      workspaceId: string;
       activeTabId: string;
       groupId?: number;
       scope: 'group' | 'tab';
@@ -349,6 +350,7 @@ export async function initKernelUi(): Promise<void> {
     document.documentElement.dataset.tinyaiTabId = activeTabId;
     document.documentElement.dataset.tinyaiExecutionTabId = executionTabId;
     document.documentElement.dataset.tinyaiSessionId = sessionId;
+    document.documentElement.dataset.tinyaiWorkspaceId = activation.workspaceId;
     projection = activation.projection;
     approvals = [...(approvalsBySession.get(sessionId) ?? [])];
     handoffs = [...(handoffsBySession.get(sessionId) ?? [])];

@@ -17,6 +17,9 @@ import type { CodeIntelligencePort } from '../platform/code-intelligence';
 import type { VirtualWorkspace } from '../virtual';
 import { TextCodeIntelligence } from '../intelligence/text-index';
 import { createCodeIntelligenceTools } from './code-intelligence-toolpack';
+import { createWorkspaceResourceTools } from './workspace-resource-toolpack';
+import type { WorkspaceInteractionProvider } from '../platform/workspace-interaction';
+import type { WorkspaceApplicationObservation } from '../platform/workspace-interaction';
 
 export type WorkspaceToolProfile = 'portable' | 'legacy';
 
@@ -31,6 +34,10 @@ export interface WorkspaceCapabilityCompositionOptions {
   workspaceGeneration?: () => number | Promise<number>;
   testEvidence?: TestEvidenceService;
   codeIntelligence?: CodeIntelligencePort;
+  workspaceInteractionProvider?: WorkspaceInteractionProvider;
+  workspaceObservationRecorder?: (
+    observation: WorkspaceApplicationObservation
+  ) => Promise<void> | void;
   actionBindingForInvocation?: (
     invocation: ToolInvocation,
     descriptor: HostActionDescriptor
@@ -44,6 +51,7 @@ export interface WorkspaceCapabilityComposition {
   actionTools: ToolDefinition[];
   applicationActions: ToolDefinition[];
   codeIntelligenceTools: ToolDefinition[];
+  resourceTools: ToolDefinition[];
   capabilityGraph: CapabilityGraph;
   composition: ReturnType<ToolPackComposer['compose']>;
   codeIntelligenceCapabilities: Awaited<
@@ -64,6 +72,20 @@ export async function createWorkspaceCapabilityComposition(
     await codeIntelligence.capabilities();
   const codeIntelligenceTools =
     createCodeIntelligenceTools(codeIntelligence);
+  const resourceTools = options.workspaceInteractionProvider
+    ? (
+        await createWorkspaceResourceTools({
+          workspace: options.workspace,
+          provider: options.workspaceInteractionProvider,
+          ...(options.workspaceObservationRecorder
+            ? {
+                recordObservation:
+                  options.workspaceObservationRecorder,
+              }
+            : {}),
+        })
+      ).tools
+    : [];
   const actionTools =
     options.actionRegistry &&
     (await options.actionRegistry.list()).length > 0
@@ -159,6 +181,13 @@ export async function createWorkspaceCapabilityComposition(
     optionalCapabilities: ['code-intelligence'],
     tools: codeIntelligenceTools,
   });
+  if (resourceTools.length > 0) {
+    composer.register({
+      id: 'workspace-resources',
+      requiredCapabilities: ['filesystem'],
+      tools: resourceTools,
+    });
+  }
   if (applicationActions.length > 0) {
     composer.register({
       id: 'application-actions',
@@ -177,6 +206,7 @@ export async function createWorkspaceCapabilityComposition(
     ),
     applicationActions,
     codeIntelligenceTools,
+    resourceTools,
     capabilityGraph: graph,
     composition,
     codeIntelligenceCapabilities,

@@ -12,6 +12,7 @@ export interface TabContext {
 }
 
 export interface TabSessionBinding {
+  workspaceId: string;
   scope: 'group' | 'tab';
   windowId: number;
   groupId?: number;
@@ -35,6 +36,7 @@ export interface TabSessionRegistryOptions {
   storageKey?: string;
   now?: () => number;
   createSessionId?: () => string;
+  createWorkspaceId?: (sessionId: string) => string;
 }
 
 export class TabSessionRegistry {
@@ -42,6 +44,7 @@ export class TabSessionRegistry {
   private readonly storageKey: string;
   private readonly now: () => number;
   private readonly createSessionId: () => string;
+  private readonly createWorkspaceId: (sessionId: string) => string;
   private loaded?: Promise<void>;
   private tail: Promise<void> = Promise.resolve();
 
@@ -50,6 +53,8 @@ export class TabSessionRegistry {
     this.now = options.now ?? Date.now;
     this.createSessionId =
       options.createSessionId ?? (() => `session_${crypto.randomUUID()}`);
+    this.createWorkspaceId =
+      options.createWorkspaceId ?? ((sessionId) => `ws_${sessionId}`);
   }
 
   resolve(context: TabContext): Promise<TabSessionBinding> {
@@ -119,7 +124,11 @@ export class TabSessionRegistry {
           this.bindings.delete(
             tabKey({ windowId: context.windowId, tabId: context.tabId })
           );
-          return this.bindLocked(context, promoted.sessionId);
+          return this.bindLocked(
+            context,
+            promoted.sessionId,
+            promoted.workspaceId
+          );
         }
       }
       return this.createLocked(context);
@@ -227,6 +236,13 @@ export class TabSessionRegistry {
     return [...this.bindings.values()].map((binding) => ({ ...binding }));
   }
 
+  async workspaceForSession(sessionId: string): Promise<string | undefined> {
+    await this.ensureLoaded();
+    return [...this.bindings.values()].find(
+      (binding) => binding.sessionId === sessionId
+    )?.workspaceId;
+  }
+
   async createTab(sessionId: string, url = 'about:blank'): Promise<TabDescriptor> {
     return this.serialized(async () => {
       await this.ensureLoaded();
@@ -254,6 +270,7 @@ export class TabSessionRegistry {
       const tabs = (await this.options.browser.listSessionTabs?.(sessionId)) ?? [tab];
       this.removeBindings(sessionId);
       const binding: TabSessionBinding = {
+        workspaceId: existing.workspaceId,
         scope: 'group',
         windowId: group.groupId !== undefined
           ? (tab.windowId ?? existing.windowId)
@@ -303,12 +320,20 @@ export class TabSessionRegistry {
   }
 
   private async createLocked(context: TabContext): Promise<TabSessionBinding> {
-    return this.bindLocked(context, this.createSessionId());
+    const sessionId = this.createSessionId();
+    return this.bindLocked(
+      context,
+      sessionId,
+      this.createWorkspaceId(sessionId)
+    );
   }
 
   private async bindLocked(
     context: TabContext,
-    sessionId: string
+    sessionId: string,
+    workspaceId =
+      this.workspaceIdForSession(sessionId) ??
+      this.createWorkspaceId(sessionId)
   ): Promise<TabSessionBinding> {
     const key = tabKey(context);
     for (const [existingKey, binding] of this.bindings) {
@@ -325,6 +350,7 @@ export class TabSessionRegistry {
         ? await this.options.browser.listTabs()
         : [];
     const binding: TabSessionBinding = {
+      workspaceId,
       scope: context.groupId !== undefined && context.groupId >= 0 ? 'group' : 'tab',
       windowId: context.windowId,
       ...(context.groupId !== undefined && context.groupId >= 0
@@ -399,6 +425,10 @@ export class TabSessionRegistry {
       const scopedGroupId = Number.isFinite(groupId) && groupId >= 0 ? groupId : undefined;
       const context = { windowId, tabId, ...(scopedGroupId !== undefined ? { groupId: scopedGroupId } : {}) };
       this.bindings.set(tabKey(context), {
+        workspaceId:
+          typeof item.workspaceId === 'string' && item.workspaceId
+            ? item.workspaceId
+            : this.createWorkspaceId(sessionId),
         scope: scopedGroupId !== undefined ? 'group' : 'tab',
         windowId,
         ...(scopedGroupId !== undefined ? { groupId: scopedGroupId } : {}),
@@ -429,6 +459,14 @@ export class TabSessionRegistry {
     for (const [key, binding] of this.bindings) {
       if (binding.sessionId === sessionId) this.bindings.delete(key);
     }
+  }
+
+  private workspaceIdForSession(sessionId: string): string {
+    return (
+      [...this.bindings.values()].find(
+        (binding) => binding.sessionId === sessionId
+      )?.workspaceId ?? this.createWorkspaceId(sessionId)
+    );
   }
 
   private async forgetLocked(context: TabContext): Promise<void> {

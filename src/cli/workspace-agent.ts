@@ -182,7 +182,7 @@ async function main(): Promise<void> {
     artifacts,
     environmentId: `local-${process.platform}-${process.arch}`,
     hostProfile: 'local-coding',
-    agentVersion: '0.13.0',
+    agentVersion: '0.14.0',
     newId: () => `capsule_${randomUUID()}`,
     environment: {
       manifestVersion: 1,

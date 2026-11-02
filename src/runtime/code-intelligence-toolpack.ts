@@ -4,7 +4,7 @@ import type {
   CodeIntelligencePort,
   CodeRange,
 } from '../platform/code-intelligence';
-import { normalizeVirtualPath } from '../virtual';
+import { workspacePath } from '../platform/workspace-resource';
 
 export function createCodeIntelligenceTools(
   intelligence: CodeIntelligencePort
@@ -23,7 +23,9 @@ export function createCodeIntelligenceTools(
       schema({ paths: { type: 'array', items: { type: 'string' } } }, ['paths']),
       async (input, invocation) =>
         (await intelligence.diagnostics(
-          stringArray(objectInput(input), 'paths').map(normalizeVirtualPath),
+          stringArray(objectInput(input), 'paths').map((path) =>
+            workspacePath(path)
+          ),
           invocation.signal
         )) as unknown as JsonValue
     ),
@@ -77,7 +79,7 @@ export function createCodeIntelligenceTools(
           );
         }
         return (await intelligence.codeActions(
-          normalizeVirtualPath(requiredString(object, 'path')),
+          workspacePath(requiredString(object, 'path')),
           range as unknown as CodeRange,
           invocation.signal
         )) as unknown as JsonValue;

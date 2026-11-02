@@ -9,7 +9,7 @@
 </style>
 </head>
 <body><div class="wrap">
-<header class="hero"><small>TINYAI / WORKSPACE RESOURCE ARCHITECTURE / REVIEW</small><h1>Workspace 资源路径与宿主交互</h1><p>把 Workspace 作用域、相对路径、资源身份、宿主打开/导出能力和应用验证拆成独立契约。Chrome 只实现自己的 Adapter，其他宿主共享同一套语义。</p><div class="chips"><span class="chip">Target 0.14.0</span><span class="chip">ADR-021 Proposed</span><span class="chip">Design Review</span><span class="chip">Implementation unauthorized</span></div></header>
+<header class="hero"><small>TINYAI / WORKSPACE RESOURCE ARCHITECTURE / IMPLEMENTATION</small><h1>Workspace 资源路径与宿主交互</h1><p>把 Workspace 作用域、相对路径、资源身份、宿主打开/导出能力和应用验证拆成独立契约。Chrome 只实现自己的 Adapter，其他宿主共享同一套语义。</p><div class="chips"><span class="chip">Target 0.14.0</span><span class="chip">ADR-021 Accepted</span><span class="chip">Approved unreviewed</span><span class="chip">Implementation authorized</span></div></header>
 <nav><a href="#overview">总览</a><a href="#layers">分层</a><a href="#paths">路径</a><a href="#req-workspace-003">Workspace</a><a href="#req-host-004">Host Ports</a><a href="#req-chrome-002">Chrome</a><a href="#req-verify-002">Verification</a><a href="#architecture-impact">影响面</a><a href="#failure">失败</a><a href="#acceptance">验收</a></nav>
 
 <section id="overview"><h2>1. 问题、范围与需求</h2><p>当前 Chrome 所有标签共用一个扩展级 VFS，但 UI 和 Session 暴露标签组/独立标签作用域。Agent 又只能看到相对路径和“virtual workspace”工具描述，无法预先知道该路径不是宿主路径。因此会出现跨任务文件泄漏、<code>file://</code> 尝试、把源码注入无关页面验证以及写入成功但任务 Failed。</p>
@@ -196,5 +196,19 @@ interface WorkspaceVerificationGuard {
 <tr><td>D</td><td>Host-aware verification 与 Prompt/Tool 投影</td><td>应用任务可真实完成，无假 Evidence</td></tr>
 </tbody></table>
 <p>整体验收：任一宿主都能只暴露自己的能力；Agent 始终看到 workspace-relative path；Workspace 资源能按宿主 preview/export；验证失败或过期时不会显示 completed；Chrome 的真实应用任务通过独立文件预览完成 E2E。</p>
-<p class="foot">REQ-WORKSPACE-003 · REQ-HOST-004 · REQ-CHROME-002 · REQ-VERIFY-002 · Target 0.14.0 · Design review · ADR-021 Proposed · Implementation unauthorized</p></section>
+<p class="foot">REQ-WORKSPACE-003 · REQ-HOST-004 · REQ-CHROME-002 · REQ-VERIFY-002 · Target 0.14.0 · Approved unreviewed · ADR-021 Accepted · Implementation authorized</p></section>
+<section id="implementation-evidence"><h2>11. 实现映射</h2>
+<table><thead><tr><th>模块</th><th>结果</th></tr></thead><tbody>
+<tr><td><code>src/platform/workspace-resource.ts</code></td><td>Canonical path、Scope、ResourceRef、resource URI 和 MIME contract。</td></tr>
+<tr><td><code>src/platform/workspace-interaction.ts</code></td><td>Open/Export/Verify Ports 与通用 Observation。</td></tr>
+<tr><td><code>src/virtual/scoped-fs.ts</code></td><td>同一底层存储上的路径空间隔离与结果路径翻译。</td></tr>
+<tr><td><code>src/runtime/chrome-workspace-scope.ts</code></td><td>按稳定 Workspace ID 惰性创建资源域及一次性旧 VFS 接管。</td></tr>
+<tr><td><code>src/runtime/chrome-scoped-workspace-manager.ts</code></td><td>按 session 路由到正确 Workspace composition，并执行资源结果与 Evidence 门禁。</td></tr>
+<tr><td><code>src/adapters/chrome-workspace-interaction.ts</code></td><td>隔离预览标签、downloads 导出、预览 frame 断言。</td></tr>
+<tr><td><code>src/adapters/chrome-workspace-session-registry.ts</code></td><td>标签组共享 Workspace，独立标签隔离；binding 使用本地持久存储。</td></tr>
+<tr><td><code>src/runtime/workspace-resource-toolpack.ts</code></td><td>按 capability 暴露 get/open/export/verify 工具。</td></tr>
+<tr><td><code>src/adapters/chrome-workspace-observation-store.ts</code></td><td>任务级、generation-bound BrowserApp Observation。</td></tr>
+</tbody></table>
+<div class="rule"><b>验证：</b><code>npm run check</code> 126/129 files passed，495 tests passed，3 skipped；Chrome for Testing E2E 12/12；TUI Portable Action 验证与 Capsule 导出通过。</div>
+<p class="foot">Implementation evidence · 0.14.0</p></section>
 </div></body></html>
