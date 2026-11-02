@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>REQ-ENG-009 Chrome for Testing E2E Baseline</title>
+<style>:root{--bg:#f4f6f8;--paper:#fff;--text:#171a1f;--muted:#69707a;--line:#e0e4e9;--accent:#2563eb;--mono:ui-monospace,Menlo,monospace}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.wrap{max-width:1080px;margin:auto;padding:36px 24px 90px}header{padding:34px;border-radius:24px;background:linear-gradient(135deg,#111723,#173d70 60%,#2d75c7);color:#fff}header small{opacity:.72;letter-spacing:.1em}h1{font-size:34px;margin:10px 0}header p{margin:0;max-width:850px;color:#edf5ff}section{margin:17px 0;padding:24px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}h2{font-size:22px;margin:0 0 14px}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#fafbfc;color:var(--muted)}code{font-family:var(--mono);background:#eff2f5;padding:1px 5px;border-radius:4px}pre{overflow:auto;padding:15px;border-radius:11px;background:#111923;color:#eef6ff;font:12px/1.6 var(--mono)}.rule{padding:12px 14px;border-left:3px solid var(--accent);border-radius:0 9px 9px 0;background:#eef5ff}.foot{color:var(--muted);font-size:12px}</style>
+</head><body><div class="wrap">
+<header><small>TINYAI / TEST INFRASTRUCTURE / DESIGN</small><h1>Chrome for Testing E2E 基线</h1><p>统一浏览器选择、可复现 CI、headed 本地验证和 Stable Chrome 发布冒烟。</p></header>
+<section><h2>1. 问题与目标</h2><p>此前每个 E2E 文件重复查找硬编码 CfT 路径，并在缺失时静默使用 Stable Chrome，导致无法从结果判断实际浏览器。目标是让 CfT 成为唯一默认基线。</p></section>
+<section id="architecture-impact"><h2>2. Architecture impact</h2><table><tbody><tr><td>Production Runtime</td><td>none</td></tr><tr><td>E2E Harness</td><td>add shared <code>tests/harness/chrome-e2e.ts</code></td></tr><tr><td>All E2E specs</td><td>modify launcher usage</td></tr><tr><td>package scripts</td><td>CfT, headed, stable and auto profiles</td></tr><tr><td>CI gate</td><td><code>test:e2e</code> strictly CfT</td></tr></tbody></table></section>
+<section><h2>3. Browser profiles</h2><pre>npm run test:e2e          CfT + headless
+npm run test:e2e:headed   CfT + visible window
+npm run test:e2e:stable   Stable Chrome + headless smoke
+npm run test:e2e:auto     diagnostic only: CfT then Stable</pre><p><code>CHROME_FOR_TESTING_PATH</code>、<code>TINYAI_CHROME_EXECUTABLE</code> 可覆盖路径；默认缺少 CfT 时直接失败，不回退 Stable。</p></section>
+<section><h2>4. Resolution and lifecycle</h2><p>显式路径优先；否则读取 Playwright 期望路径，然后扫描 <code>ms-playwright/chromium-*</code> 最新版本，支持 macOS arm64/x64、Linux 和 Windows。每个 E2E 使用同一扩展启动参数和临时 profile。</p></section>
+<section><h2>5. Acceptance</h2><ul><li>所有 E2E 使用共享 launcher。</li><li>默认门禁运行 CfT headless。</li><li>headed 模式可用。</li><li>Stable Chrome 独立运行。</li><li>文档和 scripts 可发现。</li></ul><p class="foot">REQ-ENG-009 · 0.12.2 · ADR-019</p></section>
+</div></body></html>

@@ -1,10 +1,10 @@
 import { createServer, type Server } from 'node:http';
-import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { chromium, type BrowserContext } from 'playwright-core';
+import { type BrowserContext } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { launchE2EChrome } from '../harness/chrome-e2e';
 
 let server: Server;
 let baseUrl: string;
@@ -20,6 +20,7 @@ const handoffPromptCalls = new Map<string, number>();
 const groupWorkspacePromptCalls = new Map<string, number>();
 const remoteActionPromptCalls = new Map<string, number>();
 const tabRecoveryPromptCalls = new Map<string, number>();
+const executionTargetPromptCalls = new Map<string, number>();
 const capturedToolRequests: string[][] = [];
 let remoteActionCalls = 0;
 
@@ -103,6 +104,57 @@ beforeAll(async () => {
       const userText =
         [...(parsed.messages ?? [])].reverse().find((message) => message.role === 'user')?.content ??
         '';
+      if (userText.includes('execution target smoke')) {
+        const count = (executionTargetPromptCalls.get(userText) ?? 0) + 1;
+        executionTargetPromptCalls.set(userText, count);
+        response.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+        });
+        if (count === 1) {
+          response.write(
+            `data: ${JSON.stringify({
+              choices: [
+                {
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: 'call_execution_target',
+                        function: {
+                          name: 'read_page',
+                          arguments: '{}',
+                        },
+                      },
+                    ],
+                  },
+                  finish_reason: 'tool_calls',
+                },
+              ],
+            })}\n\n`
+          );
+        } else {
+          const toolText =
+            [...(parsed.messages ?? [])]
+              .reverse()
+              .find((message) => message.role === 'tool')?.content ?? '';
+          response.write(
+            `data: ${JSON.stringify({
+              choices: [
+                {
+                  delta: {
+                    content: `Execution result: ${toolText}`,
+                  },
+                  finish_reason: 'stop',
+                },
+              ],
+            })}\n\n`
+          );
+        }
+        response.write('data: [DONE]\n\n');
+        response.end();
+        return;
+      }
       if (userText.includes('about blank recovery smoke')) {
         const count = (tabRecoveryPromptCalls.get(userText) ?? 0) + 1;
         tabRecoveryPromptCalls.set(userText, count);
@@ -393,35 +445,12 @@ beforeAll(async () => {
   baseUrl = `http://127.0.0.1:${address.port}/v1`;
 
   userDataDir = await mkdtemp(join(tmpdir(), 'tinyai-e2e-'));
-  context = await chromium.launchPersistentContext(userDataDir, {
-    headless: true,
-    executablePath: chromeExecutable(),
-    args: [
-      `--disable-extensions-except=${resolve('extension')}`,
-      `--load-extension=${resolve('extension')}`,
-      '--no-first-run',
-    ],
-    ignoreDefaultArgs: ['--disable-extensions'],
-  });
+  context = await launchE2EChrome(userDataDir);
   context.on('serviceworker', (worker) => {
     worker.on('console', (message) => backgroundLogs.push(`console:${message.text()}`));
     worker.on('close', () => backgroundLogs.push('worker:close'));
   });
 });
-
-function chromeExecutable(): string {
-  const candidates = [
-    process.env.CHROME_PATH,
-    join(
-      homedir(),
-      'Library/Caches/ms-playwright/chromium-1234/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'
-    ),
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  ].filter((value): value is string => Boolean(value));
-  const found = candidates.find(existsSync);
-  if (!found) throw new Error('No Chrome executable found; set CHROME_PATH');
-  return found;
-}
 
 afterAll(async () => {
   await context?.close();
@@ -964,6 +993,21 @@ describe('kernel extension E2E', () => {
       active: initialTab,
       execution: groupWorkspace.executionTabId,
     });
+    const callsBeforeExecutionTarget = modelCalls;
+    await reopened.fill('#kernel-input', 'execution target smoke');
+    await reopened.click('#kernel-send');
+    await reopened.waitForFunction(
+      () =>
+        document.querySelector('#kernel-rows')?.textContent?.includes(
+          'Execution result:'
+        ) &&
+        document.querySelector('#kernel-rows')?.textContent?.includes(
+          'Browser fixture ready'
+        ),
+      undefined,
+      { timeout: 30_000 }
+    );
+    expect(modelCalls).toBe(callsBeforeExecutionTarget + 2);
     await reopened.click('#kernel-tabs');
     await reopened.waitForSelector('#kernel-tab-menu:not([hidden])');
     expect(await reopened.textContent('#kernel-tab-menu')).toContain('Current workspace');
@@ -979,16 +1023,7 @@ describe('kernel extension E2E', () => {
 
   it('handles an absent about:blank tab and adds a new blank tab without session errors', async () => {
     const recoveryDir = await mkdtemp(join(tmpdir(), 'tinyai-tab-recovery-e2e-'));
-    const recoveryContext = await chromium.launchPersistentContext(recoveryDir, {
-      headless: true,
-      executablePath: chromeExecutable(),
-      args: [
-        `--disable-extensions-except=${resolve('extension')}`,
-        `--load-extension=${resolve('extension')}`,
-        '--no-first-run',
-      ],
-      ignoreDefaultArgs: ['--disable-extensions'],
-    });
+    const recoveryContext = await launchE2EChrome(recoveryDir);
     try {
       let worker = recoveryContext.serviceWorkers()[0];
       if (!worker) worker = await recoveryContext.waitForEvent('serviceworker');
@@ -1081,16 +1116,7 @@ describe('kernel extension E2E', () => {
 
   it('keeps one conversation per tab and switches automatically', async () => {
     const tabDir = await mkdtemp(join(tmpdir(), 'tinyai-tab-sessions-e2e-'));
-    const tabContext = await chromium.launchPersistentContext(tabDir, {
-      headless: true,
-      executablePath: chromeExecutable(),
-      args: [
-        `--disable-extensions-except=${resolve('extension')}`,
-        `--load-extension=${resolve('extension')}`,
-        '--no-first-run',
-      ],
-      ignoreDefaultArgs: ['--disable-extensions'],
-    });
+    const tabContext = await launchE2EChrome(tabDir);
     try {
       let worker = tabContext.serviceWorkers()[0];
       if (!worker) worker = await tabContext.waitForEvent('serviceworker');
@@ -1263,16 +1289,7 @@ describe('kernel extension E2E', () => {
   it('restores an imported legacy session and continues it after migration', async () => {
     const legacyId = '5db19410-a409-4da1-9d21-8ae09c1e10ed';
     const legacyDir = await mkdtemp(join(tmpdir(), 'tinyai-legacy-e2e-'));
-    const legacyContext = await chromium.launchPersistentContext(legacyDir, {
-      headless: true,
-      executablePath: chromeExecutable(),
-      args: [
-        `--disable-extensions-except=${resolve('extension')}`,
-        `--load-extension=${resolve('extension')}`,
-        '--no-first-run',
-      ],
-      ignoreDefaultArgs: ['--disable-extensions'],
-    });
+    const legacyContext = await launchE2EChrome(legacyDir);
     try {
       let worker = legacyContext.serviceWorkers()[0];
       if (!worker) worker = await legacyContext.waitForEvent('serviceworker');
@@ -1410,16 +1427,7 @@ describe('kernel extension E2E', () => {
 
   it('configures Remote Actions, exposes evidence state and transfers a Capsule', async () => {
     const remoteDir = await mkdtemp(join(tmpdir(), 'tinyai-chrome-remote-e2e-'));
-    const remoteContext = await chromium.launchPersistentContext(remoteDir, {
-      headless: true,
-      executablePath: chromeExecutable(),
-      args: [
-        `--disable-extensions-except=${resolve('extension')}`,
-        `--load-extension=${resolve('extension')}`,
-        '--no-first-run',
-      ],
-      ignoreDefaultArgs: ['--disable-extensions'],
-    });
+    const remoteContext = await launchE2EChrome(remoteDir);
     try {
       let worker = remoteContext.serviceWorkers()[0];
       if (!worker) worker = await remoteContext.waitForEvent('serviceworker');

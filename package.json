@@ -1,7 +1,7 @@
 {
   "name": "tinyai",
   "private": true,
-  "version": "0.12.1",
+  "version": "0.12.2",
   "scripts": {
     "build": "npm run typecheck && npm run clean && npm run extension:sync && npm run build:sidepanel && npm run build:background && npm run build:cli && npm run build:tui && npm run build:workspace-agent && npm run build:workspace-transfer && npm run build:runner && npm run build:proxy && npm run build:debug-server && npm run build:package",
     "build:sidepanel": "esbuild src/sidepanel.ts --bundle --format=iife --target=chrome120 --outfile=extension/js/sidepanel/main.js",
@@ -46,7 +46,10 @@
     "test:large:1gb": "TINYAI_LARGE_WORKSPACE=1 TINYAI_LARGE_WORKSPACE_MB=1024 vitest run tests/soak/large-workspace.test.ts",
     "test:acceptance": "npm run typecheck && npm run typecheck:tests && npm run typecheck:core && npm run check:boundaries && npm test && npm run test:e2e",
     "test:watch": "vitest",
-    "test:e2e": "npm run build && vitest run --config vitest.e2e.config.mts",
+    "test:e2e": "npm run build && TINYAI_E2E_CHROME=cft vitest run --config vitest.e2e.config.mts",
+    "test:e2e:headed": "npm run build && TINYAI_E2E_CHROME=cft TINYAI_E2E_HEADED=1 vitest run --config vitest.e2e.config.mts",
+    "test:e2e:stable": "npm run build && TINYAI_E2E_CHROME=stable vitest run --config vitest.e2e.config.mts",
+    "test:e2e:auto": "npm run build && TINYAI_E2E_CHROME=auto vitest run --config vitest.e2e.config.mts",
     "check": "npm run requirements:check && npm run adr:check && npm run decisions:check && npm run extension:check && npm run check:ui && npm run typecheck && npm run typecheck:tests && npm run typecheck:core && npm run check:boundaries && npm test && npm run build"
   },
   "devDependencies": {

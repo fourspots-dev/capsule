@@ -535,6 +535,27 @@
         "reviewedAt": "2026-11-02"
       },
       "architectureImpact": true
+    },
+    {
+      "id": "REQ-ENG-009",
+      "title": "Chrome for Testing E2E baseline",
+      "type": "infrastructure",
+      "priority": "P1",
+      "status": "verified",
+      "designStatus": "approved_unreviewed",
+      "approvalNote": "User explicitly requested Chrome for Testing as the primary E2E browser.",
+      "implementationAuthorized": true,
+      "targetVersion": "0.12.2",
+      "design": "docs/testing/REQ-ENG-009-design.html#architecture-impact",
+      "testDesign": "docs/testing/REQ-ENG-009-testing.html#architecture-completeness",
+      "acceptance": "All Chrome E2E specs use one shared launcher; the default gate requires Chrome for Testing headless; headed CfT and explicit Stable Chrome profiles are available; missing CfT does not silently fall back to Stable.",
+      "legacyAliases": [],
+      "adrReview": {
+        "status": "existing",
+        "adrs": ["ADR-019"],
+        "rationale": "ADR-019 establishes Chrome for Testing as the canonical automated E2E baseline.",
+        "reviewedAt": "2026-11-02"
+      }
     }
   ]
 }

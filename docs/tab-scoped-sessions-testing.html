@@ -33,6 +33,14 @@
       <div class="card"><h3>Integration</h3><p>Gateway 原子解析、Runtime Session 冷加载、Projection、Browser working tab、全量删除。</p></div>
       <div class="card"><h3>Chrome E2E</h3><p>真实 tabs API、Service Worker、Offscreen Runtime、Side Panel DOM、标签菜单和历史页。</p></div>
     </div>
+    <h3>Chrome 运行矩阵</h3>
+    <table><thead><tr><th>模式</th><th>入口</th><th>用途</th></tr></thead><tbody>
+      <tr><td>Chrome for Testing / headless</td><td><code>npm run test:e2e</code></td><td>默认 CI 门禁；真实 MV3、Tabs、Tab Groups、Debugger/CDP，无 UI 动画噪声。</td></tr>
+      <tr><td>Chrome for Testing / headed</td><td><code>npm run test:e2e:headed</code></td><td>本地观察真实窗口、标签切换、焦点和 Side Panel 页面。</td></tr>
+      <tr><td>Stable Chrome</td><td><code>npm run test:e2e:stable</code></td><td>发布前 branded Chrome 冒烟；不作为默认测试基线。</td></tr>
+      <tr><td>Auto</td><td><code>npm run test:e2e:auto</code></td><td>仅用于本地兼容调查；默认 CfT 缺失时允许回退 Stable。</td></tr>
+    </tbody></table>
+    <div class="note">默认严格使用 Chrome for Testing。未安装时运行 <code>npx playwright install chromium</code> 或设置 <code>CHROME_FOR_TESTING_PATH</code>，不会静默替换为 Stable Chrome。</div>
   </section>
 
   <section>
@@ -98,6 +106,14 @@ then:
       <tr><td><code>tests/e2e/kernel-extension.e2e.ts</code></td><td>A/B 标签独立对话、切换、Runtime 重建、Legacy 历史、全量清理</td></tr>
       <tr><td><code>tests/e2e/approval.e2e.ts</code></td><td>标签 Session 中的审批流程</td></tr>
     </tbody></table>
+    <h3>TAB-11 真实 Chrome 执行目标验证</h3>
+    <pre>1. 在 about:blank 发起组工作区任务
+2. Agent 创建 E2E Fixture 标签，形成组 G，executionTabId=Fixture
+3. 用户切到组内 about:blank 标签，只更新 activeTabId
+4. 发送“execution target smoke”
+5. Agent 调用 read_page
+6. 最终输出必须包含 Fixture 的 “Browser fixture ready”</pre>
+    <p>该断言同时验证 DOM 字段、Session 映射和 ChromeBrowserProvider 的真实 working tab，而不是只看 UI 标记。若查看标签切换偷偷改变执行标签，<code>read_page</code> 会读到 about:blank，测试失败。</p>
   </section>
 
   <section>

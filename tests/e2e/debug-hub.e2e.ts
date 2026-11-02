@@ -1,12 +1,12 @@
 import { createServer, type Server } from 'node:http';
-import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { chromium, type BrowserContext } from 'playwright-core';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { type BrowserContext } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ExecutionEventHub } from '../../src/observability/execution-hub';
 import { ExecutionLogServer } from '../../src/node/execution-log-server';
+import { launchE2EChrome } from '../harness/chrome-e2e';
 
 const debugToken = 'e2e-debug-token';
 let modelServer: Server;
@@ -102,16 +102,7 @@ beforeAll(async () => {
   debugUrl = debugAddress.baseUrl;
 
   userDataDir = await mkdtemp(join(tmpdir(), 'tinyai-debug-e2e-'));
-  context = await chromium.launchPersistentContext(userDataDir, {
-    headless: true,
-    executablePath: chromeExecutable(),
-    args: [
-      `--disable-extensions-except=${resolve('extension')}`,
-      `--load-extension=${resolve('extension')}`,
-      '--no-first-run',
-    ],
-    ignoreDefaultArgs: ['--disable-extensions'],
-  });
+  context = await launchE2EChrome(userDataDir);
   context.on('serviceworker', (worker) => {
     worker.on('console', (message) => {
       workerLogs.push(`${message.type()}: ${message.text()}`);
@@ -274,18 +265,4 @@ async function waitFor<T>(
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
   }
   throw new Error('Timed out waiting for Debug Hub events');
-}
-
-function chromeExecutable(): string {
-  const candidates = [
-    process.env.CHROME_PATH,
-    join(
-      homedir(),
-      'Library/Caches/ms-playwright/chromium-1234/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'
-    ),
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  ].filter((value): value is string => Boolean(value));
-  const found = candidates.find(existsSync);
-  if (!found) throw new Error('No Chrome executable found; set CHROME_PATH');
-  return found;
 }

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.12.2
+
+### Engineering
+
+- `REQ-ENG-009`: use Chrome for Testing as the strict default E2E browser.
+- Centralize executable resolution and extension launch flags in a shared E2E
+  harness, with support for Playwright-managed CfT, explicit CfT paths and
+  macOS/Linux/Windows cache layouts.
+- Add independent CfT headed and Stable Chrome release-smoke profiles. The
+  default gate no longer silently falls back from CfT to Stable Chrome.
+
+### Verification
+
+- `npm run test:e2e`: 10 Chrome for Testing headless tests passed.
+- `npm run test:e2e:headed`: focused visible-window tag execution test passed.
+- `npm run check`.
+
 ## 0.12.1
 
 ### Fixes

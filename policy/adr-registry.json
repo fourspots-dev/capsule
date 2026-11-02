@@ -245,6 +245,18 @@
       "approvedBy": "user",
       "supersedes": [],
       "supersededBy": null
+    },
+    {
+      "id": "ADR-019",
+      "title": "Chrome for Testing is the canonical E2E browser",
+      "status": "accepted",
+      "file": "docs/adr/ADR-019-chrome-for-testing-e2e-baseline.md",
+      "requirements": ["REQ-ENG-009"],
+      "originDecision": "DEC-013",
+      "decidedAt": "2026-11-02",
+      "approvedBy": "user",
+      "supersedes": [],
+      "supersededBy": null
     }
   ]
 }

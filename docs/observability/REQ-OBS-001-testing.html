@@ -11,7 +11,7 @@
 <body><div class="wrap">
 <header><small>TINYAI / EXECUTION DEBUG / TEST DESIGN</small><h1>Debug Hub 测试设计</h1><p>验证事件正确性、cursor 语义、服务认证、持久化、实时流、Chrome 出站上报以及无副作用边界。</p></header>
 
-<section id="strategy"><h2>1. 测试层级</h2><div class="grid"><div class="card"><h3>Unit</h3><p>事件 projection、redaction、cursor、dedupe、retention、transport queue。</p></div><div class="card"><h3>HTTP Integration</h3><p>真实 ephemeral server：认证、ingest、query、SSE、export、错误码。</p></div><div class="card"><h3>Chrome E2E</h3><p>真实扩展配置 Debug Service，执行任务，外部 Hub 收到事件。</p></div><div class="card"><h3>Security / Fault</h3><p>无 token、错误 token、恶意 key、慢消费者、断线重试。</p></div></div></section>
+<section id="strategy"><h2>1. 测试层级</h2><div class="grid"><div class="card"><h3>Unit</h3><p>事件 projection、redaction、cursor、dedupe、retention、transport queue。</p></div><div class="card"><h3>HTTP Integration</h3><p>真实 ephemeral server：认证、ingest、query、SSE、export、错误码。</p></div><div class="card"><h3>Chrome E2E</h3><p>真实扩展配置 Debug Service，执行任务，外部 Hub 收到事件。</p></div><div class="card"><h3>Security / Fault</h3><p>无 token、错误 token、恶意 key、慢消费者、断线重试。</p></div></div><p><b>Browser baseline:</b> default E2E strictly uses Chrome for Testing. <code>npm run test:e2e:headed</code> provides a visible local run; <code>npm run test:e2e:stable</code> is a separate release smoke and is not silently substituted for CfT.</p></section>
 
 <section id="trace"><h2>2. Requirement trace matrix</h2><table><thead><tr><th>Case</th><th>Expected</th><th>Level</th></tr></thead><tbody>
 <tr><td>OBS-001</td><td>Projection row 生成 user/assistant/reasoning/tool 事件</td><td>Unit</td></tr>

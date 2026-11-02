@@ -228,6 +228,25 @@
       "supersedes": [],
       "supersededBy": null,
       "file": "docs/decisions/DEC-012-bounded-agent-memory.md"
+    },
+    {
+      "id": "DEC-013",
+      "title": "Use Chrome for Testing as the E2E baseline",
+      "statement": "Chrome 自动化测试改为以 Chrome for Testing 为主；Chrome Stable 只作为独立发布冒烟。",
+      "normalizedDecision": "Use a shared CfT launcher as the default headless E2E gate, support headed CfT and explicit Stable smoke profiles, and fail the default profile when CfT is missing.",
+      "capturedAt": "2026-11-02",
+      "source": "request",
+      "scope": ["e2e", "chrome", "ci", "release-verification"],
+      "status": "promoted",
+      "triage": {
+        "disposition": "adr_and_requirement",
+        "adrs": ["ADR-019"],
+        "requirements": ["REQ-ENG-009"],
+        "rationale": "The browser baseline affects every Chrome E2E and CI/release evidence profile."
+      },
+      "supersedes": [],
+      "supersededBy": null,
+      "file": "docs/decisions/DEC-013-chrome-for-testing-baseline.md"
     }
   ]
 }

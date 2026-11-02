@@ -1,25 +1,16 @@
-import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { chromium, type BrowserContext } from 'playwright-core';
+import { type BrowserContext } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { launchE2EChrome } from '../harness/chrome-e2e';
 
 let context: BrowserContext;
 let userDataDir: string;
 
 beforeAll(async () => {
   userDataDir = await mkdtemp(join(tmpdir(), 'tinyai-ui-contract-'));
-  context = await chromium.launchPersistentContext(userDataDir, {
-    headless: true,
-    executablePath: chromeExecutable(),
-    args: [
-      `--disable-extensions-except=${resolve('extension')}`,
-      `--load-extension=${resolve('extension')}`,
-      '--no-first-run',
-    ],
-    ignoreDefaultArgs: ['--disable-extensions'],
-  });
+  context = await launchE2EChrome(userDataDir);
 });
 
 afterAll(async () => {
@@ -180,17 +171,3 @@ describe('REQ-UI-001 Side Panel UI Contract', () => {
     await page.close();
   });
 });
-
-function chromeExecutable(): string {
-  const candidates = [
-    process.env.CHROME_PATH,
-    join(
-      homedir(),
-      'Library/Caches/ms-playwright/chromium-1234/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'
-    ),
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  ].filter((value): value is string => Boolean(value));
-  const found = candidates.find(existsSync);
-  if (!found) throw new Error('No Chrome executable found; set CHROME_PATH');
-  return found;
-}
