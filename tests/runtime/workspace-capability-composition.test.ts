@@ -7,6 +7,7 @@ import {
   evaluateCompletion,
 } from '../../src/runtime/workspace-capability-composition';
 import { VirtualWorkspace } from '../../src/virtual';
+import { buildPrompt } from '../../src/prompts';
 
 function workspace(): VirtualWorkspace {
   return new VirtualWorkspace({ host: new MemoryHostBridge() });
@@ -48,10 +49,17 @@ describe('workspace capability composition', () => {
     expect(names).toContain('code_symbols');
     expect(names).toContain('code_definition');
     expect(names).toContain('action_app_game_check');
-    expect(result.prompt).toContain('Portable Git');
-    expect(result.prompt).toContain('action_app_game_check');
-    expect(result.prompt).toContain('Code intelligence provider: text');
-    expect(result.prompt).not.toContain('/Users/');
+    const prompt = buildPrompt({
+      hostProfile: 'tui',
+      workspaceProfile: 'portable',
+      mode: 'build',
+      tools: result.tools,
+      codeIntelligence: result.codeIntelligenceCapabilities,
+    }).fullPrompt;
+    expect(prompt).toContain('action_app_game_check');
+    expect(prompt).toContain('Code intelligence provider: text');
+    expect(prompt).toContain('Portable Git');
+    expect(prompt).not.toContain('/Users/');
   });
 
   it('requires Legacy to be explicit and keeps VirtualShell available there', async () => {
@@ -63,7 +71,14 @@ describe('workspace capability composition', () => {
     expect(names).toContain('exec');
     expect(names).toContain('job_start');
     expect(names).toContain('git_status');
-    expect(result.prompt).toContain('Legacy VirtualShell');
+    const prompt = buildPrompt({
+      hostProfile: 'tui',
+      workspaceProfile: 'legacy',
+      mode: 'build',
+      tools: result.tools,
+      codeIntelligence: result.codeIntelligenceCapabilities,
+    }).fullPrompt;
+    expect(prompt).toContain('legacy-capable workspace');
   });
 
   it('evaluates verification in event order', () => {

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.13.0
+
+### Features
+
+- `REQ-PROMPT-001`: replace monolithic host prompts with a deterministic
+  layered assembler covering Core, Workspace, Host, Execution, Mode, Agent
+  Profile, Project, Skill, Capability and Runtime sections.
+- Derive capability context from the active Tool, Action and Code Intelligence
+  registries, with profile-aware filtering and bounded optional context.
+- Separate stable, session and request prompt regions, record a manifest and
+  capability fingerprint, redact secret-like runtime fields and label runtime
+  facts as untrusted data.
+- Rebuild system prompts when permission modes change across Headless, TUI,
+  Chrome and Sandbox runtimes. Add isolated Chrome, TUI, Headless, iOS and
+  Sandbox host policies.
+
+### Verification
+
+- `npm run check`.
+- `npm run test:e2e`.
+- `npm run verify:tui`.
+
 ## 0.12.3
 
 ### Fixes

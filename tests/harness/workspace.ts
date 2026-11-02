@@ -15,6 +15,9 @@ export interface TestWorkspaceOptions {
   tools: ToolDefinition[];
   approval?: ApprovalPort;
   systemPrompt?: string;
+  systemPromptForMode?: (
+    mode: import('../../src/core/policy').PermissionMode
+  ) => string;
   maxSteps?: number;
   sessionStore?: SessionStore;
   completionGuard?: CompletionGuard;
@@ -33,6 +36,7 @@ export function createTestWorkspace(options: TestWorkspaceOptions) {
     clock,
     ids,
     systemPrompt: options.systemPrompt,
+    systemPromptForMode: options.systemPromptForMode,
     maxSteps: options.maxSteps,
     sessionStore: options.sessionStore,
     completionGuard: options.completionGuard,

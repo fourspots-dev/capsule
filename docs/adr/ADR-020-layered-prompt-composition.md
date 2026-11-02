@@ -1,8 +1,8 @@
 # ADR-020: Compose layered host-neutral Agent prompts
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-02
-- Approved by: none
+- Approved by: user
 - Requirements: REQ-PROMPT-001
 - Origin decision: DEC-014
 - Supersedes: none

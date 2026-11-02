@@ -50,7 +50,10 @@ import {
   createWorkspaceCompletionGuard,
   type WorkspaceToolProfile,
 } from '../runtime/workspace-capability-composition';
-import { workspaceEditPrompt } from '../platform/workspace-edit-prompt';
+import {
+  buildPrompt,
+  loadProjectInstructions,
+} from '../prompts';
 import {
   HostViewStateStorage,
   LocalTuiRuntimePort,
@@ -116,6 +119,7 @@ async function main(): Promise<void> {
     }
     await workspace.sync.captureBaseline(await workspace.exportBundle());
   }
+  const projectInstructions = await loadProjectInstructions(workspace.fs);
   const baseline =
     options.workspaceMode === 'virtual'
       ? await workspace.checkpoint('tui-baseline')
@@ -387,7 +391,20 @@ async function main(): Promise<void> {
             options.toolProfile,
             applicationActions
           ),
-    systemPrompt: [capability.prompt, workspaceEditPrompt].join('\n'),
+    systemPromptForMode: (mode) =>
+      buildPrompt({
+        hostProfile: 'tui',
+        workspaceProfile: options.toolProfile,
+        mode,
+        tools: [...allTools, ...subagentTools],
+        codeIntelligence: capability.codeIntelligenceCapabilities,
+        ...(projectInstructions ? { projectInstructions } : {}),
+        runtime: {
+          workspaceId: workspace.workspaceId,
+          workspaceMode: options.workspaceMode,
+          toolProfile: options.toolProfile,
+        },
+      }).fullPrompt,
     maxSteps: Number(process.env.TINYAI_MAX_STEPS ?? 120),
   });
   const continuity = new WorkspaceContinuityService({
@@ -399,7 +416,7 @@ async function main(): Promise<void> {
     environmentId: `tui-${options.workspaceMode}-${options.toolProfile}`,
     hostProfile:
       options.workspaceMode === 'host' ? 'local-coding' : 'portable',
-    agentVersion: '0.12.3',
+    agentVersion: '0.13.0',
     environment: {
       manifestVersion: 1,
       requiredActions: options.actionScripts.map((script) => ({

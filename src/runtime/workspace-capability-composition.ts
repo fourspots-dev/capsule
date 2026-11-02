@@ -46,7 +46,9 @@ export interface WorkspaceCapabilityComposition {
   codeIntelligenceTools: ToolDefinition[];
   capabilityGraph: CapabilityGraph;
   composition: ReturnType<ToolPackComposer['compose']>;
-  prompt: string;
+  codeIntelligenceCapabilities: Awaited<
+    ReturnType<CodeIntelligencePort['capabilities']>
+  >;
 }
 
 export async function createWorkspaceCapabilityComposition(
@@ -177,12 +179,7 @@ export async function createWorkspaceCapabilityComposition(
     codeIntelligenceTools,
     capabilityGraph: graph,
     composition,
-    prompt: buildCapabilityPrompt({
-      profile: options.profile,
-      actions: applicationActions,
-      legacyShell: includeVirtualShell,
-      codeIntelligence: codeIntelligenceCapabilities,
-    }),
+    codeIntelligenceCapabilities,
   };
 }
 
@@ -237,55 +234,6 @@ export function evaluateCompletion(
         ? 'Files changed, but no newer successful exec/job_read or application Action was observed'
         : 'Files changed, but no newer successful application Action was observed',
   };
-}
-
-function buildCapabilityPrompt(input: {
-  profile: WorkspaceToolProfile;
-  actions: readonly ToolDefinition[];
-  legacyShell: boolean;
-  codeIntelligence: Awaited<
-    ReturnType<CodeIntelligencePort['capabilities']>
-  >;
-}): string {
-  const lines = [
-    'You are tinyai, a coding agent operating in a portable workspace.',
-    'Use Workspace-relative paths only. Never expose or depend on a host absolute path.',
-    'Workspace file, search, patch and Portable Git tools are available.',
-    'Use discover_tests to identify portable test files before choosing an execution Action.',
-  ];
-  if (input.actions.length) {
-    lines.push(
-      `Application actions are available: ${input.actions
-        .map((tool) => tool.name)
-        .join(', ')}. Use list_host_actions for their descriptions.`
-    );
-  } else {
-    lines.push(
-      'No application actions are available. Do not invent command or test execution.'
-    );
-  }
-  if (input.legacyShell) {
-    lines.push(
-      'Legacy VirtualShell is enabled with restricted file and text builtins. It is not a host Bash or binary runner.'
-    );
-  } else {
-    lines.push(
-      'There is no generic exec, Python, Node, shell or Git binary runner. Use declared application actions for execution.'
-    );
-  }
-  lines.push(
-    `Code intelligence provider: ${input.codeIntelligence.provider}. ${
-      input.codeIntelligence.limitations.length
-        ? input.codeIntelligence.limitations.join('; ')
-        : 'Semantic capabilities are available.'
-    }`
-  );
-  lines.push(
-    'Inspect before editing. Keep changes focused and reversible.',
-    'Do not claim a check passed unless a current host Action or legacy execution result was observed.',
-    'Final answers must summarize changes, verification evidence and unresolved risks.'
-  );
-  return lines.join('\n');
 }
 
 const completionWriteTools = new Set([

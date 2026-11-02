@@ -67,6 +67,7 @@ export interface SessionRuntimeOptions {
   ids: IdGenerator;
   logEpoch?: string;
   systemPrompt?: string;
+  systemPromptForMode?: (mode: PermissionMode) => string;
   maxSteps?: number;
   sessionStore?: SessionStore;
   initialSnapshot?: SessionSnapshot;
@@ -106,7 +107,10 @@ export class SessionRuntime {
   private readonly sessionStore?: SessionStore;
   private readonly sessionTree: SessionTree;
   private readonly taskGraph: TaskGraph;
-  private readonly systemPrompt: string;
+  private systemPrompt: string;
+  private readonly systemPromptForMode?: (
+    mode: PermissionMode
+  ) => string;
   private readonly permissionModes: PermissionModeRegistry;
   private readonly queue: QueueItem[] = [];
   private readonly rows: ConversationRow[] = [];
@@ -160,7 +164,9 @@ export class SessionRuntime {
       () => this.clock.now(),
       options.initialSnapshot?.tasks ?? []
     );
+    this.systemPromptForMode = options.systemPromptForMode;
     this.systemPrompt =
+      this.systemPromptForMode?.(this.permissionModes.mode(this.sessionId)) ??
       options.systemPrompt ??
       (options.initialSnapshot?.messages.find((message) => message.role === 'system')?.content as
         | string
@@ -488,6 +494,7 @@ export class SessionRuntime {
     }
     try {
       this.permissionModes.get(this.sessionId).setMode(payload.mode);
+      this.refreshSystemPrompt();
     } catch (error) {
       return this.ack(
         command,
@@ -1103,6 +1110,7 @@ export class SessionRuntime {
     this.inbox.restore(snapshot.commands ?? []);
     if (snapshot.permission) {
       this.permissionModes.restore(this.sessionId, snapshot.permission);
+      this.refreshSystemPrompt();
     }
     this.revision = snapshot.revision;
     this.eventSeq = snapshot.eventSeq;
@@ -1147,6 +1155,13 @@ export class SessionRuntime {
       }
     }
     if (reconciled) this.touch('session.reconciled');
+  }
+
+  private refreshSystemPrompt(): void {
+    if (!this.systemPromptForMode) return;
+    this.systemPrompt = this.systemPromptForMode(
+      this.permissionModes.mode(this.sessionId)
+    );
   }
 
   private emit(): void {

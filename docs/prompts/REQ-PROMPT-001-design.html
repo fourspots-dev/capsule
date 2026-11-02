@@ -9,7 +9,7 @@
 </style>
 </head>
 <body><div class="wrap">
-<header><small>TINYAI / PROMPT ARCHITECTURE / DETAILED DESIGN</small><h1>分层、跨宿主 Prompt 组合</h1><p>把稳定行为策略、Workspace 语义、宿主差异、执行能力、模式、Profile 和动态运行上下文拆成可测试、可缓存、可按权限裁剪的 Prompt Contract。</p><div class="chips"><span class="chip">REQ-PROMPT-001</span><span class="chip">Target 0.13.0</span><span class="chip">ADR-020 Proposed</span><span class="chip">Design Review</span><span class="chip">Implementation blocked</span></div></header>
+<header><small>TINYAI / PROMPT ARCHITECTURE / DETAILED DESIGN</small><h1>分层、跨宿主 Prompt 组合</h1><p>把稳定行为策略、Workspace 语义、宿主差异、执行能力、模式、Profile 和动态运行上下文拆成可测试、可缓存、可按权限裁剪的 Prompt Contract。</p><div class="chips"><span class="chip">REQ-PROMPT-001</span><span class="chip">Target 0.13.0</span><span class="chip">ADR-020 Accepted</span><span class="chip">Approved unreviewed</span><span class="chip">Implementation authorized</span></div></header>
 <nav><a href="#problems">问题</a><a href="#architecture-impact">影响面</a><a href="#layers">分层</a><a href="#objects">对象</a><a href="#composition">组合</a><a href="#hosts">宿主</a><a href="#trust">优先级</a><a href="#budget">预算缓存</a><a href="#lifecycle">生命周期</a><a href="#migration">迁移</a><a href="#acceptance">验收</a></nav>
 
 <section id="problems"><h2>1. 当前问题</h2><div class="grid"><div class="card"><h3>结构问题</h3><ul><li>Workspace Prompt 与 Chrome Prompt 重复定义 Agent 身份。</li><li>浏览器、Coding、Patch 和 Skill 规则全部平铺。</li><li>宿主不存在的能力可能被硬编码进 Prompt。</li><li>标签查看与任务执行语义未进入统一 Policy。</li></ul></div><div class="card"><h3>行为问题</h3><ul><li>缺少统一 Observe → Decide → Act → Verify → Report 循环。</li><li>工具协议细节与 Tool Schema 重复。</li><li>Skill、Profile、Runtime facts 没有信任等级。</li><li>没有稳定前缀、预算或裁剪规则。</li></ul></div></div></section>
@@ -123,5 +123,18 @@ executionTabId = 当前任务执行标签
     ├── headless-policy.ts
     └── ios-policy.ts</pre><p>现有 <code>PromptProfile</code> 先保留兼容包装，迁移后只允许 <code>PromptAssembler</code> 输出最终系统提示词。Chrome Runtime、TUI 和 Headless 使用相同 Core/Workspace，按宿主注入不同 Host Policy。</p></section>
 
-<section id="acceptance"><h2>11. 验收</h2><ul><li>Core 无宿主专属词。</li><li>Chrome Prompt 不含 TUI/PTY，TUI Prompt 不含 Tab。</li><li>Capability 声明与实际 Registry 完全一致。</li><li>Profile/Skill 无法扩大工具或权限。</li><li>稳定前缀和动态上下文可区分并缓存。</li><li>所有宿主通过同一行为契约与各自 E2E。</li><li>标签执行语义在 Chrome Prompt 和行为 E2E 中成立。</li></ul><p class="foot">REQ-PROMPT-001 · Target 0.13.0 · ADR-020 Proposed · Design status: review · Implementation authorized: false</p></section>
+<section id="acceptance"><h2>11. 验收</h2><ul><li>Core 无宿主专属词。</li><li>Chrome Prompt 不含 TUI/PTY，TUI Prompt 不含 Tab。</li><li>Capability 声明与实际 Registry 完全一致。</li><li>Profile/Skill 无法扩大工具或权限。</li><li>稳定前缀和动态上下文可区分并缓存。</li><li>所有宿主通过同一行为契约与各自 E2E。</li><li>标签执行语义在 Chrome Prompt 和行为 E2E 中成立。</li></ul><p class="foot">REQ-PROMPT-001 · Target 0.13.0 · ADR-020 Accepted · Design status: approved_unreviewed · Implementation authorized: true</p></section>
+<section id="implementation-evidence"><h2>12. 实现映射</h2>
+<table><thead><tr><th>模块</th><th>职责</th><th>状态</th></tr></thead><tbody>
+<tr><td><code>src/prompts/prompt-context.ts</code></td><td>Section、Trust、Cache、Manifest 与 BuildContext 类型。</td><td>Implemented</td></tr>
+<tr><td><code>src/prompts/core-policy.ts</code><br><code>workspace-policy.ts</code><br><code>mode-policy.ts</code></td><td>跨宿主 Core、Workspace 与 Mode Policy。</td><td>Implemented</td></tr>
+<tr><td><code>src/prompts/adapters/*</code></td><td>Chrome、TUI、Headless、iOS、Sandbox 隔离的 Host Policy。</td><td>Implemented</td></tr>
+<tr><td><code>src/prompts/execution-policy.ts</code></td><td>从实际 Tool/Action/Code Intelligence 输入生成能力与 Patch 上下文；按 Profile 过滤。</td><td>Implemented</td></tr>
+<tr><td><code>src/prompts/agent-context.ts</code></td><td>Profile、Project、Skill、Runtime facts 的独立信任层、脱敏与边界。</td><td>Implemented</td></tr>
+<tr><td><code>src/prompts/prompt-assembler.ts</code></td><td>固定顺序、去重、必需段保护、预算裁剪、stable/session/request 分区、cache key 与 manifest。</td><td>Implemented</td></tr>
+<tr><td><code>src/core/session-runtime.ts</code></td><td>Permission mode 变化时重建系统 Prompt，运行时权限仍为最终权威。</td><td>Implemented</td></tr>
+<tr><td>Chrome / TUI / Headless / Sandbox composition roots</td><td>只传入宿主与 registry 事实；不再维护宿主专属巨型 Prompt。</td><td>Integrated</td></tr>
+</tbody></table>
+<div class="rule"><b>验证结果：</b><code>npm run check</code> 121 files / 475 tests passed；Chrome for Testing E2E 10/10；<code>npm run verify:tui</code> 完成 Portable 文件修改、Action 验证和 Capsule 导出。</div>
+<p class="foot">Implementation evidence · 0.13.0 · ADR-020 Accepted</p></section>
 </div></body></html>

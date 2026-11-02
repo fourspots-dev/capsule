@@ -16,7 +16,7 @@ import { Verifier, type VerificationCommand } from '../core/verifier';
 import { DockerAllowlistSidecar } from '../node/network-sidecar';
 import type { SandboxProvider, WorkspaceLease } from '../core/sandbox-provider';
 import { MacOSSeatbeltSandbox } from '../node/macos-sandbox';
-import { workspaceEditPrompt } from '../platform/workspace-edit-prompt';
+import { buildPrompt } from '../prompts';
 
 interface CliOptions {
   workspace: string;
@@ -103,7 +103,11 @@ async function main(): Promise<void> {
     });
     const activeLease = lease;
     const modes = new PermissionModeRegistry('sandbox-auto', () => Date.now());
-    const tools = new ToolExecutor(createSandboxTools(sandbox, activeLease), denyApproval, {
+    const definitions = createSandboxTools(sandbox, activeLease);
+    const projectInstructions = await readProjectInstructions(
+      options.workspace
+    );
+    const tools = new ToolExecutor(definitions, denyApproval, {
       policy: new PolicyEngine((sessionId) => modes.mode(sessionId)),
       approvalReceipts: new InMemoryApprovalReceiptStore(),
       artifacts: {
@@ -117,14 +121,17 @@ async function main(): Promise<void> {
       clock: systemClock,
       ids: new SequentialIdGenerator(),
       permissionModes: modes,
-      systemPrompt: [
-        `You are tinyai, a coding agent operating inside an isolated ${sandboxKind === 'local' ? 'macOS Seatbelt' : 'Docker'} workspace.`,
-        'Inspect files before editing. Prefer small, reversible changes.',
-        workspaceEditPrompt,
-        'Run relevant tests and type checks before declaring completion.',
-        'All commands run inside a network-restricted sandbox. Report missing dependencies instead of disabling security.',
-        'Your final answer must summarize changes and verification evidence.',
-      ].join('\n'),
+      systemPromptForMode: (mode) =>
+        buildPrompt({
+          hostProfile: 'sandbox',
+          workspaceProfile: 'legacy',
+          mode,
+          tools: definitions,
+          ...(projectInstructions ? { projectInstructions } : {}),
+          runtime: {
+            sandboxKind,
+          },
+        }).fullPrompt,
       maxSteps: Number(process.env.TINYAI_MAX_STEPS ?? 60),
     });
     const ack = await runtime.command({
@@ -175,6 +182,17 @@ async function main(): Promise<void> {
     await runtime?.dispose();
     if (lease) await sandbox.release(lease).catch(() => undefined);
     await runningSidecar?.close();
+  }
+}
+
+async function readProjectInstructions(
+  workspace: string
+): Promise<string | undefined> {
+  try {
+    const value = await readFile(resolve(workspace, 'AGENTS.md'), 'utf8');
+    return value.trim().slice(0, 8000) || undefined;
+  } catch {
+    return undefined;
   }
 }
 

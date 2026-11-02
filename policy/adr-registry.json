@@ -261,12 +261,12 @@
     {
       "id": "ADR-020",
       "title": "Compose layered host-neutral Agent prompts",
-      "status": "proposed",
+      "status": "accepted",
       "file": "docs/adr/ADR-020-layered-prompt-composition.md",
       "requirements": ["REQ-PROMPT-001"],
       "originDecision": "DEC-014",
       "decidedAt": "2026-11-02",
-      "approvedBy": "none",
+      "approvedBy": "user",
       "supersedes": [],
       "supersededBy": null
     }

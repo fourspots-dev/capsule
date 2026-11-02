@@ -33,7 +33,13 @@ import { SequentialIdGenerator, systemClock } from '../core/ports';
 import { PermissionModeRegistry } from '../core/policy';
 import { ModelGateway } from '../core/model-gateway';
 import type { WorkspaceRuntime } from '../core/workspace-runtime';
-import { chromePromptProfile } from '../adapters/chrome-prompts';
+import type { PermissionMode } from '../core/policy';
+import { createBrowserTools } from '../adapters/browser-tools';
+import {
+  buildPrompt,
+  loadProjectInstructions,
+  type PromptBuildContext,
+} from '../prompts';
 import { PortApprovalBroker } from './approval-broker';
 import type { RuntimeBundle } from './runtime-gateway';
 import { RuntimeGateway } from './runtime-gateway';
@@ -292,7 +298,7 @@ export async function createChromeRuntimeBundle(
     artifacts: artifactStore,
     environmentId: 'chrome-extension-v1',
     hostProfile: 'browser-agent',
-    agentVersion: '0.12.3',
+    agentVersion: '0.13.0',
     newId: () => `capsule_${crypto.randomUUID()}`,
     beforeExport: async () => {
       if (!activeRuntime) return;
@@ -327,6 +333,9 @@ export async function createChromeRuntimeBundle(
   const extensions = new ExtensionRegistry();
   const skillStore = new ChromeSkillStore(storage);
   const initialSkills = await skillStore.list();
+  const projectInstructions = await loadProjectInstructions(
+    virtualWorkspace.fs
+  );
   extensions.register({
     id: 'tinyai.skills',
     name: 'tinyai skills',
@@ -371,6 +380,66 @@ export async function createChromeRuntimeBundle(
     ],
     effects: ['read', 'write', 'execute', 'network'] as const,
   };
+  const downloadArtifact = async (
+    name: string,
+    mime: string,
+    base64: string
+  ) => {
+    await chrome.downloads.download({
+      url: `data:${mime};base64,${base64}`,
+      filename: name,
+      saveAs: false,
+    });
+  };
+  const promptFor = (input: {
+    mode: PermissionMode;
+    tools: ToolDefinition[];
+    profile?: PromptBuildContext['agentProfile'];
+    runtime?: PromptBuildContext['runtime'];
+  }) =>
+    buildPrompt({
+      hostProfile: 'chrome',
+      workspaceProfile: 'portable',
+      mode: input.mode,
+      tools: input.tools,
+      actions: actionReport.available,
+      codeIntelligence:
+        sharedComposition.codeIntelligenceCapabilities,
+      skills: initialSkills,
+      ...(projectInstructions ? { projectInstructions } : {}),
+      ...(input.profile ? { agentProfile: input.profile } : {}),
+      runtime: input.runtime ?? {},
+    }).fullPrompt;
+  const childBrowserTools = createBrowserTools(browser, {
+    handoff: approval,
+    tabScoped: true,
+  });
+  const childPromptTools = [
+    ...childBrowserTools,
+    ...sharedComposition.tools,
+    ...skillTools,
+    ...mcpTools,
+  ];
+  let mainWorkspace: ReturnType<typeof createBrowserWorkspace>;
+  let tabSessions: TabSessionRegistry | undefined;
+  const workspaceTabs = {
+    createTab: (sessionId: string, url?: string) =>
+      requireTabSessions().createTab(sessionId, url),
+    switchTab: (sessionId: string, tabId: string) =>
+      requireTabSessions().switchTab(sessionId, tabId),
+    listTabs: (sessionId: string) => requireTabSessions().listTabs(sessionId),
+  };
+  const requireTabSessions = (): TabSessionRegistry => {
+    if (!tabSessions) {
+      throw new AgentError('WORKSPACE_NOT_READY', 'Browser workspace is not initialized');
+    }
+    return tabSessions;
+  };
+  const mainBrowserTools = createBrowserTools(browser, {
+    download: downloadArtifact,
+    handoff: approval,
+    workspaceTabs,
+  });
   const subagentDriver = new WorkspaceSubagentDriver({
     ids,
     now: () => systemClock.now(),
@@ -387,13 +456,17 @@ export async function createChromeRuntimeBundle(
         artifactStore,
         trace,
         hooks,
-        systemPrompt: [
-          sharedComposition.prompt,
-          chromePromptProfile.build({
+        systemPromptForMode: (mode) =>
+          promptFor({
+            mode,
+            tools: childPromptTools,
             profile,
-            skills: initialSkills,
+            runtime: {
+              workspaceId: virtualWorkspace.workspaceId,
+              environmentFingerprint,
+              agentKind: 'subagent',
+            },
           }),
-        ].join('\n\n'),
         maxSteps: spec.budget.maxTurns,
         toolSelection: {
           allow: profile.tools.allow,
@@ -422,21 +495,6 @@ export async function createChromeRuntimeBundle(
         onProjectionChange,
       }).runtime,
   });
-  let mainWorkspace: ReturnType<typeof createBrowserWorkspace>;
-  let tabSessions: TabSessionRegistry | undefined;
-  const workspaceTabs = {
-    createTab: (sessionId: string, url?: string) =>
-      requireTabSessions().createTab(sessionId, url),
-    switchTab: (sessionId: string, tabId: string) =>
-      requireTabSessions().switchTab(sessionId, tabId),
-    listTabs: (sessionId: string) => requireTabSessions().listTabs(sessionId),
-  };
-  const requireTabSessions = (): TabSessionRegistry => {
-    if (!tabSessions) {
-      throw new AgentError('WORKSPACE_NOT_READY', 'Browser workspace is not initialized');
-    }
-    return tabSessions;
-  };
   const coordinator = new SubagentCoordinator({
     registry,
     driver: subagentDriver,
@@ -469,17 +527,23 @@ export async function createChromeRuntimeBundle(
     artifactStore,
     trace,
     hooks,
-    systemPrompt: [
-      sharedComposition.prompt,
-      chromePromptProfile.build({ skills: initialSkills }),
-    ].join('\n\n'),
-    download: async (name, mime, base64) => {
-      await chrome.downloads.download({
-        url: `data:${mime};base64,${base64}`,
-        filename: name,
-        saveAs: false,
-      });
-    },
+    systemPromptForMode: (mode) =>
+      promptFor({
+        mode,
+        tools: [
+          ...mainBrowserTools,
+          ...sharedComposition.tools,
+          ...subagentTools,
+          ...skillTools,
+          ...mcpTools,
+        ],
+        runtime: {
+          workspaceId: virtualWorkspace.workspaceId,
+          environmentFingerprint,
+          agentKind: 'root',
+        },
+      }),
+    download: downloadArtifact,
     additionalTools: [
       ...sharedComposition.tools.map((definition) => ({
         definition,

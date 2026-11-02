@@ -63,5 +63,15 @@ executionTabId = B</pre><h3>TUI</h3><ol><li>读取仓库。</li><li>Patch 文件
 npm test
 npm run test:e2e
 npm run verify:tui
-npm run check</pre><div class="rule">开发前门禁：ADR-020 与 REQ-PROMPT-001 详细设计必须得到用户确认。实现门禁：任一宿主泄漏其他宿主 Policy、Capability/Prompt 不一致、Profile/Skill 扩权、预算截断 Core，均阻断完成。</div><p class="foot">REQ-PROMPT-001 · Target 0.13.0 · Design status: review · Implementation authorized: false</p></section>
+npm run check</pre><div class="rule">开发前门禁：ADR-020 与 REQ-PROMPT-001 详细设计必须得到用户确认。实现门禁：任一宿主泄漏其他宿主 Policy、Capability/Prompt 不一致、Profile/Skill 扩权、预算截断 Core，均阻断完成。</div><p class="foot">REQ-PROMPT-001 · Target 0.13.0 · Design status: approved_unreviewed · Implementation authorized: true</p></section>
+<section id="implementation-evidence"><h2>7. 实现证据</h2>
+<table><thead><tr><th>Evidence</th><th>Observed result</th></tr></thead><tbody>
+<tr><td><code>tests/prompts/prompt-assembler.test.ts</code></td><td>覆盖 PRM-001..012、016..018；另验证 Permission mode 变化会重建 system prompt。</td></tr>
+<tr><td><code>tests/runtime/workspace-capability-composition.test.ts</code></td><td>Portable/Legacy 工具事实进入统一 Prompt；未注册 Action 不进入；无宿主绝对路径。</td></tr>
+<tr><td><code>tests/adapters/workspace-edit-prompt.test.ts</code></td><td>Patch 契约只在 Patch tool 实际存在时注入，并保持单一来源。</td></tr>
+<tr><td><code>npm run check</code></td><td>121 files passed, 3 skipped；475 tests passed, 3 skipped；policy、ADR、boundary、UI 和全部构建通过。</td></tr>
+<tr><td><code>npm run test:e2e</code></td><td>5 files / 10 Chrome for Testing tests passed；长流 heap growth 0 MB。</td></tr>
+<tr><td><code>npm run verify:tui</code></td><td>Portable TUI 完成 write_file、Action 验证与 Capsule 导出；legacy shell 未误报。</td></tr>
+</tbody></table>
+<p class="foot">Verified on 2026-11-02 · REQ-PROMPT-001 · 0.13.0</p></section>
 </div></body></html>

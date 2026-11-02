@@ -29,6 +29,9 @@ export interface BrowserWorkspaceFactoryOptions {
   clock: Clock;
   ids: IdGenerator;
   systemPrompt?: string;
+  systemPromptForMode?: (
+    mode: import('../core/policy').PermissionMode
+  ) => string;
   maxSteps?: number;
   defaultToolTimeoutMs?: number;
   toolSelection?: {
@@ -102,6 +105,7 @@ export function createBrowserWorkspace(
     trace: options.trace,
     maxSteps: options.maxSteps,
     systemPrompt: options.systemPrompt,
+    systemPromptForMode: options.systemPromptForMode,
     onClose: async (sessionId) => {
       const report = await options.browser.closeSessionTabs(sessionId);
       if (report.errors.length > 0) {

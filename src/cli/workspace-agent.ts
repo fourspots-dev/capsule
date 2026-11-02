@@ -40,7 +40,10 @@ import {
 } from '../node/actions/trusted-module-loader';
 import { HostActionRegistry } from '../platform/host-action';
 import { assertHostBaseline } from '../host';
-import { workspaceEditPrompt } from '../platform/workspace-edit-prompt';
+import {
+  buildPrompt,
+  loadProjectInstructions,
+} from '../prompts';
 import { WorkspaceSubagentDriver } from '../runtime/workspace-subagent-driver';
 import {
   createWorkspaceCapabilityComposition,
@@ -179,7 +182,7 @@ async function main(): Promise<void> {
     artifacts,
     environmentId: `local-${process.platform}-${process.arch}`,
     hostProfile: 'local-coding',
-    agentVersion: '0.12.3',
+    agentVersion: '0.13.0',
     newId: () => `capsule_${randomUUID()}`,
     environment: {
       manifestVersion: 1,
@@ -205,6 +208,7 @@ async function main(): Promise<void> {
     });
     await continuity.commitImport(prepared, { replaceProject: true });
   }
+  const projectInstructions = await loadProjectInstructions(workspace.fs);
 
   const modes = new PermissionModeRegistry('sandbox-auto', () => systemClock.now());
   const ids = new SequentialIdGenerator();
@@ -297,14 +301,15 @@ async function main(): Promise<void> {
         sessionPermissions.get(invocation.sessionId) ?? rootPermissions,
     }),
   });
+  const allTools = [
+    ...routedBase.filter((tool) =>
+      capability.tools.some((candidate) => candidate.name === tool.name)
+    ),
+    ...actionTools,
+    ...subagents,
+  ];
   const executor = new ToolExecutor(
-    [
-      ...routedBase.filter((tool) =>
-        capability.tools.some((candidate) => candidate.name === tool.name)
-      ),
-      ...actionTools,
-      ...subagents,
-    ],
+    allTools,
     denyApproval,
     {
       policy: new PolicyEngine((sessionId) => modes.mode(sessionId)),
@@ -332,7 +337,19 @@ async function main(): Promise<void> {
           (action) => action.descriptor.id === actionId
         )?.descriptor.version,
     }),
-    systemPrompt: [capability.prompt, workspaceEditPrompt].join('\n'),
+    systemPromptForMode: (mode) =>
+      buildPrompt({
+        hostProfile: 'headless',
+        workspaceProfile: 'portable',
+        mode,
+        tools: allTools,
+        codeIntelligence: capability.codeIntelligenceCapabilities,
+        ...(projectInstructions ? { projectInstructions } : {}),
+        runtime: {
+          workspaceId: workspace.workspaceId,
+          sessionId: options.sessionId,
+        },
+      }).fullPrompt,
   });
   const unsubscribe = coordinator.subscribe((child) => {
     runtime.updateChildTask(child.parentTaskId, {

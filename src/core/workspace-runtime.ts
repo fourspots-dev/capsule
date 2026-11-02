@@ -1,7 +1,7 @@
 import { AgentError } from './errors';
 import type { RuntimeEvent } from './event-log';
 import type { Clock, IdGenerator, ModelTransport } from './ports';
-import type { PermissionModeRegistry } from './policy';
+import type { PermissionMode, PermissionModeRegistry } from './policy';
 import {
   SessionRuntime,
   type SessionProjectionChange,
@@ -25,6 +25,7 @@ export interface WorkspaceRuntimeOptions {
   clock: Clock;
   ids: IdGenerator;
   systemPrompt?: string;
+  systemPromptForMode?: (mode: PermissionMode) => string;
   maxSteps?: number;
   sessionStore?: SessionStore;
   onOpen?: (sessionId: string) => Promise<void>;
