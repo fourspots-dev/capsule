@@ -14227,7 +14227,7 @@ ${lines.join("\n")}
       ),
       tool5(
         "evaluate",
-        "Evaluate JavaScript in the working tab. This is a high-risk capability.",
+        "Execute JavaScript in the working tab for advanced interaction or inspection. Prefer dedicated browser tools when they cover the action. This is a high-risk capability.",
         objectSchema({
           code: { type: "string" },
           frameId: { type: "string" }
@@ -17395,7 +17395,7 @@ ${lines.join("\n")}
       artifacts: artifactStore,
       environmentId: "chrome-extension-v1",
       hostProfile: "browser-agent",
-      agentVersion: "0.12.2",
+      agentVersion: "0.12.3",
       newId: () => `capsule_${crypto.randomUUID()}`,
       beforeExport: async () => {
         if (!activeRuntime) return;

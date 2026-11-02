@@ -34,6 +34,7 @@ import {
 } from './render-window';
 import {
   buildTurnRenderUnits,
+  toolDisplayLabel,
   toolFamily,
   workStateLabel,
   type ToolFamily,
@@ -243,7 +244,7 @@ export async function initKernelUi(): Promise<void> {
       approvals
         .map(
           (approval) => `<article class="wb-permission-card kernel-approval" data-ui-key="approval:${escapeHtml(approval.approvalId)}">
-            <div class="wb-permission-title">${zh ? '允许' : 'Allow'} ${escapeHtml(toolLabel(approval.toolName))}?</div>
+            <div class="wb-permission-title">${zh ? '允许' : 'Allow'} ${escapeHtml(toolLabel(approval.toolName, pageConfig.language))}?</div>
             <div class="kernel-permission-summary">${escapeHtml(approvalSummary(approval.toolName, approval.input, zh))}</div>
             <details class="kernel-raw-details">
               <summary>${zh ? '查看参数' : 'Show arguments'}</summary>
@@ -2337,7 +2338,7 @@ function renderToolRow(
       <summary class="wb-step-row">
         <span class="wb-step-ico" aria-hidden="true">${familyIcon(toolFamily(row.toolName ?? ''))}</span>
         <span class="wb-step-text">
-          <span class="wb-step-name">${escapeHtml(toolSummary(row.toolName ?? 'tool'))}</span>
+          <span class="wb-step-name">${escapeHtml(toolSummary(row.toolName ?? 'tool', language))}</span>
           ${status ? `<span class="wb-tool-status${running ? ' wb-tool-status--running' : failed ? ' wb-tool-status--error' : ''}">${status}</span>` : ''}
         </span>
         <span class="wb-tool-group-chev" aria-hidden="true">${icons.chevronRight}</span>
@@ -2451,15 +2452,15 @@ function restoreDetailState(
   });
 }
 
-function toolSummary(name: string): string {
+function toolSummary(name: string, language: string): string {
   const family = toolFamily(name);
-  if (family === 'explore') return toolLabel(name);
-  if (family === 'browser') return toolLabel(name);
-  if (family === 'terminal') return toolLabel(name);
-  if (family === 'changes') return toolLabel(name);
-  if (family === 'subagent') return toolLabel(name);
-  if (family === 'artifact') return toolLabel(name);
-  return toolLabel(name);
+  if (family === 'explore') return toolLabel(name, language);
+  if (family === 'browser') return toolLabel(name, language);
+  if (family === 'terminal') return toolLabel(name, language);
+  if (family === 'changes') return toolLabel(name, language);
+  if (family === 'subagent') return toolLabel(name, language);
+  if (family === 'artifact') return toolLabel(name, language);
+  return toolLabel(name, language);
 }
 
 function familyLabel(family: ToolFamily, language: string): string {
@@ -2494,32 +2495,8 @@ function familyIcon(family: ToolFamily): string {
   return icons.gear;
 }
 
-function toolLabel(name: string): string {
-  const labels: Record<string, string> = {
-    list_tabs: 'List tabs',
-    list_frames: 'Inspect frames',
-    snapshot: 'Read page structure',
-    read_page: 'Read page',
-    find: 'Find element',
-    navigate: 'Open page',
-    click: 'Click',
-    mouse_click: 'Click',
-    fill: 'Fill input',
-    select_option: 'Select option',
-    wait: 'Wait',
-    screenshot: 'Screenshot',
-    spawn_agent: 'Start subagent',
-    send_message: 'Message subagent',
-    wait_agent: 'Wait for subagent',
-    stop_agent: 'Stop subagent',
-    list_agents: 'List subagents',
-    run_tests: 'Run tests',
-    read_file: 'Read file',
-    write_file: 'Write file',
-    list_files: 'List files',
-    exec: 'Run command',
-  };
-  return labels[name] ?? name.replace(/_/g, ' ');
+function toolLabel(name: string, language = 'en'): string {
+  return toolDisplayLabel(name, language);
 }
 
 function markModelOptionSelected(
@@ -2564,7 +2541,7 @@ function approvalSummary(name: string, input: unknown, zh: boolean): string {
   if (name === 'await_user_action') {
     return target || (zh ? '需要你完成一次手动操作' : 'Manual action required');
   }
-  return `${toolLabel(name)}${suffix}`;
+  return `${toolLabel(name, zh ? 'zh' : 'en')}${suffix}`;
 }
 
 function truncateText(value: string, maxLength: number): string {

@@ -73,6 +73,7 @@ describe('browser tool adapter', () => {
     );
     expect(tools.every((item) => item.capabilities?.length)).toBe(true);
     expect(tools.find((item) => item.name === 'evaluate')).toMatchObject({
+      description: expect.stringContaining('Prefer dedicated browser tools'),
       risk: 'dangerous',
       effect: 'execute',
       replay: 'never',

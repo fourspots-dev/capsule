@@ -191,7 +191,7 @@ export function createBrowserTools(
     ),
     tool(
       'evaluate',
-      'Evaluate JavaScript in the working tab. This is a high-risk capability.',
+      'Execute JavaScript in the working tab for advanced interaction or inspection. Prefer dedicated browser tools when they cover the action. This is a high-risk capability.',
       objectSchema({
         code: { type: 'string' },
         frameId: { type: 'string' },

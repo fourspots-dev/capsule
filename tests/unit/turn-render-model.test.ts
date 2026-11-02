@@ -6,6 +6,7 @@ import type {
 } from '../../src/core/types';
 import {
   buildTurnRenderUnits,
+  toolDisplayLabel,
   toolFamily,
   workStateLabel,
 } from '../../src/sidepanel/turn-render-model';
@@ -54,6 +55,15 @@ function row(
 }
 
 describe('turn render model', () => {
+  it('labels evaluate as an advanced JavaScript capability', () => {
+    expect(toolDisplayLabel('evaluate', 'en')).toBe(
+      'Run JavaScript (advanced)'
+    );
+    expect(toolDisplayLabel('evaluate', 'zh')).toBe(
+      '执行 JavaScript（高级）'
+    );
+  });
+
   it('separates the latest answer and groups consecutive tools by family', () => {
     const child: ChildTaskProjection = {
       taskId: 'child_1',

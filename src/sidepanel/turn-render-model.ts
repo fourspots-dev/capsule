@@ -316,6 +316,39 @@ export function toolFamily(name: string): ToolFamily {
   return 'other';
 }
 
+export function toolDisplayLabel(
+  name: string,
+  language = 'en'
+): string {
+  const zh = language.startsWith('zh');
+  const labels: Record<string, string> = {
+    list_tabs: 'List tabs',
+    list_frames: 'Inspect frames',
+    snapshot: 'Read page structure',
+    read_page: 'Read page',
+    find: 'Find element',
+    navigate: 'Open page',
+    evaluate: zh ? '执行 JavaScript（高级）' : 'Run JavaScript (advanced)',
+    click: 'Click',
+    mouse_click: 'Click',
+    fill: 'Fill input',
+    select_option: 'Select option',
+    wait: 'Wait',
+    screenshot: 'Screenshot',
+    spawn_agent: 'Start subagent',
+    send_message: 'Message subagent',
+    wait_agent: 'Wait for subagent',
+    stop_agent: 'Stop subagent',
+    list_agents: 'List subagents',
+    run_tests: 'Run tests',
+    read_file: 'Read file',
+    write_file: 'Write file',
+    list_files: 'List files',
+    exec: 'Run command',
+  };
+  return labels[name] ?? name.replace(/_/g, ' ');
+}
+
 export function workStateLabel(
   segment: WorkSegment,
   language: string

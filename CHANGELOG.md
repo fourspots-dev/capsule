@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.12.3
+
+### Fixes
+
+- `REQ-CHROME-001`: keep the full Browser ToolPack available and describe
+  `evaluate` as an advanced capability that prefers dedicated browser tools
+  for covered interactions.
+- Present `evaluate` as “Run JavaScript (advanced)” or
+  “执行 JavaScript（高级）” in Tool rows and approval cards without changing
+  its dangerous/execute/never policy.
+
+### Verification
+
+- `npm run check`.
+- `npm run test:e2e`.
+
 ## 0.12.2
 
 ### Engineering
